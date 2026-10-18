@@ -90,6 +90,7 @@ impl Servers {
                 let _ = stopped.try_send(Event::Stopped { name, root: stopped_root, reason });
             },
             core::initialization_options(&program, path, &root),
+            core::settings(spec),
         );
         match started {
             Ok(server) => {
@@ -274,15 +275,17 @@ fn link(location: lsp_types::Location) -> LocationLink {
     }
 }
 
-/// The command behind the Find references entry: Saturn's own, never sent to the server.
+/// The commands behind the Find references and Rename entries: Saturn's own, never sent to the
+/// server.
 const REFERENCES: &str = "saturn.references";
+const RENAME: &str = "saturn.rename";
 
 impl CodeActionProvider for Provider {
     fn id(&self) -> SharedString {
         "lsp".into()
     }
 
-    /// The server's quick fixes that change only this file, and Find references.
+    /// Find references, Rename, and the server's quick fixes (edits, not server commands).
     fn code_actions(
         &self,
         state: Entity<EditorState>,
@@ -323,22 +326,26 @@ impl CodeActionProvider for Provider {
         });
         let wants_fixes = self.document.server.can("codeActionProvider");
         let answer = wants_fixes.then(|| self.ask::<Vec<CodeActionOrCommand>>("textDocument/codeAction", params, cx));
-        let uri = self.document.uri.clone();
         let at = text.offset_to_position(range.start);
+        let name = text.word_at(range.start);
+        let ours = |title: &str, command: &str, arguments: Vec<Value>| CodeAction {
+            title: title.to_owned(),
+            command: Some(Command { title: title.to_owned(), command: command.to_owned(), arguments: Some(arguments) }),
+            ..CodeAction::default()
+        };
+        let mut actions = vec![ours("Find references", REFERENCES, vec![json!(at)])];
+        if !name.is_empty() && self.document.server.can("renameProvider") {
+            actions.push(ours("Rename…", RENAME, vec![json!(at), json!(name)]));
+        }
         cx.background_spawn(async move {
-            let mut actions = vec![CodeAction {
-                title: "Find references".to_owned(),
-                command: Some(Command {
-                    title: "Find references".to_owned(),
-                    command: REFERENCES.to_owned(),
-                    arguments: Some(vec![json!(at)]),
-                }),
-                ..CodeAction::default()
-            }];
             if let Some(answer) = answer {
                 actions.extend(answer.await.ok().flatten().unwrap_or_default().into_iter().filter_map(
                     |item| match item {
-                        CodeActionOrCommand::CodeAction(action) if edits_only(&action, &uri) => Some(action),
+                        CodeActionOrCommand::CodeAction(action)
+                            if action.command.is_none() && action.edit.is_some() =>
+                        {
+                            Some(action)
+                        }
                         _ => None,
                     },
                 ));
@@ -349,7 +356,7 @@ impl CodeActionProvider for Provider {
 
     fn perform_code_action(
         &self,
-        state: Entity<EditorState>,
+        _: Entity<EditorState>,
         action: CodeAction,
         _: bool,
         window: &mut Window,
@@ -372,47 +379,90 @@ impl CodeActionProvider for Provider {
                 Ok(())
             });
         }
-        let edits = action.edit.as_ref().map(|edit| own_edits(edit, &self.document.uri)).unwrap_or_default();
-        state.update(cx, |state, cx| state.apply_lsp_edits(&edits, window, cx));
+        let editor = self.editor.clone();
+        if let Some(command) = action.command.as_ref().filter(|command| command.command == RENAME) {
+            let arguments = command.arguments.clone().unwrap_or_default();
+            let at: Position =
+                arguments.first().and_then(|at| serde_json::from_value(at.clone()).ok()).unwrap_or_default();
+            let name = arguments.get(1).and_then(Value::as_str).unwrap_or_default().to_owned();
+            let path = self.path.clone();
+            // After the menu has closed, so the rename field keeps the focus.
+            window.defer(cx, move |window, cx| {
+                let _ = editor.update(cx, |editor, cx| editor.start_rename(&path, at, &name, window, cx));
+            });
+            return Task::ready(Ok(()));
+        }
+        if let Some(edit) = action.edit {
+            // Outside this editor's update: the edit may change this file too.
+            window.defer(cx, move |window, cx| {
+                let _ = editor.update(cx, |editor, cx| editor.apply_workspace_edit(&edit, window, cx));
+            });
+        }
         Task::ready(Ok(()))
     }
 }
 
-/// Whether a code action is an edit to this file alone (Saturn doesn't apply edits elsewhere).
-fn edits_only(action: &CodeAction, uri: &str) -> bool {
-    action.command.is_none()
-        && action.edit.as_ref().is_some_and(|edit| {
-            let changes = edit.changes.as_ref().map(|changes| changes.keys().all(|key| key.as_str() == uri));
-            let documents = edit.document_changes.as_ref().map(|changes| match changes {
-                lsp_types::DocumentChanges::Edits(edits) => {
-                    edits.iter().all(|edit| edit.text_document.uri.as_str() == uri)
-                }
-                lsp_types::DocumentChanges::Operations(_) => false,
-            });
-            changes.or(documents).unwrap_or(false)
-        })
-}
-
-/// A workspace edit's edits to this file, last first so earlier ones keep their positions.
-fn own_edits(edit: &WorkspaceEdit, uri: &str) -> Vec<TextEdit> {
-    let mut edits: Vec<TextEdit> = Vec::new();
-    if let Some(changes) = &edit.changes {
-        for (target, list) in changes {
-            if target.as_str() == uri {
-                edits.extend(list.iter().cloned());
-            }
+/// A workspace edit's edits, by file, each file's last first so earlier ones keep their
+/// positions. Creating, renaming and deleting files are left out.
+pub fn all_edits(edit: &WorkspaceEdit) -> Vec<(PathBuf, Vec<TextEdit>)> {
+    let mut by_file: HashMap<PathBuf, Vec<TextEdit>> = HashMap::new();
+    for (uri, edits) in edit.changes.iter().flatten() {
+        if let Some(path) = core::path(uri.as_str()) {
+            by_file.entry(path).or_default().extend(edits.iter().cloned());
         }
     }
-    if let Some(lsp_types::DocumentChanges::Edits(documents)) = &edit.document_changes {
-        for document in documents.iter().filter(|document| document.text_document.uri.as_str() == uri) {
-            edits.extend(document.edits.iter().map(|edit| match edit {
+    let documents = match &edit.document_changes {
+        Some(lsp_types::DocumentChanges::Edits(documents)) => documents.clone(),
+        Some(lsp_types::DocumentChanges::Operations(operations)) => operations
+            .iter()
+            .filter_map(|operation| match operation {
+                lsp_types::DocumentChangeOperation::Edit(document) => Some(document.clone()),
+                lsp_types::DocumentChangeOperation::Op(_) => None,
+            })
+            .collect(),
+        None => Vec::new(),
+    };
+    for document in documents {
+        if let Some(path) = core::path(document.text_document.uri.as_str()) {
+            by_file.entry(path).or_default().extend(document.edits.iter().map(|edit| match edit {
                 lsp_types::OneOf::Left(edit) => edit.clone(),
                 lsp_types::OneOf::Right(annotated) => annotated.text_edit.clone(),
             }));
         }
     }
-    edits.sort_by(|a, b| {
-        (b.range.start.line, b.range.start.character).cmp(&(a.range.start.line, a.range.start.character))
-    });
-    edits
+    let mut files: Vec<(PathBuf, Vec<TextEdit>)> = by_file.into_iter().collect();
+    for (_, edits) in &mut files {
+        edits.sort_by(|a, b| {
+            (b.range.start.line, b.range.start.character).cmp(&(a.range.start.line, a.range.start.character))
+        });
+    }
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+    files
+}
+
+/// `text` with `edits` made, last first (as `all_edits` orders them).
+pub fn apply_to_text(text: &str, edits: &[TextEdit]) -> String {
+    let mut rope = Rope::from_str(text);
+    for edit in edits {
+        let start = rope.position_to_offset(&edit.range.start);
+        let end = rope.position_to_offset(&edit.range.end);
+        rope.replace(start..end, &edit.new_text);
+    }
+    rope.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn applies_edits_last_first() {
+        let edit = |line, from, to, text: &str| TextEdit {
+            range: lsp_types::Range { start: Position::new(line, from), end: Position::new(line, to) },
+            new_text: text.to_owned(),
+        };
+        let text = "const total = 1;\nuse(total, total);\n";
+        let edits = [edit(1, 11, 16, "sum"), edit(1, 4, 9, "sum"), edit(0, 6, 11, "sum")];
+        assert_eq!(apply_to_text(text, &edits), "const sum = 1;\nuse(sum, sum);\n");
+    }
 }

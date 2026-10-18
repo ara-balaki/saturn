@@ -104,6 +104,16 @@ pub fn find_server(
     })
 }
 
+/// The settings a server asks for (`workspace/configuration`), by section. For TypeScript:
+/// renaming an imported name renames it everywhere, not just here as an alias.
+pub fn settings(spec: &Spec) -> Value {
+    if spec.name != "TypeScript" {
+        return Value::Null;
+    }
+    let language = json!({ "preferences": { "useAliasesForRenames": false } });
+    json!({ "typescript": language, "javascript": language, "js/ts": language })
+}
+
 /// The project's own TypeScript server: the nearest `node_modules/typescript` from `file` up to
 /// `root` that has one (TypeScript 7 has none; its `tsc` serves instead).
 pub fn project_tsserver(file: &Path, root: &Path) -> Option<PathBuf> {
@@ -232,6 +242,8 @@ pub struct Server {
     alive: AtomicBool,
     /// Why the server refused to start, when it answered `initialize` with an error.
     failure: Mutex<Option<String>>,
+    /// What `workspace/configuration` answers, by section.
+    settings: Value,
     child: Mutex<Child>,
     /// The server's capabilities, once it has answered `initialize`.
     capabilities: Mutex<Value>,
@@ -252,6 +264,7 @@ impl Server {
         on_notification: impl Fn(&str, Value) + Send + 'static,
         on_exit: impl FnOnce(Option<String>) + Send + 'static,
         options: Value,
+        settings: Value,
     ) -> io::Result<Arc<Self>> {
         let mut child = Command::new(program)
             .args(args)
@@ -272,6 +285,7 @@ impl Server {
             next_id: AtomicI64::new(1),
             alive: AtomicBool::new(true),
             failure: Mutex::new(None),
+            settings,
             child: Mutex::new(child),
             capabilities: Mutex::new(Value::Null),
         });
@@ -416,12 +430,16 @@ impl Server {
                     let _ = reply.try_send(answer);
                 }
             }
-            // The server asking the client: configuration gets an empty answer per item, the rest
-            // (progress tokens, registrations) a plain yes.
+            // The server asking the client: configuration gets each section's settings (or none),
+            // the rest (progress tokens, registrations) a plain yes.
             (Some(method), Some(id)) => {
                 let result = if method == "workspace/configuration" {
-                    let items = message.pointer("/params/items").and_then(Value::as_array).map_or(0, Vec::len);
-                    Value::Array(vec![Value::Null; items])
+                    let items = message.pointer("/params/items").and_then(Value::as_array).cloned().unwrap_or_default();
+                    let section = |item: &Value| {
+                        let name = item.get("section").and_then(Value::as_str).unwrap_or_default();
+                        self.settings.get(name).cloned().unwrap_or(Value::Null)
+                    };
+                    Value::Array(items.iter().map(section).collect())
                 } else {
                     Value::Null
                 };
@@ -550,6 +568,7 @@ mod tests {
             |_, _| {},
             |_| {},
             Value::Null,
+            Value::Null,
         )
         .expect("started");
         let answer = block_on(async {
@@ -650,7 +669,8 @@ mod tests {
             None => find_server(&SPECS[1], &root.join("src/main.rs"), root, root, &path_env).expect("rust-analyzer"),
         };
         let server =
-            Server::start("Rust", &program, args, root, &path_env, |_, _| {}, |_| {}, Value::Null).expect("started");
+            Server::start("Rust", &program, args, root, &path_env, |_, _| {}, |_| {}, Value::Null, Value::Null)
+                .expect("started");
         let document = Document::open(server.clone(), &root.join("src/main.rs"), text);
         let hover = block_on(async {
             for _ in 0..60 {

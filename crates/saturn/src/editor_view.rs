@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui_kit::component::diff::{Diff, DiffFile, DiffMode, DiffState};
-use gpui_kit::component::input::{Editor, EditorState, InputEvent};
+use gpui_kit::component::input::{Editor, EditorState, Input, InputEvent, InputState};
 use gpui_kit::{
     AnyElement, AppContext as _, Context, Entity, FontWeight, InteractiveElement as _, IntoElement, MouseButton,
     ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, Subscription, Task, Window, div,
@@ -73,6 +73,14 @@ struct Review {
     label: String,
 }
 
+/// Renaming a symbol: the field in the strip, and where the symbol is.
+struct Rename {
+    input: Entity<InputState>,
+    path: PathBuf,
+    position: lsp_types::Position,
+    _events: Subscription,
+}
+
 /// Which of the panel's tabs is in front.
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 enum Front {
@@ -102,6 +110,8 @@ pub struct EditorView {
     impact: Option<Entity<ImpactView>>,
     /// Where a symbol is used, once asked.
     references: Option<Entity<ReferencesView>>,
+    /// The rename in progress, if any.
+    rename: Option<Rename>,
     /// Every problem the language servers report, by file.
     problems: BTreeMap<PathBuf, Vec<lsp_types::Diagnostic>>,
     /// The list of them, once opened.
@@ -215,6 +225,7 @@ impl EditorView {
         use gpui_kit::component::input::RopeExt as _;
         let Some(file) = self.files.get(self.active) else { return };
         let state = file.state.clone();
+        let (editor, path) = (cx.weak_entity(), file.path.clone());
         let (text, providers) = {
             let state = state.read(cx);
             let lsp = state.lsp();
@@ -269,6 +280,19 @@ impl EditorView {
                 };
                 let labels: Vec<String> = items.iter().take(6).map(|item| item.label.clone()).collect();
                 eprintln!("probe completion: {} items, first {labels:?}", items.len());
+            }
+            if let Ok(name) = std::env::var("SATURN_LSP_RENAME") {
+                let _ = cx.update(|window, cx| {
+                    let _ = editor.update(cx, |editor, cx| {
+                        let at = lsp_types::Position::new(line, character);
+                        // "?" shows the rename field instead, for screenshots.
+                        if name == "?" {
+                            editor.start_rename(&path, at, "format", window, cx);
+                        } else {
+                            editor.rename_symbol(&path, at, &name, window, cx);
+                        }
+                    });
+                });
             }
             if let (Some(provider), Some(Ok(actions))) = (
                 actions,
@@ -415,6 +439,111 @@ impl EditorView {
             });
         })
         .detach();
+    }
+
+    /// Asks for a symbol's new name, in a field in the strip.
+    pub fn start_rename(
+        &mut self,
+        path: &Path,
+        position: lsp_types::Position,
+        name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let input = cx.new(|cx| InputState::new(window, cx).default_value(name.to_owned()));
+        let events = cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| match event {
+            InputEvent::PressEnter { .. } => this.finish_rename(window, cx),
+            InputEvent::Blur => {
+                this.rename = None;
+                cx.notify();
+            }
+            _ => {}
+        });
+        input.update(cx, |input, cx| input.focus(window, cx));
+        self.rename = Some(Rename { input, path: path.to_owned(), position, _events: events });
+        cx.notify();
+    }
+
+    /// Renames the symbol everywhere the server finds it.
+    fn finish_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(rename) = self.rename.take() else { return };
+        cx.notify();
+        let name = rename.input.read(cx).value().trim().to_owned();
+        self.rename_symbol(&rename.path, rename.position, &name, window, cx);
+    }
+
+    /// Asks the server to rename the symbol at `position` in `path` to `name`, and makes its edit.
+    pub fn rename_symbol(
+        &mut self,
+        path: &Path,
+        position: lsp_types::Position,
+        name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let document = self.files.iter().find(|file| file.path == path).and_then(OpenFile::document).cloned();
+        let Some(document) = document.filter(|_| !name.is_empty()) else { return };
+        let mut params = document.at(position.line, position.character);
+        params["newName"] = serde_json::json!(name);
+        cx.spawn_in(window, async move |this, cx| {
+            let answer = document.server.request("textDocument/rename", params).await;
+            let _ = this.update_in(cx, |this, window, cx| match answer {
+                Ok(answer) => {
+                    if let Ok(Some(edit)) = serde_json::from_value::<Option<lsp_types::WorkspaceEdit>>(answer) {
+                        this.apply_workspace_edit(&edit, window, cx);
+                    }
+                }
+                Err(problem) => {
+                    this.problem = Some(format!("Couldn't rename: {problem}"));
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Makes a language server's edit: open files change in place (and are saved if they had no
+    /// unsaved changes), the rest change on disk.
+    pub fn apply_workspace_edit(
+        &mut self,
+        edit: &lsp_types::WorkspaceEdit,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        for (path, edits) in lsp::all_edits(edit) {
+            if let Some(index) = self.files.iter().position(|file| file.path == path) {
+                let clean = !self.files[index].dirty(cx);
+                let state = self.files[index].state.clone();
+                state.update(cx, |state, cx| state.apply_lsp_edits(&edits, window, cx));
+                if clean {
+                    let text = state.read(cx).value().to_string();
+                    if std::fs::write(&path, &text).is_ok() {
+                        if let Some(document) = self.files[index].document() {
+                            document.sync(&text);
+                            document.saved();
+                        }
+                        self.files[index].saved = text;
+                    }
+                }
+            } else if let Ok(text) = std::fs::read_to_string(&path) {
+                let _ = std::fs::write(&path, lsp::apply_to_text(&text, &edits));
+            }
+        }
+        cx.notify();
+    }
+
+    /// The rename field, while renaming.
+    fn render_rename(&self) -> Option<AnyElement> {
+        let rename = self.rename.as_ref()?;
+        Some(
+            div()
+                .flex()
+                .items_center()
+                .gap(len(space::SPACE_2))
+                .child(div().text_size(px(12.)).text_color(theme::color(color::INK_MUTED)).child("Rename to"))
+                .child(div().w(px(200.)).child(Input::new(&rename.input)))
+                .into_any_element(),
+        )
     }
 
     /// Shows every error and warning the servers report.
@@ -1135,6 +1264,7 @@ impl Render for EditorView {
                     .children((0..self.files.len()).map(|index| self.render_tab(index, cx)))
                     .child(div().flex_1())
                     .children(self.render_disk_notice(cx))
+                    .children(self.render_rename())
                     .children(self.render_language_notice(cx))
                     .children(self.render_problems_button(cx))
                     .children(self.render_impact_button(cx))
