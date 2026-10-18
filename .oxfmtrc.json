@@ -8,7 +8,12 @@
   "endOfLine": "lf",
   "sortPackageJson": false,
   "sortImports": {
-    "customGroups": [{ "groupName": "alias", "elementNamePattern": ["@shared/**"] }],
+    "customGroups": [
+      {
+        "groupName": "alias",
+        "elementNamePattern": ["@shared/**"]
+      }
+    ],
     "groups": [
       ["value-builtin", "type-builtin"],
       ["value-external", "type-external"],
@@ -17,5 +22,13 @@
       "unknown"
     ]
   },
-  "ignorePatterns": ["out", "dist", "node_modules", "pnpm-lock.yaml", "spikes/logs"]
+  "ignorePatterns": [
+    "out",
+    "dist",
+    "node_modules",
+    "pnpm-lock.yaml",
+    "spikes/logs",
+    "src/renderer/src/design/tokens.css",
+    "src/renderer/src/design/terminal-theme.ts"
+  ]
 }

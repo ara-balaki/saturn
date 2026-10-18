@@ -1,7 +1,6 @@
 /* Saturn components. Every value comes from tokens.css; the one composite is the brand gradient.
    Nested corners: inner radius = outer radius - padding. Panels (radius-lg 14) pad 4px, so whatever
    touches their edge takes radius-md (10); radius-md containers pad 4px around radius-sm (6). */
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 
 :root {
   --sat-gradient: linear-gradient(
