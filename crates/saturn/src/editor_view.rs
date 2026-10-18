@@ -1190,11 +1190,9 @@ impl EditorView {
                                     .group_hover("editor-tab", gpui_kit::Styled::invisible),
                             )
                         } else {
-                            slot.child(chrome::icon("x", 11., theme::color(color::INK_MUTED)))
-                                .tooltip(chrome::tip("Close"))
-                                .when(!selected, |slot| {
-                                    slot.invisible().group_hover("editor-tab", gpui_kit::Styled::visible)
-                                })
+                            slot.child(chrome::icon("x", 11., theme::color(color::INK_MUTED))).when(!selected, |slot| {
+                                slot.invisible().group_hover("editor-tab", gpui_kit::Styled::visible)
+                            })
                         }
                     })
                     .tooltip(chrome::tip("Close"))
