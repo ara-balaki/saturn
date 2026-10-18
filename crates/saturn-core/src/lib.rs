@@ -4,4 +4,5 @@
 pub mod agent_state;
 pub mod layout;
 pub mod program_status;
+pub mod session_name;
 pub mod shell_env;

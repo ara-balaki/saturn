@@ -56,6 +56,8 @@ pub struct TerminalView {
     /// Claude's current activity or question (OSC 7501 `msg`).
     pub message: Option<String>,
     pub cwd: PathBuf,
+    /// Claude reports its state itself (OSC 7501); hook-based state is then ignored.
+    has_program_status: bool,
     scroll_remainder: f32,
     geometry: Rc<Cell<Option<Geometry>>>,
     drag: Drag,
@@ -105,6 +107,7 @@ impl TerminalView {
             state: AgentState::Shell,
             message: None,
             cwd: cwd.to_owned(),
+            has_program_status: false,
             scroll_remainder: 0.0,
             geometry: Rc::default(),
             drag: Drag::None,
@@ -130,6 +133,7 @@ impl TerminalView {
                 }
                 TerminalEvent::Bell => cx.emit(TerminalViewEvent::Bell),
                 TerminalEvent::Status(status) => {
+                    self.has_program_status = true;
                     self.state = AgentState::from_program_status(&status);
                     self.message = status.msg;
                     cx.emit(TerminalViewEvent::StateChanged);
@@ -156,6 +160,17 @@ impl TerminalView {
             });
         })
         .detach();
+    }
+
+    /// State reported by a Claude Code hook. Used only when Claude doesn't report its state to the
+    /// terminal itself (OSC 7501 is the more precise of the two).
+    pub fn hook_state(&mut self, state: AgentState, cx: &mut Context<Self>) {
+        if self.has_program_status || self.state == state {
+            return;
+        }
+        self.state = state;
+        cx.emit(TerminalViewEvent::StateChanged);
+        cx.notify();
     }
 
     pub fn terminal(&self) -> &Terminal {

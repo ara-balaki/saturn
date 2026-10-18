@@ -1,7 +1,7 @@
 //! The window's root: the title bar and the grid of terminal panes, each with tabs.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::resizable::{h_resizable, resizable_panel, v_resizable};
@@ -11,14 +11,17 @@ use gpui_kit::{
     PromptLevel, Render, StatefulInteractiveElement as _, Styled as _, Window, actions, div,
     prelude::FluentBuilder as _, px, relative,
 };
+use saturn_bridge::{Bridge, HookCall};
 use saturn_core::agent_state::{AgentState, tab_title};
 use saturn_core::layout::{Cell, CellId, Direction, Layout, RowId, TabId};
+use saturn_core::session_name::rename_for_prompt;
 use saturn_design::{color, radius, shadow, space};
 use saturn_terminal::view::{TerminalView, TerminalViewEvent};
 
 use crate::chrome::{self, TileKind};
-use crate::settings;
+use crate::settings::{self, Settings};
 use crate::theme::{self, len};
+use crate::{dock, settings_view};
 
 actions!(
     saturn,
@@ -40,6 +43,7 @@ actions!(
         ToggleSidebar,
         ToggleEditor,
         OpenProject,
+        OpenSettings,
         FocusPane1,
         FocusPane2,
         FocusPane3,
@@ -122,6 +126,33 @@ pub struct Workspace {
     focus: FocusHandle,
     sidebar_open: bool,
     editor_open: bool,
+    settings: Settings,
+    /// Where the Saturn plugin's hooks reach this window; `None` if it could not start.
+    bridge: Option<Bridge>,
+    /// The last name Saturn gave each tab's Claude session.
+    session_names: HashMap<TabId, String>,
+    /// The number on the Dock icon right now.
+    badge: usize,
+}
+
+/// The Saturn plugin (`plugin/` in this repository) that Claude sessions in Saturn's panes load.
+fn plugin_dir() -> Option<PathBuf> {
+    std::env::var_os("SATURN_PLUGIN_DIR")
+        .map(PathBuf::from)
+        .or_else(|| Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../plugin")).canonicalize().ok())
+        .filter(|dir| dir.join(".claude-plugin/plugin.json").is_file())
+}
+
+/// Starts the hook bridge on a socket only this Saturn instance uses.
+fn start_bridge() -> Option<(Bridge, async_channel::Receiver<HookCall>)> {
+    let path = std::env::temp_dir().join(format!("saturn-{}.sock", std::process::id()));
+    match Bridge::start(&path) {
+        Ok(started) => Some(started),
+        Err(error) => {
+            eprintln!("saturn: hooks can't reach this window ({error}); agent states come from the terminal only");
+            None
+        }
+    }
 }
 
 fn state_color(state: AgentState) -> Hsla {
@@ -172,6 +203,17 @@ impl Workspace {
             }
         })
         .detach();
+        let (bridge, calls) = start_bridge().unzip();
+        if let Some(calls) = calls {
+            cx.spawn(async move |this, cx| {
+                while let Ok(call) = calls.recv().await {
+                    if this.update(cx, |this, cx| this.handle_hook(call, cx)).is_err() {
+                        break;
+                    }
+                }
+            })
+            .detach();
+        }
         Self {
             project,
             layout: Layout::default(),
@@ -183,7 +225,58 @@ impl Workspace {
             focus: cx.focus_handle(),
             sidebar_open: true,
             editor_open: true,
+            settings: settings::load(),
+            bridge,
+            session_names: HashMap::new(),
+            badge: 0,
         }
+    }
+
+    pub fn settings(&self) -> &Settings {
+        &self.settings
+    }
+
+    pub fn change_settings(&mut self, change: impl FnOnce(&mut Settings), cx: &mut Context<Self>) {
+        change(&mut self.settings);
+        settings::save(&self.settings);
+        cx.notify();
+    }
+
+    /// A Claude Code hook from a session in one of the panes.
+    fn handle_hook(&mut self, call: HookCall, cx: &mut Context<Self>) {
+        let Some(tab) = call.pane.parse().ok().map(TabId) else { return call.done() };
+        let Some(view) = self.terminals.get(&tab).cloned() else { return call.done() };
+        let state = match call.event() {
+            "UserPromptSubmit" | "PostToolUse" => Some(AgentState::Working),
+            "PermissionRequest" => Some(AgentState::NeedsYou),
+            "Stop" => Some(AgentState::YourTurn),
+            "StopFailure" => Some(AgentState::Error),
+            "SessionEnd" => Some(AgentState::Shell),
+            "Notification" if call.field("notification_type") == Some("idle_prompt") => Some(AgentState::YourTurn),
+            _ => None,
+        };
+        if let Some(state) = state {
+            view.update(cx, |view, cx| view.hook_state(state, cx));
+        }
+        if call.event() == "CwdChanged"
+            && let Some(cwd) = call.field("new_cwd").map(PathBuf::from)
+        {
+            view.update(cx, |view, _| view.cwd = cwd);
+        }
+        if call.event() == "UserPromptSubmit" && self.settings.rename_sessions_from_commands {
+            let current = call.field("session_title");
+            if let Some(name) = rename_for_prompt(
+                call.field("prompt").unwrap_or_default(),
+                current,
+                self.session_names.get(&tab).map(String::as_str),
+            ) {
+                self.session_names.insert(tab, name.clone());
+                return call.answer(&serde_json::json!({
+                    "hookSpecificOutput": { "hookEventName": "UserPromptSubmit", "sessionTitle": name }
+                }));
+            }
+        }
+        call.done();
     }
 
     /// Starts a shell, in the focused terminal's folder or the project's, and places its tab.
@@ -200,13 +293,21 @@ impl Workspace {
             .map_or_else(|| self.project.clone(), |view| view.read(cx).cwd.clone());
         self.next_tab += 1;
         let tab = TabId(self.next_tab);
-        let pane_id = tab.0.to_string();
-        let env = [
-            ("TERM", "xterm-256color"),
-            ("COLORTERM", "truecolor"),
-            ("TERM_PROGRAM", "Saturn"),
-            ("SATURN_PANE_ID", pane_id.as_str()),
+        let mut env: Vec<(String, String)> = vec![
+            ("TERM".into(), "xterm-256color".into()),
+            ("COLORTERM".into(), "truecolor".into()),
+            ("TERM_PROGRAM".into(), "Saturn".into()),
+            ("SATURN_PANE_ID".into(), tab.0.to_string()),
         ];
+        // Claude sessions in this pane load the Saturn plugin and report to this window only.
+        if let (Some(bridge), Some(plugin)) = (&self.bridge, plugin_dir()) {
+            env.push(("SATURN_SOCKET".into(), bridge.path().display().to_string()));
+            let plugin = plugin.display().to_string();
+            let dirs =
+                std::env::var("CLAUDE_CODE_PLUGIN_DIRS").map_or(plugin.clone(), |dirs| format!("{dirs}:{plugin}"));
+            env.push(("CLAUDE_CODE_PLUGIN_DIRS".into(), dirs));
+        }
+        let env: Vec<(&str, &str)> = env.iter().map(|(key, value)| (key.as_str(), value.as_str())).collect();
         let (terminal, output) = match TerminalView::spawn(&cwd, &env) {
             Ok(started) => started,
             Err(error) => {
@@ -314,14 +415,17 @@ impl Workspace {
         .detach();
     }
 
+    /// A name typed by hand, else (when the setting is on) the session's or terminal's title,
+    /// else the folder the terminal is in.
     fn tab_name(&self, tab: TabId, cx: &Context<Self>) -> String {
         if let Some(name) = self.names.get(&tab) {
             return name.clone();
         }
-        self.terminals
-            .get(&tab)
-            .and_then(|view| view.read(cx).title.as_deref().and_then(tab_title))
-            .unwrap_or_else(|| "zsh".to_owned())
+        let Some(view) = self.terminals.get(&tab).map(|view| view.read(cx)) else { return "zsh".to_owned() };
+        let title = self.settings.name_tabs_after_sessions.then(|| view.title.as_deref().and_then(tab_title)).flatten();
+        title.unwrap_or_else(|| {
+            view.cwd.file_name().map_or_else(|| "zsh".to_owned(), |folder| folder.to_string_lossy().into_owned())
+        })
     }
 
     fn tab_state(&self, tab: TabId, cx: &Context<Self>) -> AgentState {
@@ -763,6 +867,10 @@ impl Workspace {
 
 impl Render for Workspace {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.unseen.len() != self.badge {
+            self.badge = self.unseen.len();
+            dock::set_badge(self.badge);
+        }
         div()
             .size_full()
             .flex()
@@ -819,6 +927,7 @@ impl Render for Workspace {
                 cx.notify();
             }))
             .on_action(cx.listener(|_, _: &OpenProject, window, cx| Self::open_project(window, cx)))
+            .on_action(cx.listener(|_, _: &OpenSettings, window, cx| settings_view::open(cx.weak_entity(), window, cx)))
             .on_action(cx.listener(|this, _: &Copy, _, cx| {
                 if let Some(view) = this.focused_view() {
                     view.update(cx, |view, cx| view.copy_selection(cx));

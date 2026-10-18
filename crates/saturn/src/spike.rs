@@ -2,6 +2,7 @@
 //!
 //! - `SATURN_PANES=N` opens N panes, `SATURN_COMMAND` types a command into each.
 //! - `SATURN_PERF=1` prints how long terminal frames take, every second.
+//! - `SATURN_OPEN_SETTINGS=1` opens the Settings dialog on start.
 //! - `SATURN_SCREENSHOT=path.png` saves what the window draws after `SATURN_SCREENSHOT_AFTER`
 //!   seconds (needs the `capture` feature); `SATURN_QUIT_AFTER` quits after that many seconds.
 
@@ -61,6 +62,10 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
             }
         })
         .detach();
+    }
+    if std::env::var_os("SATURN_OPEN_SETTINGS").is_some() {
+        // After the window (and the Root that hosts dialogs) exists.
+        cx.defer_in(window, |_, window, cx| crate::settings_view::open(cx.weak_entity(), window, cx));
     }
     capture(window, cx);
     if let Some(seconds) = var::<u64>("SATURN_QUIT_AFTER") {

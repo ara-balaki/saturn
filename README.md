@@ -25,6 +25,21 @@ pnpm health           # format check, clippy, tests, unused deps, licences
 | `crates/saturn-core`     | Pure logic: grid layout, agent states, OSC 7501 parsing                      |
 | `crates/saturn-design`   | Design tokens compiled from `design/tokens.json`                             |
 
+## Claude Code integration
+
+Every pane's shell gets `SATURN_SOCKET`, `SATURN_PANE_ID` and `CLAUDE_CODE_PLUGIN_DIRS`, so a Claude
+session started in Saturn loads the plugin in [`plugin/`](plugin) for that session only; nothing
+is installed into Claude Code's own settings. The plugin's hooks report to the Saturn window the
+session runs in, and do nothing anywhere else.
+
+Settings (⌘,), saved in `~/Library/Application Support/Saturn/settings.json`:
+
+- **Name tabs after Claude's session** (on by default): tabs show the session's name. Off: the
+  folder, or a name typed by hand.
+- **Name sessions after tickets** (on by default): `/start abc-224`, or any slash command whose
+  first word is a ticket, renames the session to `ABC-224`, as `/rename` would. A name you gave
+  yourself is never replaced.
+
 ### Spikes and screenshots
 
 `SATURN_PANES=12 SATURN_COMMAND="node scripts/tui-load.mjs 30 14" SATURN_PERF=1 cargo run -p saturn --release`

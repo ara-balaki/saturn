@@ -2,7 +2,9 @@
 
 mod assets;
 mod chrome;
+mod dock;
 mod settings;
+mod settings_view;
 mod spike;
 mod theme;
 mod workspace;
@@ -16,8 +18,8 @@ use gpui_kit::{
 
 use crate::workspace::{
     CloseTab, Copy, FocusDown, FocusLeft, FocusPane1, FocusPane2, FocusPane3, FocusPane4, FocusPane5, FocusPane6,
-    FocusPane7, FocusPane8, FocusPane9, FocusRight, FocusUp, NewTab, NextAttention, NextTab, OpenProject, Paste,
-    Placement, PreviousTab, SplitDown, SplitRight, ToggleEditor, ToggleMaximize, ToggleSidebar, Workspace,
+    FocusPane7, FocusPane8, FocusPane9, FocusRight, FocusUp, NewTab, NextAttention, NextTab, OpenProject, OpenSettings,
+    Paste, Placement, PreviousTab, SplitDown, SplitRight, ToggleEditor, ToggleMaximize, ToggleSidebar, Workspace,
 };
 
 actions!(saturn, [Quit]);
@@ -44,6 +46,7 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-c", Copy, None),
         KeyBinding::new("cmd-b", ToggleSidebar, None),
         KeyBinding::new("cmd-o", OpenProject, None),
+        KeyBinding::new("cmd-,", OpenSettings, None),
         KeyBinding::new("cmd-j", ToggleEditor, None),
         KeyBinding::new("cmd-1", FocusPane1, None),
         KeyBinding::new("cmd-2", FocusPane2, None),
@@ -59,7 +62,11 @@ fn bind_keys(cx: &mut App) {
 
 fn set_menus(cx: &mut App) {
     cx.set_menus(vec![
-        Menu::new("Saturn").items([MenuItem::action("Quit Saturn", Quit)]),
+        Menu::new("Saturn").items([
+            MenuItem::action("Settings…", OpenSettings),
+            MenuItem::separator(),
+            MenuItem::action("Quit Saturn", Quit),
+        ]),
         Menu::new("File").items([MenuItem::action("Open Project…", OpenProject)]),
         Menu::new("Terminal").items([
             MenuItem::action("New Tab", NewTab),

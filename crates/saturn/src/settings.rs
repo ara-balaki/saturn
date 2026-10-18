@@ -4,9 +4,21 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Settings {
     pub last_project: Option<PathBuf>,
+    /// Tabs show the Claude session's name (or the terminal's title). Off: the folder, or a
+    /// name typed by hand.
+    pub name_tabs_after_sessions: bool,
+    /// A slash command whose first word is a ticket (`/start abc-224`) names the session after it.
+    pub rename_sessions_from_commands: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self { last_project: None, name_tabs_after_sessions: true, rename_sessions_from_commands: true }
+    }
 }
 
 fn file() -> Option<PathBuf> {
@@ -26,12 +38,16 @@ pub fn load() -> Settings {
 }
 
 pub fn remember_project(project: &Path) {
-    let Some(path) = file() else { return };
     let mut settings = load();
     settings.last_project = Some(project.to_owned());
+    save(&settings);
+}
+
+pub fn save(settings: &Settings) {
+    let Some(path) = file() else { return };
     if let Some(dir) = path.parent()
         && std::fs::create_dir_all(dir).is_ok()
-        && let Ok(text) = serde_json::to_string_pretty(&settings)
+        && let Ok(text) = serde_json::to_string_pretty(settings)
     {
         let _ = std::fs::write(path, text);
     }

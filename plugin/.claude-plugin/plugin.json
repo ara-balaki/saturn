@@ -1,0 +1,5 @@
+{
+  "name": "saturn",
+  "description": "Tells the Saturn window a Claude session runs in what the session is doing, and lets Saturn name it after the ticket a command is about. Does nothing outside Saturn.",
+  "version": "0.1.0"
+}

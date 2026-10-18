@@ -9,6 +9,7 @@ license = "MIT"
 publish = false
 
 [workspace.dependencies]
+saturn-bridge = { path = "crates/saturn-bridge" }
 saturn-core = { path = "crates/saturn-core" }
 saturn-design = { path = "crates/saturn-design" }
 saturn-terminal = { path = "crates/saturn-terminal" }
