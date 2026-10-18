@@ -1,6 +1,7 @@
 //! Saturn: a terminal grid for running many Claude Code agents side by side.
 
 mod assets;
+mod changes_view;
 mod chrome;
 mod dock;
 mod editor_view;

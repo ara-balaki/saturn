@@ -19,6 +19,7 @@ use saturn_core::session_name::rename_for_prompt;
 use saturn_design::{color, radius, shadow, space};
 use saturn_terminal::view::{TerminalView, TerminalViewEvent};
 
+use crate::changes_view::{self, ChangesEvent, ChangesView};
 use crate::chrome;
 use crate::editor_view::EditorView;
 use crate::files_view::{FilesEvent, FilesView};
@@ -143,6 +144,17 @@ pub struct Workspace {
     files_events: Subscription,
     /// Open files, in the top panel.
     editor: Entity<EditorView>,
+    /// What the sidebar shows.
+    sidebar_tab: SidebarTab,
+    /// The repository's changes, in the sidebar's Changes tab.
+    changes: Entity<ChangesView>,
+    changes_events: Subscription,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SidebarTab {
+    Files,
+    Changes,
 }
 
 /// The Saturn plugin (`plugin/` in this repository) that Claude sessions in Saturn's panes load.
@@ -243,7 +255,12 @@ impl Workspace {
         }
         let files = cx.new(|cx| FilesView::new(&project, cx));
         let files_events = Self::follow_files(&files, window, cx);
+        let changes = cx.new(|cx| ChangesView::new(&project, cx));
+        let changes_events = Self::follow_changes(&changes, cx);
         Self {
+            sidebar_tab: SidebarTab::Files,
+            changes,
+            changes_events,
             files,
             files_events,
             editor: cx.new(|_| EditorView::default()),
@@ -275,7 +292,52 @@ impl Workspace {
     fn follow_files(files: &Entity<FilesView>, window: &mut Window, cx: &mut Context<Self>) -> Subscription {
         cx.subscribe_in(files, window, |this, _, event: &FilesEvent, window, cx| match event {
             FilesEvent::Open(path) => this.open_file(path, window, cx),
+            FilesEvent::GitChanged => this.changes.update(cx, ChangesView::reload),
         })
+    }
+
+    /// Reviewing a change opens it in the editor panel; new changes refresh an open review.
+    fn follow_changes(changes: &Entity<ChangesView>, cx: &mut Context<Self>) -> Subscription {
+        cx.subscribe(changes, |this, _, event: &ChangesEvent, cx| match event {
+            ChangesEvent::Open { files, scope, path } => {
+                this.editor.update(cx, |editor, cx| editor.review(files.clone(), *scope, path, cx));
+                this.editor_open = true;
+                cx.notify();
+            }
+            ChangesEvent::Updated { files, scope } => {
+                this.editor.update(cx, |editor, cx| editor.refresh_review(files.clone(), *scope, cx));
+            }
+        })
+    }
+
+    /// Shows the Changes tab and reviews its first file once the changes are read (spikes).
+    pub fn review_first_change(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_tab = SidebarTab::Changes;
+        let changes = self.changes.clone();
+        cx.spawn(async move |_, cx| {
+            cx.background_executor().timer(std::time::Duration::from_millis(1500)).await;
+            changes.update(cx, |changes, cx| changes.open(0, cx));
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Files / Changes, at the top of the sidebar.
+    fn render_sidebar_switch(&self, cx: &mut Context<Self>) -> AnyElement {
+        let tab = |label: &'static str, target: SidebarTab, cx: &mut Context<Self>| {
+            chrome::track_item(label, self.sidebar_tab == target)
+                .flex_1()
+                .px(len(space::SPACE_4))
+                .child(label)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.sidebar_tab = target;
+                    cx.notify();
+                }))
+        };
+        chrome::track()
+            .child(tab("Files", SidebarTab::Files, cx))
+            .child(tab("Changes", SidebarTab::Changes, cx))
+            .into_any_element()
     }
 
     pub fn settings(&self) -> &Settings {
@@ -541,6 +603,8 @@ impl Workspace {
             let _ = this.update_in(cx, |this, window, cx| {
                 this.files = cx.new(|cx| FilesView::new(&project, cx));
                 this.files_events = Self::follow_files(&this.files, window, cx);
+                this.changes = cx.new(|cx| ChangesView::new(&project, cx));
+                this.changes_events = Self::follow_changes(&this.changes, cx);
                 this.project = project;
                 if this.layout.is_empty() {
                     this.open_terminal(Placement::Tab, window, cx);
@@ -870,6 +934,17 @@ impl Workspace {
             self.render_grid(cx)
         };
         let path = self.project.display().to_string();
+        let switch = self.render_sidebar_switch(cx);
+        let sidebar = match self.sidebar_tab {
+            SidebarTab::Files => chrome::sidebar(&name, &path, switch, None, self.files.clone()),
+            SidebarTab::Changes => chrome::sidebar(
+                &name,
+                &path,
+                switch,
+                Some(changes_view::scope_strip(&self.changes, cx).into_any_element()),
+                self.changes.clone(),
+            ),
+        };
         div().flex_1().min_h_0().child(
             h_resizable("workbench")
                 .with_handle_appearance(chrome::quiet_resize_handle())
@@ -878,7 +953,7 @@ impl Workspace {
                         .size(px(270.))
                         .size_range(px(200.)..px(480.))
                         .visible(self.sidebar_open)
-                        .child(div().size_full().pr(half_gap).child(chrome::sidebar(&name, &path, self.files.clone()))),
+                        .child(div().size_full().pr(half_gap).child(sidebar)),
                 )
                 .child(
                     resizable_panel().child(

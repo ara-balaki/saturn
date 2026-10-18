@@ -1,14 +1,17 @@
 //! The editor panel: open files as tabs in its strip, the active one in its well, with syntax
-//! highlighting from gpui-component's tree-sitter editor.
+//! highlighting from gpui-component's tree-sitter editor. A Changes tab, when open, reviews the
+//! repository's diff with gpui-component's diff view.
 
 use std::path::{Path, PathBuf};
 
+use gpui_kit::component::diff::{Diff, DiffFile, DiffMode, DiffState};
 use gpui_kit::component::input::{Editor, EditorState, InputEvent};
 use gpui_kit::{
     AnyElement, AppContext as _, Context, Entity, FontWeight, InteractiveElement as _, IntoElement, MouseButton,
     ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, Subscription, Window, div,
     prelude::FluentBuilder as _, px,
 };
+use saturn_core::git::Scope;
 use saturn_design::{color, radius, space};
 
 use crate::chrome;
@@ -35,10 +38,19 @@ impl OpenFile {
     }
 }
 
+/// The review of a scope's changes, in the Changes tab.
+struct Review {
+    state: Entity<DiffState>,
+    scope: Scope,
+}
+
 #[derive(Default)]
 pub struct EditorView {
     files: Vec<OpenFile>,
     active: usize,
+    review: Option<Review>,
+    /// Whether the Changes tab is in front of the files.
+    showing_review: bool,
     /// Why the last file could not be opened or saved, shown in the strip until the next action.
     problem: Option<String>,
 }
@@ -47,6 +59,7 @@ impl EditorView {
     /// Opens `path` in a tab, or brings its tab forward if it is already open.
     pub fn open(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
         self.problem = None;
+        self.showing_review = false;
         if let Some(index) = self.files.iter().position(|file| file.path == path) {
             self.active = index;
             cx.notify();
@@ -81,8 +94,34 @@ impl EditorView {
         cx.notify();
     }
 
+    /// Shows `files` in the Changes tab, scrolled to `path`.
+    pub fn review(&mut self, files: Vec<DiffFile>, scope: Scope, path: &str, cx: &mut Context<Self>) {
+        let state = if let Some(review) = &mut self.review {
+            review.scope = scope;
+            review.state.update(cx, |state, cx| state.set_files(files, cx));
+            review.state.clone()
+        } else {
+            let state = cx.new(|cx| DiffState::new(files, cx));
+            self.review = Some(Review { state: state.clone(), scope });
+            state
+        };
+        state.update(cx, |state, cx| state.scroll_to_file(path, cx));
+        self.showing_review = true;
+        cx.notify();
+    }
+
+    /// Keeps an open review current while agents keep working.
+    pub fn refresh_review(&mut self, files: Vec<DiffFile>, scope: Scope, cx: &mut Context<Self>) {
+        if let Some(review) = self.review.as_ref().filter(|review| review.scope == scope) {
+            review.state.update(cx, |state, cx| state.set_files(files, cx));
+        }
+    }
+
     /// Writes the active file to disk.
     pub fn save(&mut self, cx: &mut Context<Self>) {
+        if self.showing_review {
+            return;
+        }
         let Some(file) = self.files.get_mut(self.active) else { return };
         let text = file.state.read(cx).value().to_string();
         match std::fs::write(&file.path, &text) {
@@ -105,9 +144,84 @@ impl EditorView {
         }
     }
 
+    fn render_review_tab(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let review = self.review.as_ref()?;
+        let label = match review.scope {
+            Scope::Uncommitted => "Uncommitted changes",
+            Scope::Branch => "Branch changes",
+        };
+        Some(
+            chrome::track_item("review-tab", self.showing_review)
+                .group("review-tab")
+                .pl(len(space::SPACE_3))
+                .pr(len(space::SPACE_1))
+                .child(chrome::icon("git-compare", 13., theme::color(color::INK_MUTED)))
+                .child(label)
+                .child(
+                    div()
+                        .id("review-close")
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .size(px(20.))
+                        .rounded(len(radius::RADIUS_XS))
+                        .hover(|s| s.bg(theme::color(color::CONTROL_HOVER)))
+                        .child(chrome::icon("x", 11., theme::color(color::INK_MUTED)))
+                        .when(!self.showing_review, |slot| {
+                            slot.invisible().group_hover("review-tab", gpui_kit::Styled::visible)
+                        })
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.review = None;
+                            this.showing_review = false;
+                            cx.notify();
+                        })),
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.showing_review = true;
+                    cx.notify();
+                }))
+                .into_any_element(),
+        )
+    }
+
+    /// Unified or split, and stepping through the changes: the review's own controls.
+    fn render_review_controls(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let review = self.review.as_ref().filter(|_| self.showing_review)?;
+        let mode = review.state.read(cx).mode();
+        let state = review.state.clone();
+        let pick = |label: &'static str, target: DiffMode| {
+            let state = state.clone();
+            chrome::track_item(label, mode == target).px(len(space::SPACE_3)).child(label).on_click(move |_, _, cx| {
+                state.update(cx, |state, cx| state.set_mode(target, cx));
+            })
+        };
+        let step = |id: &'static str, icon: &str, next: bool| {
+            let state = state.clone();
+            chrome::icon_button(id, icon, true).on_click(move |_, _, cx| {
+                state.update(cx, |state, cx| if next { state.next_change(cx) } else { state.previous_change(cx) });
+            })
+        };
+        Some(
+            div()
+                .flex()
+                .items_center()
+                .gap(len(space::SPACE_1))
+                .child(step("previous-change", "chevron-up", false))
+                .child(step("next-change", "chevron-down", true))
+                .child(
+                    chrome::track()
+                        .p(px(2.))
+                        .child(pick("Unified", DiffMode::Unified))
+                        .child(pick("Split", DiffMode::Split)),
+                )
+                .into_any_element(),
+        )
+    }
+
     fn render_tab(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
         let file = &self.files[index];
-        let selected = index == self.active;
+        let selected = index == self.active && !self.showing_review;
         let dirty = file.dirty(cx);
         chrome::track_item(("editor-tab", index), selected)
             .group("editor-tab")
@@ -145,6 +259,7 @@ impl EditorView {
             )
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.active = index;
+                this.showing_review = false;
                 cx.notify();
             }))
             .into_any_element()
@@ -153,7 +268,14 @@ impl EditorView {
 
 impl Render for EditorView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let Some(active) = self.files.get(self.active) else {
+        let body: Option<AnyElement> = if self.showing_review {
+            self.review.as_ref().map(|review| Diff::new(&review.state).size_full().into_any_element())
+        } else {
+            self.files
+                .get(self.active)
+                .map(|file| Editor::new(&file.state).appearance(false).bordered(false).size_full().into_any_element())
+        };
+        let Some(body) = body else {
             return chrome::panel()
                 .child(
                     chrome::well().flex().items_center().justify_center().child(
@@ -180,7 +302,6 @@ impl Render for EditorView {
                 )
                 .into_any_element();
         };
-        let state = active.state.clone();
         chrome::panel()
             .child(
                 div()
@@ -189,8 +310,10 @@ impl Render for EditorView {
                     .items_center()
                     .gap(px(2.))
                     .h(len(chrome::CONTROL_HEIGHT))
+                    .children(self.render_review_tab(cx))
                     .children((0..self.files.len()).map(|index| self.render_tab(index, cx)))
                     .child(div().flex_1())
+                    .children(self.render_review_controls(cx))
                     .children(self.problem.clone().map(|problem| {
                         div()
                             .px(len(space::SPACE_3))
@@ -199,7 +322,7 @@ impl Render for EditorView {
                             .child(problem)
                     })),
             )
-            .child(chrome::well().child(Editor::new(&state).appearance(false).bordered(false).size_full()))
+            .child(chrome::well().child(body))
             .into_any_element()
     }
 }

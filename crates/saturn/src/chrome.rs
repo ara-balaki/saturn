@@ -174,15 +174,6 @@ pub fn button(
         .children(shortcut.map(|keys| div().font_weight(FontWeight::NORMAL).text_color(hint).child(keys)))
 }
 
-/// A segmented switch: a track whose selected segment is raised.
-pub fn segmented(options: &[(&'static str, bool)]) -> gpui_kit::Div {
-    track().children(
-        options
-            .iter()
-            .map(|(label, selected)| track_item(*label, *selected).flex_1().px(len(space::SPACE_4)).child(*label)),
-    )
-}
-
 /// A headline in two weights, the point in semibold: "No terminals **yet**".
 pub fn headline(light: &str, bold: &str, size: f32) -> impl IntoElement {
     div()
@@ -222,8 +213,15 @@ pub fn dot_grid() -> impl IntoElement {
     .left_0()
 }
 
-/// The sidebar: the project, the Files/Changes switch, and the file tree in the well.
-pub fn sidebar(project_name: &str, project_path: &str, files: impl IntoElement) -> AnyElement {
+/// The sidebar: the project, the Files/Changes switch with whatever belongs to the chosen view, and
+/// that view in the well.
+pub fn sidebar(
+    project_name: &str,
+    project_path: &str,
+    switch: impl IntoElement,
+    strip: Option<AnyElement>,
+    content: impl IntoElement,
+) -> AnyElement {
     panel()
         .child(
             div()
@@ -254,8 +252,9 @@ pub fn sidebar(project_name: &str, project_path: &str, files: impl IntoElement) 
                         ),
                 ),
         )
-        .child(segmented(&[("Files", true), ("Changes", false)]))
-        .child(well().child(files))
+        .child(switch)
+        .children(strip)
+        .child(well().child(content))
         .into_any_element()
 }
 

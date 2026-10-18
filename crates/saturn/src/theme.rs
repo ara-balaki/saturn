@@ -74,6 +74,9 @@ fn component_theme(appearance: Appearance) -> gpui_kit::component::ThemeConfig {
         "scrollbar.background": "#00000000",
         "scrollbar.thumb.background": hex(c::LINE_STRONG),
         "scrollbar.thumb.hover.background": hex(c::INK_FAINT),
+        // The diff view's added and removed lines.
+        "success.background": hex(c::TERM_GREEN),
+        "success.foreground": hex(c::INK_ON_SIGNAL),
         "danger.background": hex(c::RED),
         "danger.foreground": hex(c::INK_ON_ACCENT),
     });

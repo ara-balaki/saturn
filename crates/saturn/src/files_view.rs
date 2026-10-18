@@ -26,6 +26,8 @@ const SETTLE: Duration = Duration::from_millis(150);
 
 pub enum FilesEvent {
     Open(PathBuf),
+    /// Git reported a new state: the Changes list and any review should read it again.
+    GitChanged,
 }
 
 pub struct FilesView {
@@ -99,7 +101,10 @@ impl FilesView {
         cx.spawn(async move |this, cx| {
             let changes = cx.background_spawn(async move { git::status(&root) }).await;
             let _ = this.update(cx, |this, cx| {
-                this.changes = changes;
+                if this.changes != changes {
+                    this.changes = changes;
+                    cx.emit(FilesEvent::GitChanged);
+                }
                 cx.notify();
             });
         })
@@ -135,6 +140,7 @@ impl FilesView {
         };
         div()
             .id(("file", index))
+            .w_full()
             .flex()
             .items_center()
             .gap(len(space::SPACE_2))

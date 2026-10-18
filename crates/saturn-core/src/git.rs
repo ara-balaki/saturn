@@ -77,6 +77,60 @@ pub fn parse_porcelain(raw: &[u8]) -> Vec<(PathBuf, FileState)> {
     files
 }
 
+/// What a review covers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Scope {
+    /// Everything not committed yet: staged, unstaged and new files, against `HEAD`.
+    #[default]
+    Uncommitted,
+    /// Everything the branch changed since it left the default branch, committed or not: what a
+    /// pull request would show, plus work in progress.
+    Branch,
+}
+
+/// The unified diff for `scope` in `repo`, new files included. Empty outside a repository.
+pub fn patch(repo: &Path, scope: Scope) -> String {
+    let base = match scope {
+        Scope::Uncommitted => "HEAD".to_owned(),
+        Scope::Branch => merge_base(repo).unwrap_or_else(|| "HEAD".to_owned()),
+    };
+    let mut patch = run(repo, &["diff", "--no-color", "--no-ext-diff", "-M", &base]).unwrap_or_default();
+    // `git diff` leaves out files git does not track yet; show them as added in full.
+    let untracked = run(repo, &["ls-files", "--others", "--exclude-standard", "-z"]).unwrap_or_default();
+    for file in untracked.split('\0').filter(|file| !file.is_empty()) {
+        // `--no-index` exits with 1 when the files differ, which they always do here.
+        if let Ok(output) = git(repo).args(["diff", "--no-color", "--no-index", "--", "/dev/null", file]).output() {
+            patch.push_str(&String::from_utf8_lossy(&output.stdout));
+        }
+    }
+    patch
+}
+
+/// Where the current branch left the default branch (`origin/HEAD`, else `main` or `master`).
+pub fn merge_base(repo: &Path) -> Option<String> {
+    let default_branch = run(repo, &["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"])
+        .map(|name| name.trim().to_owned())
+        .or_else(|| {
+            ["main", "master"]
+                .into_iter()
+                .find(|name| run(repo, &["rev-parse", "--verify", "--quiet", name]).is_some())
+                .map(str::to_owned)
+        })?;
+    run(repo, &["merge-base", "HEAD", &default_branch]).map(|sha| sha.trim().to_owned())
+}
+
+fn git(repo: &Path) -> Command {
+    let mut command = Command::new("git");
+    command.arg("--no-optional-locks").current_dir(repo);
+    command
+}
+
+/// Runs git and returns its output when it succeeds.
+fn run(repo: &Path, args: &[&str]) -> Option<String> {
+    let output = git(repo).args(args).output().ok()?;
+    output.status.success().then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
 /// Whether anything under `dir` has changed, for the quiet dot on a closed folder.
 pub fn has_changes_under<S: std::hash::BuildHasher>(changes: &HashMap<PathBuf, FileState, S>, dir: &Path) -> bool {
     changes.keys().any(|path| path.starts_with(dir) && path != dir)
@@ -109,6 +163,45 @@ mod tests {
         let changes = HashMap::from([(PathBuf::from("/repo/apps/api/orders.ts"), FileState::Modified)]);
         assert!(has_changes_under(&changes, Path::new("/repo/apps")));
         assert!(!has_changes_under(&changes, Path::new("/repo/packages")));
+    }
+
+    fn repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let sh = |args: &[&str]| {
+            let status = Command::new("git").args(args).current_dir(dir.path()).output().expect("git runs").status;
+            assert!(status.success(), "git {args:?}");
+        };
+        sh(&["init", "--quiet", "--initial-branch=main"]);
+        sh(&["config", "user.email", "test@saturn.local"]);
+        sh(&["config", "user.name", "Saturn tests"]);
+        std::fs::write(dir.path().join("orders.ts"), "export const a = 1;\n").expect("write");
+        sh(&["add", "."]);
+        sh(&["commit", "--quiet", "-m", "first"]);
+        sh(&["switch", "--quiet", "-c", "abc-236"]);
+        std::fs::write(dir.path().join("filter.ts"), "export const f = 2;\n").expect("write");
+        sh(&["add", "."]);
+        sh(&["commit", "--quiet", "-m", "on the branch"]);
+        std::fs::write(dir.path().join("orders.ts"), "export const a = 10;\n").expect("write");
+        std::fs::write(dir.path().join(".env"), "PORT=4000\n").expect("write");
+        dir
+    }
+
+    #[test]
+    fn uncommitted_covers_edits_and_new_files() {
+        let dir = repo();
+        let patch = patch(dir.path(), Scope::Uncommitted);
+        assert!(patch.contains("+export const a = 10;"), "{patch}");
+        assert!(patch.contains("+PORT=4000"), "{patch}");
+        assert!(!patch.contains("filter.ts"), "the branch's commit is not uncommitted: {patch}");
+    }
+
+    #[test]
+    fn branch_covers_its_commits_and_work_in_progress() {
+        let dir = repo();
+        let patch = patch(dir.path(), Scope::Branch);
+        assert!(patch.contains("+export const f = 2;"), "{patch}");
+        assert!(patch.contains("+export const a = 10;"), "{patch}");
+        assert!(patch.contains("+PORT=4000"), "{patch}");
     }
 
     #[test]

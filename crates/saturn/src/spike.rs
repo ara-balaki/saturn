@@ -4,7 +4,7 @@
 //!   types a command into each.
 //! - `SATURN_PERF=1` prints how long terminal frames take, every second.
 //! - `SATURN_OPEN_SETTINGS=1` opens the Settings dialog on start; `SATURN_OPEN_FILE=path` opens a file
-//!   in the editor.
+//!   in the editor; `SATURN_REVIEW=1` shows the Changes tab and reviews the first change.
 //! - `SATURN_SCREENSHOT=path.png` saves what the window draws after `SATURN_SCREENSHOT_AFTER`
 //!   seconds (needs the `capture` feature); `SATURN_QUIT_AFTER` quits after that many seconds.
 
@@ -69,6 +69,9 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
     if std::env::var_os("SATURN_OPEN_SETTINGS").is_some() {
         // After the window (and the Root that hosts dialogs) exists.
         cx.defer_in(window, |_, window, cx| crate::settings_view::open(cx.weak_entity(), window, cx));
+    }
+    if std::env::var_os("SATURN_REVIEW").is_some() {
+        cx.defer_in(window, |workspace, _, cx| workspace.review_first_change(cx));
     }
     if let Some(path) = std::env::var_os("SATURN_OPEN_FILE") {
         cx.defer_in(window, move |workspace, window, cx| workspace.open_file(std::path::Path::new(&path), window, cx));
