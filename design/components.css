@@ -1,23 +1,77 @@
-/* Saturn components, version 3. Every value comes from tokens.css; the composites are the blue
-   gradient, the grain and the motion scale below. Nested corners: inner radius = outer radius -
-   inset, from the outside in: the macOS window (about 16), 6px gap, panels and frames (radius-md 10),
-   4px padding, controls (radius-sm 6), 2px, chips and keys (radius-xs 4). Floating panels are
-   radius-lg 14 with 8px padding. */
-@import url('https://fonts.googleapis.com/css2?family=Urbanist:wght@300;400;600&family=JetBrains+Mono:wght@400;600&display=swap');
+/* Saturn components, version 4. Every value comes from tokens.css, plus the relative colours, the
+   gradients and the motion scale below.
+
+   Glass and cards, after how macOS builds its windows: the chrome (title bar, sidebar, the gaps
+   between panes) is clear over the window's sidebar material, which macOS draws (blur, saturation,
+   a fill, a brightness clamp). Previews stand that material in with `--sat-glass`. Content
+   (terminal panes, the editor) sits on opaque cards. Strokes and control fills are relative: black
+   in light mode, white in dark, at a low alpha, never a fixed grey.
+
+   Nested corners: inner radius = outer radius - inset, from the outside in: the macOS window (about
+   16), 6px gap, cards and tracks (radius-md 10), 4px padding, controls (radius-sm 6). Floating
+   dialogs are radius-lg 14 with 8px padding. Every control is 28px tall. */
+@import url('https://fonts.googleapis.com/css2?family=Urbanist:wght@300;400;500;600&family=JetBrains+Mono:wght@400;700&display=swap');
+
+:root,
+[data-theme='dark'] {
+  /* Stands in for macOS's dark sidebar material in previews; the app draws nothing here. */
+  --sat-glass: #1e1e20;
+  /* Relative colours: white in dark mode (theme::overlay). */
+  --sat-separator: rgba(255, 255, 255, 0.1);
+  --sat-fill-hover: rgba(255, 255, 255, 0.06);
+  --sat-fill-control: rgba(255, 255, 255, 0.08);
+  --sat-fill-pressed: rgba(255, 255, 255, 0.11);
+  --sat-fill-strong: rgba(255, 255, 255, 0.14);
+  --sat-dot: rgba(255, 255, 255, 0.16);
+  --sat-track: rgba(255, 255, 255, 0.07);
+  --sat-track-sep: rgba(255, 255, 255, 0.14);
+  /* A card's edge: a faint light ring and a highlight along its top edge. */
+  --sat-card-edge:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  /* The pressed item in a track: a lighter pill. */
+  --sat-raised: rgba(255, 255, 255, 0.14);
+  --sat-raised-edge: none;
+  /* The checkbox when off. */
+  --sat-check-fill: rgba(255, 255, 255, 0.04);
+  --sat-check-ring: rgba(255, 255, 255, 0.24);
+  --sat-check-ring-hover: rgba(255, 255, 255, 0.4);
+  /* Status words: the state's own colour reads in dark mode. */
+  --sat-state-text-working: var(--blue);
+  --sat-state-text-needs-you: var(--status-needs-you);
+  --sat-state-text-your-turn: var(--status-your-turn);
+}
+[data-theme='light'] {
+  --sat-glass: #ebebed;
+  --sat-separator: rgba(0, 0, 0, 0.1);
+  --sat-fill-hover: rgba(0, 0, 0, 0.06);
+  --sat-fill-control: rgba(0, 0, 0, 0.08);
+  --sat-fill-pressed: rgba(0, 0, 0, 0.11);
+  --sat-fill-strong: rgba(0, 0, 0, 0.14);
+  --sat-dot: rgba(0, 0, 0, 0.16);
+  --sat-track: rgba(0, 0, 0, 0.05);
+  --sat-track-sep: rgba(0, 0, 0, 0.14);
+  /* A faint dark ring and a soft shadow lift the card off the glass. */
+  --sat-card-edge: inset 0 0 0 1px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.1);
+  /* A white pill with a small shadow. */
+  --sat-raised: #ffffff;
+  --sat-raised-edge: inset 0 0 0 1px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.14);
+  --sat-check-fill: rgba(0, 0, 0, 0.04);
+  --sat-check-ring: rgba(0, 0, 0, 0.24);
+  --sat-check-ring-hover: rgba(0, 0, 0, 0.4);
+  /* In light mode the status words stay ink and the dot carries the colour, which reads calmer
+     on glass than coloured words. */
+  --sat-state-text-working: var(--ink);
+  --sat-state-text-needs-you: var(--ink);
+  --sat-state-text-your-turn: var(--ink);
+}
 
 :root {
-  /* The one colour moment: vivid blue in the lower left, sinking into deep blue and then black,
-     like light falling across the card. Blended in OKLab. */
-  --sat-gradient:
-    radial-gradient(
-      130% 150% at 8% 112%,
-      color-mix(in oklab, var(--blue-vivid), white 22%) 0%,
-      var(--blue-vivid) 28%,
-      transparent 72%
-    ),
-    linear-gradient(155deg in oklab, var(--blue-deep) 0%, #040814 100%);
-  /* Quarn's grain: a fine noise over gradient fills, so they read as material, not CSS. */
-  --sat-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  /* The primary action: vivid blue sinking toward deep blue, blended in OKLab. */
+  --sat-accent-fill: linear-gradient(
+    135deg in oklab,
+    var(--blue-vivid),
+    color-mix(in oklab, var(--blue-vivid) 55%, var(--blue-deep))
+  );
 
   --dur-instant: 100ms;
   --dur-fast: 150ms;
@@ -30,7 +84,7 @@
 
 .sat-root {
   box-sizing: border-box;
-  background: var(--ground);
+  background: var(--sat-glass);
   color: var(--ink-body);
   font: 400 14px/20px var(--font-sans);
   font-variant-numeric: tabular-nums;
@@ -49,16 +103,17 @@
   color: var(--ink);
 }
 
-/* The dot grid: faint dots on an 18px pitch, only inside empty areas (the empty grid, the gradient
-   card's well). The ground itself is plain. */
+/* The dot grid: 2px dots on an 18px pitch, relative (16%). Only in the empty terminal grid. */
 .sat-dotgrid {
-  background-image: radial-gradient(var(--line-strong) 1px, transparent 1.4px);
+  background-image: radial-gradient(circle, var(--sat-dot) 1px, transparent 1.2px);
   background-size: 18px 18px;
+  background-position: 0 0;
 }
 
-/* Type helpers. Light and semibold in one line is the signature: "Why <b>Saturn?</b>". */
+/* Type helpers. Light and semibold in one line is the signature: "No terminals <b>yet</b>".
+   Names and controls are Medium (500); semibold only in headlines. */
 .sat-display {
-  font: 300 44px/44px var(--font-sans);
+  font: 300 44px/48px var(--font-sans);
   letter-spacing: -0.02em;
   color: var(--ink);
 }
@@ -76,7 +131,7 @@
   color: var(--ink);
 }
 .sat-subtitle {
-  font: 600 15px/20px var(--font-sans);
+  font: 500 15px/20px var(--font-sans);
   color: var(--ink);
 }
 .sat-meta {
@@ -88,62 +143,72 @@
   color: var(--ink-faint);
 }
 
-/* Panel and well: one structure for every container. The panel (surface-raised, radius-md) holds
-   a strip of controls and one well (surface, radius-sm) with the content: 10 - 4 = 6. */
+/* Card: an opaque content surface over the glass (a terminal pane, the editor). A strip of
+   controls on top, then one hairline, then the content edge to edge. No inner well with its own
+   border, so no double outline. */
 .sat-panel {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
   min-width: 0;
   min-height: 0;
-  padding: var(--space-1);
+  padding: var(--space-1) var(--space-1) 0;
   border-radius: var(--radius-md);
-  background: var(--surface-raised);
-  box-shadow: inset 0 0 0 1px var(--line);
+  background: var(--surface);
+  box-shadow: var(--sat-card-edge);
+  overflow: hidden;
 }
+/* A card with no strip (a list, an empty state): content edge to edge, no hairline. */
+.sat-card {
+  padding: 0;
+}
+/* A card's content, under its strip: edge to edge, below one hairline. */
 .sat-well {
   position: relative;
   flex: 1;
+  min-width: 0;
   min-height: 0;
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--line);
+  margin: var(--space-1) calc(-1 * var(--space-1)) 0;
+  border-top: 1px solid var(--sat-separator);
   overflow: hidden;
 }
-/* A list in a well sits flush, so its rows share the well's corners. */
+.sat-card > .sat-well {
+  margin: 0;
+  border-top: 0;
+}
 .sat-list {
   display: grid;
   gap: 0;
+  align-content: start;
 }
 .sat-strip {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
-  min-height: 36px;
+  gap: 2px;
+  min-height: 28px;
 }
 
-/* Buttons: squircles, not pills. */
+/* Buttons: 28px squircles. Secondary is a relative fill with no border. */
 .sat-button {
   display: inline-flex;
+  flex: none;
   align-items: center;
   justify-content: center;
   gap: var(--space-3);
-  height: 36px;
-  padding: 0 var(--space-5);
+  height: 28px;
+  padding: 0 var(--space-4);
   border: 0;
   border-radius: var(--radius-sm);
-  font: 600 13px/16px var(--font-sans);
+  font: 500 13px/16px var(--font-sans);
   color: var(--ink);
-  background: var(--control);
-  box-shadow: inset 0 0 0 1px var(--line);
+  background: var(--sat-fill-control);
   cursor: pointer;
   transition:
     background-color var(--dur-fast) var(--ease-out),
     transform var(--dur-instant) var(--ease-out);
 }
 .sat-button:hover {
-  background: var(--control-hover);
+  background: var(--sat-fill-pressed);
 }
 .sat-button:active {
   transform: scale(0.98);
@@ -154,24 +219,11 @@
 }
 .sat-button--primary {
   color: var(--ink-on-accent);
-  background: linear-gradient(
-    135deg in oklab,
-    var(--blue-vivid),
-    color-mix(in oklab, var(--blue-vivid) 55%, var(--blue-deep))
-  );
+  background: var(--sat-accent-fill);
   box-shadow: 0 6px 20px color-mix(in oklab, var(--blue-vivid) 35%, transparent);
 }
 .sat-button--primary:hover {
-  background: var(--blue-vivid);
-}
-.sat-button--ghost {
-  background: transparent;
-  box-shadow: none;
-  color: var(--ink-muted);
-}
-.sat-button--ghost:hover {
-  background: var(--control);
-  color: var(--ink);
+  background: var(--sat-accent-fill);
 }
 .sat-button kbd {
   font: 400 12px/16px var(--font-sans);
@@ -181,17 +233,18 @@
   color: color-mix(in oklab, var(--ink-on-accent) 70%, transparent);
 }
 
-/* Icon buttons: 40px dark squircles, Quarn's toolbar keys. */
+/* Icon buttons: square, as tall as every control, a 14px icon. Quiet ones have no fill until
+   hovered; a pressed one (a toggle that's on) takes the pressed fill. */
 .sat-icon-button {
   display: inline-grid;
   place-items: center;
   flex: none;
-  width: 40px;
-  height: 40px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
   border: 0;
   border-radius: var(--radius-sm);
-  background: var(--control);
-  box-shadow: inset 0 0 0 1px var(--line);
+  background: var(--sat-fill-control);
   color: var(--ink);
   cursor: pointer;
   transition:
@@ -199,7 +252,7 @@
     transform var(--dur-instant) var(--ease-out);
 }
 .sat-icon-button:hover {
-  background: var(--control-hover);
+  background: var(--sat-fill-pressed);
 }
 .sat-icon-button:active {
   transform: scale(0.96);
@@ -209,109 +262,134 @@
   outline-offset: 2px;
 }
 .sat-icon-button svg {
-  width: 18px;
-  height: 18px;
-}
-/* 36px, for pane headers: 4px inside a frame, so radius-sm (10 - 4 = 6). */
-.sat-icon-button--sm {
-  width: 36px;
-  height: 36px;
-}
-.sat-icon-button--sm svg {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
 }
 .sat-icon-button--quiet {
   background: transparent;
-  box-shadow: none;
   color: var(--ink-muted);
 }
 .sat-icon-button--quiet:hover {
-  background: var(--control);
+  background: var(--sat-fill-hover);
+}
+.sat-icon-button[aria-pressed='true'] {
+  background: var(--sat-fill-pressed);
   color: var(--ink);
 }
-/* Where you are: the blue gradient with grain, like Quarn's app-icon rail. */
-.sat-icon-button--current {
-  background: var(--sat-grain), var(--sat-gradient);
-  box-shadow: none;
-  color: var(--ink-on-accent);
-}
 
-/* Toolbar: one track, items inside, thin dividers between groups ("Test workflow | Hide chat | 11:44"). */
+/* Track: controls that belong together, on a faint relative fill with no border, 4px padding.
+   The pressed item is raised: a white pill with a small shadow in light mode, a lighter pill in
+   dark. Selection is tone, not colour. */
 .sat-toolbar {
   display: inline-flex;
+  flex: none;
   align-items: center;
-  gap: var(--space-1);
-  height: 48px;
-  padding: var(--space-1);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--line);
-}
-.sat-toolbar__item {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-3);
-  height: 40px;
-  padding: 0 var(--space-5);
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  font: 600 13px/16px var(--font-sans);
-  color: var(--ink-body);
-  cursor: pointer;
-  transition: background-color var(--dur-fast) var(--ease-out);
-}
-.sat-toolbar__item:hover {
-  background: var(--control);
-}
-.sat-toolbar__item[aria-pressed='true'] {
-  background: var(--control-pressed);
-  color: var(--ink);
-}
-.sat-toolbar__item--icon {
-  width: 40px;
-  padding: 0;
-  justify-content: center;
-  color: var(--ink-muted);
-}
-.sat-toolbar__item--icon svg {
-  width: 18px;
-  height: 18px;
-}
-.sat-toolbar__sep {
-  width: 1px;
-  height: 22px;
-  margin: 0 var(--space-1);
-  background: var(--line-strong);
-}
-/* A live value: tinted blue up to how far along it is, as Quarn's timer. */
-.sat-toolbar__live {
-  --progress: 50%;
-  background: linear-gradient(
-    90deg,
-    color-mix(in oklab, var(--blue-vivid) 22%, transparent) var(--progress),
-    transparent var(--progress)
-  );
-  box-shadow: inset 0 0 0 1px var(--line);
-  color: var(--blue);
-}
-
-/* Segmented switch ("Editor | Executions | Tests"): the selected segment is raised, not coloured. */
-.sat-segmented {
-  display: inline-flex;
   gap: 2px;
   padding: var(--space-1);
   border-radius: var(--radius-md);
-  background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--line);
+  background: var(--sat-track);
 }
-.sat-segment {
-  height: 36px;
-  padding: 0 var(--space-5);
+.sat-toolbar__item {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: 28px;
+  min-width: 28px;
+  padding: 0 var(--space-3);
   border: 0;
   border-radius: var(--radius-sm);
-  font: 600 13px/16px var(--font-sans);
+  background: transparent;
+  font: 500 13px/16px var(--font-sans);
+  color: var(--ink-muted);
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.sat-toolbar__item:hover {
+  background: var(--sat-fill-hover);
+}
+.sat-toolbar__item[aria-pressed='true'],
+.sat-toolbar__item[aria-selected='true'] {
+  background: var(--sat-raised);
+  box-shadow: var(--sat-raised-edge);
+  color: var(--ink);
+}
+.sat-toolbar__item--icon {
+  width: 28px;
+  padding: 0;
+}
+.sat-toolbar__item--icon svg {
+  width: 16px;
+  height: 16px;
+}
+.sat-toolbar__sep {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  margin: 0 var(--space-1);
+  background: var(--sat-track-sep);
+}
+/* A live count in the title bar: "4 working" on a faint blue tint; the others in their state's
+   colour. */
+.sat-toolbar__live {
+  background: color-mix(in oklab, var(--blue-vivid) 14%, transparent);
+  color: var(--sat-state-text-working);
+}
+.sat-toolbar__live:hover {
+  background: color-mix(in oklab, var(--blue-vivid) 20%, transparent);
+}
+.sat-toolbar__item[data-state='needs-you'] {
+  color: var(--sat-state-text-needs-you);
+}
+.sat-toolbar__item[data-state='your-turn'] {
+  color: var(--sat-state-text-your-turn);
+}
+/* A repo tab: ✕ only on hover, floating over the tab's end on a small round surface, so a hidden
+   ✕ takes no room. */
+.sat-repo-tab {
+  position: relative;
+}
+.sat-repo-tab__close {
+  position: absolute;
+  top: 6px;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--sat-fill-pressed);
+  color: var(--ink-muted);
+  visibility: hidden;
+}
+.sat-repo-tab__close svg {
+  width: 10px;
+  height: 10px;
+}
+.sat-repo-tab:hover .sat-repo-tab__close,
+.sat-repo-tab.is-hover .sat-repo-tab__close {
+  visibility: visible;
+}
+
+/* Segmented switch ("Files | Changes"): a track whose items share its width. */
+.sat-segmented {
+  display: flex;
+  gap: 2px;
+  padding: var(--space-1);
+  border-radius: var(--radius-md);
+  background: var(--sat-track);
+}
+.sat-segment {
+  flex: 1;
+  height: 28px;
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-sm);
+  font: 500 13px/16px var(--font-sans);
   color: var(--ink-muted);
   background: transparent;
   cursor: pointer;
@@ -320,120 +398,108 @@
     color var(--dur-fast) var(--ease-out);
 }
 .sat-segment:hover {
-  color: var(--ink);
+  background: var(--sat-fill-hover);
 }
 .sat-segment[aria-selected='true'] {
-  background: var(--control-pressed);
+  background: var(--sat-raised);
+  box-shadow: var(--sat-raised-edge);
   color: var(--ink);
 }
 
-/* Status pill: Quarn's "Active". Blue only while something runs. */
-.sat-status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-3);
-  height: 36px;
-  padding: 0 var(--space-5);
-  border-radius: var(--radius-sm);
-  font: 600 13px/16px var(--font-sans);
-  color: var(--ink-on-accent);
-  background:
-    var(--sat-grain), linear-gradient(135deg in oklab, var(--blue-vivid), var(--blue-deep));
-  box-shadow: 0 0 24px color-mix(in oklab, var(--blue-vivid) 30%, transparent);
-}
-.sat-status-pill--idle {
-  color: var(--ink-muted);
-  background: var(--control);
-  box-shadow: inset 0 0 0 1px var(--line);
-}
-
-/* Chips: small labels. Colour only for needs-you. */
+/* Chips in a pane's header: the ticket's status and the pull request. 28px, 12px Medium, quiet
+   until hovered. */
 .sat-chip {
   display: inline-flex;
+  flex: none;
   align-items: center;
-  gap: var(--space-1);
-  height: 22px;
+  gap: var(--space-2);
+  height: 28px;
   padding: 0 var(--space-3);
-  border-radius: var(--radius-xs);
-  font: 600 12px/14px var(--font-sans);
+  border-radius: var(--radius-sm);
+  font: 500 12px/16px var(--font-sans);
   white-space: nowrap;
-  color: var(--ink-body);
-  background: var(--control);
-  box-shadow: inset 0 0 0 1px var(--line);
-}
-.sat-chip--amber {
-  background: var(--amber);
-  color: var(--ink-on-signal);
-  box-shadow: none;
-}
-.sat-chip--blue {
-  background: color-mix(in oklab, var(--blue-vivid) 18%, transparent);
-  color: var(--blue);
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--blue-vivid) 35%, transparent);
-}
-.sat-chip--outline {
-  background: transparent;
   color: var(--ink-muted);
-  box-shadow: inset 0 0 0 1px var(--line-strong);
+  background: transparent;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
 }
+.sat-chip:hover {
+  background: var(--sat-fill-hover);
+}
+/* The ticket's status dot, in the tracker's own colour (set inline). */
+.sat-chip__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+}
+.sat-chip--pr {
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+}
+.sat-chip svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+.sat-chip[data-pr='open'] svg {
+  color: var(--term-green);
+}
+.sat-chip[data-pr='draft'] svg {
+  color: var(--ink-faint);
+}
+.sat-chip[data-pr='merged'] svg {
+  color: var(--term-magenta);
+}
+.sat-chip[data-pr='closed'] svg {
+  color: var(--red);
+}
+/* A count, in the mono face on a faint fill: how many files a group holds. */
 .sat-count {
   display: inline-grid;
   place-items: center;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
-  border-radius: var(--radius-pill);
-  font: 600 11px/14px var(--font-sans);
-  color: var(--ink);
-  background: var(--control-pressed);
-}
-.sat-count--amber {
-  background: var(--amber);
-  color: var(--ink-on-signal);
+  flex: none;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-xs);
+  font: 400 11px/16px var(--font-mono);
+  color: var(--ink-muted);
+  background: var(--sat-fill-hover);
 }
 
-/* Agent status: a dot (or a check) and a word, never colour alone. */
+/* Agent status: an 8px dot in the state's colour, and a word. Never colour alone. */
 .sat-status {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font: 600 12px/16px var(--font-sans);
+  font: 500 12px/16px var(--font-sans);
   color: var(--ink-muted);
   white-space: nowrap;
 }
 .sat-status__dot {
+  flex: none;
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--status-idle);
-  flex: none;
+}
+.sat-status[data-state='working'] {
+  color: var(--sat-state-text-working);
 }
 .sat-status[data-state='working'] .sat-status__dot {
   background: var(--status-working);
-  box-shadow: 0 0 8px var(--status-working);
-  animation: sat-pulse 1.4s var(--ease-in-out) infinite;
 }
 .sat-status[data-state='needs-you'] {
-  color: var(--status-needs-you);
+  color: var(--sat-state-text-needs-you);
 }
 .sat-status[data-state='needs-you'] .sat-status__dot {
   background: var(--status-needs-you);
-  box-shadow: 0 0 10px var(--status-needs-you);
 }
 .sat-status[data-state='your-turn'] {
-  color: var(--status-your-turn);
+  color: var(--sat-state-text-your-turn);
 }
 .sat-status[data-state='your-turn'] .sat-status__dot {
-  width: 12px;
-  height: 12px;
-  background: none;
-  border-radius: 0;
-  flex: none;
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E")
-    center/contain no-repeat;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E")
-    center/contain no-repeat;
-  background-color: var(--status-your-turn);
+  background: var(--status-your-turn);
 }
 .sat-status[data-state='error'] {
   color: var(--status-error);
@@ -441,43 +507,21 @@
 .sat-status[data-state='error'] .sat-status__dot {
   background: var(--status-error);
 }
-@keyframes sat-pulse {
-  50% {
-    opacity: 0.35;
-    box-shadow: none;
-  }
-}
 
-/* Context meter: a hairline track with a bright segment and a soft glow at its end, like Quarn's
-   progress line. */
-.sat-meter {
-  position: relative;
-  display: inline-block;
-  width: 64px;
-  height: 2px;
-  border-radius: 1px;
-  background: var(--line-strong);
-}
-.sat-meter__fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  border-radius: 1px;
-  background: var(--ink);
-  box-shadow: 0 0 6px color-mix(in oklab, var(--ink) 60%, transparent);
-}
-
-/* Terminal pane: a frame with the tabs in it, and the terminal as the card. */
+/* Terminal pane: a card with the tabs, chips and buttons in its strip, and the terminal under a
+   hairline. The ring, by priority: needs you (orange, breathing), your turn (green), focus
+   (blue). A ring replaces the card's edge. */
 .sat-pane {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
   min-width: 0;
   min-height: 0;
-  padding: var(--space-1);
+  padding: var(--space-1) var(--space-1) 0;
   border-radius: var(--radius-md);
-  background: var(--surface-raised);
-  box-shadow: inset 0 0 0 1px var(--line);
+  background: var(--surface);
+  box-shadow: var(--sat-card-edge);
+  overflow: hidden;
   transition: box-shadow var(--dur-base) var(--ease-out);
 }
 .sat-pane.is-focused {
@@ -488,68 +532,54 @@
 }
 .sat-pane[data-attention='needs-you'] {
   box-shadow: var(--glow-needs-you);
-  animation: sat-breathe 2.4s var(--ease-in-out) infinite;
+  animation: sat-breathe 2.4s var(--ease-in-out) infinite alternate;
 }
+/* Breathing widens the halo by 4px and brightens it by 12%. */
 @keyframes sat-breathe {
-  50% {
+  to {
     box-shadow:
-      0 0 0 1px var(--amber),
-      0 0 42px color-mix(in oklab, var(--amber) 45%, transparent);
+      0 0 0 1px var(--status-needs-you),
+      0 0 16px color-mix(in oklab, var(--status-needs-you) 40%, transparent);
   }
 }
-/* Tabs, buttons and the terminal card all sit 4px inside the frame: 10 - 4 = 6. */
 .sat-pane__head {
   display: flex;
+  flex: none;
   align-items: center;
   gap: var(--space-1);
-  height: 36px;
+  height: 28px;
 }
 .sat-pane__body {
   flex: 1;
   min-height: 0;
-  padding: var(--space-4);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--line);
+  margin: var(--space-1) calc(-1 * var(--space-1)) 0;
+  padding: var(--space-3) var(--space-4) var(--space-1);
+  border-top: 1px solid var(--sat-separator);
   font: 400 12px/15px var(--font-mono);
   color: var(--term-white);
   overflow: hidden;
 }
-.sat-pane__foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  height: 24px;
-  padding: 0 var(--space-3);
-  font: 400 12px/16px var(--font-sans);
-  color: var(--ink-muted);
-}
-.sat-pane__msg {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-/* Tabs inside a pane: squircles, 36px, raised when selected. */
+/* Tabs in a pane's strip: 28px, an 8px state dot, the name, and ✕ (on the selected tab, or on
+   hover). */
 .sat-tabs {
   display: flex;
+  flex: 1;
   gap: 2px;
   min-width: 0;
-  flex: 1;
   overflow: hidden;
 }
 .sat-tab {
   display: inline-flex;
+  flex: none;
   align-items: center;
-  gap: var(--space-3);
-  height: 36px;
-  max-width: 200px;
-  padding: 0 var(--space-4);
+  gap: 6px;
+  height: 28px;
+  max-width: 220px;
+  padding: 0 var(--space-1) 0 var(--space-3);
   border: 0;
   border-radius: var(--radius-sm);
-  font: 600 13px/16px var(--font-sans);
+  font: 500 13px/16px var(--font-sans);
   color: var(--ink-muted);
   background: transparent;
   white-space: nowrap;
@@ -559,49 +589,77 @@
     color var(--dur-fast) var(--ease-out);
 }
 .sat-tab:hover {
-  color: var(--ink);
-  background: var(--control);
+  background: var(--sat-fill-hover);
 }
 .sat-tab[aria-selected='true'] {
   color: var(--ink);
-  background: var(--control-pressed);
+  background: var(--sat-fill-pressed);
 }
 .sat-tab__name {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.sat-tab[data-attention='needs-you'] {
-  color: var(--ink-on-signal);
-  background: var(--amber);
-  box-shadow: none;
+.sat-tab .sat-status {
+  gap: 0;
 }
-.sat-tab[data-attention='needs-you'] .sat-status__dot {
-  background: var(--ink-on-signal);
-  box-shadow: none;
+.sat-tab__close {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-xs);
+  visibility: hidden;
+}
+.sat-tab__close svg {
+  width: 11px;
+  height: 11px;
+}
+.sat-tab__close:hover {
+  background: var(--sat-fill-control);
+}
+.sat-tab[aria-selected='true'] .sat-tab__close,
+.sat-tab:hover .sat-tab__close {
+  visibility: visible;
 }
 
-/* Sidebar rows. */
+/* Sidebar rows (the file tree, the changes list): 26px, 13px, on the glass. */
 .sat-row {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  height: 32px;
-  padding: 0 var(--space-4);
+  gap: var(--space-2);
+  height: 26px;
+  padding: 0 var(--space-3) 0 6px;
   border-radius: var(--radius-sm);
+  font: 400 13px/16px var(--font-sans);
   color: var(--ink-muted);
   white-space: nowrap;
   cursor: pointer;
-  transition:
-    background-color var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out);
+  transition: background-color var(--dur-fast) var(--ease-out);
 }
 .sat-row:hover {
-  background: var(--control);
-  color: var(--ink);
+  background: var(--sat-fill-hover);
 }
 .sat-row[aria-selected='true'] {
-  background: var(--control-pressed);
+  background: var(--sat-fill-pressed);
   color: var(--ink);
+}
+.sat-row__chevron {
+  flex: none;
+  width: 12px;
+  color: var(--ink-faint);
+}
+.sat-row__chevron svg {
+  width: 12px;
+  height: 12px;
+}
+.sat-row__icon {
+  flex: none;
+  color: var(--ink-muted);
+}
+.sat-row__icon svg {
+  width: 14px;
+  height: 14px;
 }
 .sat-row__name {
   flex: 1;
@@ -610,7 +668,8 @@
   text-overflow: ellipsis;
 }
 .sat-row__git {
-  font: 600 11px/14px var(--font-mono);
+  flex: none;
+  font: 400 11px/14px var(--font-mono);
 }
 .sat-row__git--m {
   color: var(--amber-text);
@@ -618,115 +677,255 @@
 .sat-row__git--a {
   color: var(--term-green);
 }
-.sat-row svg {
-  width: 16px;
-  height: 16px;
+.sat-row__git--d {
+  color: var(--red);
+}
+/* A closed folder with changes beneath it. */
+.sat-row__changed {
   flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--amber-text);
+}
+.sat-row__folder {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink-faint);
+}
+.sat-row__stats {
+  flex: none;
+  font: 400 11px/14px var(--font-mono);
+}
+.sat-row__group {
+  font: 500 12px/16px var(--font-sans);
+  color: var(--ink-muted);
 }
 
-/* Agent card: one agent in the list, Quarn's "AI · Automate with agents" rows with the arrow key. */
+/* Stage checkbox, in the macOS manner: 14px, radius 4. Off: a faint relative fill and a quiet
+   relative border. On: the accent, a highlight along its top edge, a white 10px tick (a dash when
+   partly staged). */
+.sat-checkbox {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: var(--sat-check-fill);
+  box-shadow: inset 0 0 0 1px var(--sat-check-ring);
+  color: #ffffff;
+  cursor: pointer;
+}
+.sat-checkbox:hover {
+  box-shadow: inset 0 0 0 1px var(--sat-check-ring-hover);
+}
+.sat-checkbox:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+.sat-checkbox[aria-checked='true'],
+.sat-checkbox[aria-checked='mixed'] {
+  background: var(--blue-vivid);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+.sat-checkbox svg {
+  width: 10px;
+  height: 10px;
+}
+
+/* A picker row (the New agent dialog's tickets): status dot, key in mono, title, list. */
 .sat-agent {
   display: flex;
   align-items: center;
-  gap: var(--space-4);
-  padding: var(--space-3) var(--space-4);
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background-color var(--dur-fast) var(--ease-out);
 }
-.sat-agent:hover {
-  background: var(--control);
+.sat-agent:hover,
+.sat-agent.is-hover {
+  background: var(--sat-fill-hover);
 }
-.sat-agent[aria-selected='true'] {
-  background: var(--control-pressed);
-}
-/* The state lines up in one column whatever it is: a dot, a check or a chip. */
-.sat-agent__state {
+.sat-agent__key {
   flex: none;
-  min-width: 76px;
-  display: flex;
-  justify-content: flex-end;
-}
-.sat-agent__icon {
+  width: 84px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 400 12px/16px var(--font-mono);
   color: var(--ink-muted);
-  flex: none;
-}
-.sat-agent__text {
-  flex: 1;
-  min-width: 0;
-  display: grid;
-  gap: 2px;
 }
 .sat-agent__name {
-  font: 400 15px/20px var(--font-sans);
-  color: var(--ink);
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font: 400 14px/20px var(--font-sans);
+  color: var(--ink);
 }
 .sat-agent__meta {
+  flex: none;
   font: 400 12px/16px var(--font-sans);
-  color: var(--ink-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: var(--ink-faint);
+}
+.sat-agent__group {
+  padding: var(--space-3) var(--space-3) var(--space-1);
+  font: 500 11px/14px var(--font-sans);
+  color: var(--ink-faint);
 }
 
-/* Gradient card: the one coloured surface on a screen (the selected agent's progress, onboarding). */
+/* The agent card: the focused agent at the foot of the sidebar, the one coloured surface on a
+   screen. A deep-to-near-black gradient (155deg, OKLab) with the state's bright colour pooling
+   from the lower left; white text in both themes. Set the state with data-state. */
 .sat-gradient-card {
+  --sat-bright: #1c69e3;
+  --sat-deep: #072869;
+  --sat-end: #040814;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
   padding: var(--space-3);
   border-radius: var(--radius-lg);
   color: var(--ink-on-accent);
-  background: var(--sat-grain), var(--sat-gradient);
+  background:
+    linear-gradient(
+      30deg in oklab,
+      color-mix(in oklab, var(--sat-bright) 70%, transparent) 0%,
+      color-mix(in oklab, var(--sat-bright) 0%, transparent) 85%
+    ),
+    linear-gradient(155deg in oklab, var(--sat-deep) 0%, var(--sat-end) 100%);
   overflow: hidden;
 }
-.sat-gradient-card .sat-meta {
-  color: color-mix(in oklab, var(--ink-on-accent) 60%, transparent);
+.sat-gradient-card[data-state='needs-you'] {
+  --sat-bright: #ff8a3d;
+  --sat-deep: #4a1d05;
+  --sat-end: #0d0603;
 }
-/* Its inset well: darker glass inside the gradient, 28 - 12 = 16. */
-/* 8px inside the card: 14 - 8 = 6. */
+.sat-gradient-card[data-state='your-turn'] {
+  --sat-bright: #2f9e57;
+  --sat-deep: #0b3a1c;
+  --sat-end: #030b06;
+}
+.sat-gradient-card__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font: 400 12px/16px var(--font-sans);
+  color: rgba(255, 255, 255, 0.62);
+}
+.sat-gradient-card__context {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: rgba(255, 255, 255, 0.9);
+}
+.sat-gradient-card__context svg {
+  width: 12px;
+  height: 12px;
+}
+.sat-gradient-card__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 500 15px/20px var(--font-sans);
+  color: #ffffff;
+}
+.sat-gradient-card__activity {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 400 12px/16px var(--font-sans);
+  color: rgba(255, 255, 255, 0.72);
+}
+/* The meter: a darker glass well (black 28%, a white 6% ring), radius 6, with a 2px hairline
+   track and a white fill that glows at its end. */
 .sat-gradient-card__well {
-  margin-top: var(--space-3);
-  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding: var(--space-3);
   border-radius: var(--radius-sm);
   background: rgba(0, 0, 0, 0.28);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
+.sat-meter {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 2px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.18);
+}
+.sat-meter__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 1px;
+  background: #ffffff;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.6);
+}
+.sat-meter__labels {
+  display: flex;
+  justify-content: space-between;
+  font: 400 11px/14px var(--font-sans);
+  color: rgba(255, 255, 255, 0.55);
+}
+.sat-meter__labels b {
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.9);
+}
 
-/* Glass: a floating panel over the grid (palette, menus). The window itself is blurred by macOS;
-   the panel is the ground at high opacity, with a float shadow. */
+/* A dialog (the New agent picker, settings): its own solid surface, radius-lg 14 with 8px
+   padding, over the window frosted (an 18px blur, the ground at 25%). */
 .sat-glass {
-  /* 8px in, so rows and the input are radius-sm: 14 - 8 = 6. */
   border-radius: var(--radius-lg);
   padding: var(--space-3);
-  background: color-mix(in oklab, var(--surface-raised) 88%, transparent);
-  -webkit-backdrop-filter: blur(24px);
-  backdrop-filter: blur(24px);
+  background: var(--surface-raised);
   box-shadow:
-    inset 0 0 0 1px var(--line),
+    inset 0 0 0 1px var(--sat-separator),
     var(--shadow-float);
+}
+.sat-frost {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in oklab, var(--ground) 25%, transparent);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
 }
 .sat-input {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  height: 48px;
-  padding: 0 var(--space-4);
+  height: 28px;
+  padding: 0 var(--space-3);
   border-radius: var(--radius-sm);
-  background: var(--control);
-  box-shadow: inset 0 0 0 1px var(--line);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--sat-fill-strong);
   color: var(--ink-faint);
-  font: 400 14px/20px var(--font-sans);
+  font: 400 13px/16px var(--font-sans);
+}
+.sat-input svg {
+  width: 14px;
+  height: 14px;
 }
 
-/* Editor syntax colours. */
+/* Editor syntax colours: the terminal's palette, in One Dark's roles. */
 .sat-code {
   font: 400 12px/20px var(--font-mono);
   color: var(--ink-body);
 }
 .sat-code .k {
-  color: var(--blue);
+  color: var(--term-magenta);
+}
+.sat-code .f {
+  color: var(--term-blue);
 }
 .sat-code .s {
   color: var(--term-green);

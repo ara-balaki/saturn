@@ -1397,10 +1397,15 @@ impl Workspace {
         let selected = tab == cell.active;
         let state = self.tab_state(tab, cx);
         let name = self.tab_name(tab, cx);
-        // A tab hidden behind another that needs you turns amber, so it can't be missed.
+        // A tab hidden behind another that needs you turns orange, so it can't be missed.
         let calling = !selected && state == AgentState::NeedsYou && self.unseen.contains(&tab);
+        let on_orange = if saturn_design::appearance() == saturn_design::Appearance::Dark {
+            theme::color(color::INK_ON_SIGNAL)
+        } else {
+            gpui_kit::white()
+        };
         let (background, foreground) = match (calling, selected) {
-            (true, _) => (theme::color(color::AMBER), theme::color(color::INK_ON_SIGNAL)),
+            (true, _) => (theme::color(color::STATUS_NEEDS_YOU), on_orange),
             (false, true) => (theme::fill_pressed(), theme::color(color::INK)),
             (false, false) => (gpui_kit::transparent_black(), theme::color(color::INK_MUTED)),
         };
