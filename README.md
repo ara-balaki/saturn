@@ -16,14 +16,20 @@ commit checks and formatting Markdown/JSON.
 pnpm install          # commit hooks and formatters
 pnpm dev              # build and run Saturn (cargo run -p saturn)
 pnpm health           # format check, clippy, tests, unused deps, licences
+pnpm dist             # build Saturn.app (signed for this Mac) in target/release
+pnpm install-app      # the same, then put it in /Applications
 ```
 
-| Crate                    | What it holds                                                                |
-| ------------------------ | ---------------------------------------------------------------------------- |
-| `crates/saturn`          | The app: window, title bar, grid, shortcuts                                  |
-| `crates/saturn-terminal` | Shells in ptys, alacritty's engine, Claude Code's signals, the terminal view |
-| `crates/saturn-core`     | Pure logic: grid layout, agent states, OSC 7501 parsing                      |
-| `crates/saturn-design`   | Design tokens compiled from `design/tokens.json`                             |
+Saturn.app reopens each project's grid where it was left, offers to resume the Claude sessions that
+were running (the command is typed, not run), and posts a macOS notification when an agent needs you
+while Saturn is in the background.
+
+| Crate                    | What it holds                                                                 |
+| ------------------------ | ----------------------------------------------------------------------------- |
+| `crates/saturn`          | The app: window, title bar, grid, shortcuts                                   |
+| `crates/saturn-terminal` | Shells in ptys, alacritty's engine, Claude Code's signals, the terminal view  |
+| `crates/saturn-core`     | Logic without UI: grid layout, agent states, OSC 7501, files, git, formatters |
+| `crates/saturn-design`   | Design tokens compiled from `design/tokens.json`                              |
 
 ## Claude Code integration
 
