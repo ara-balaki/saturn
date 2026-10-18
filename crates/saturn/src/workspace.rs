@@ -759,14 +759,22 @@ impl Workspace {
         let toggle = |id: &'static str, icon: &str, on: bool| {
             chrome::icon_tile(id, icon, if on { TileKind::Plain } else { TileKind::Off }, 28.)
         };
+        // The title bar is drawn by Saturn, so the empty parts of it pass a double-click on to
+        // macOS, which zooms or minimizes as System Settings says.
+        let empty = |id: &'static str| {
+            div().id(id).h_full().on_click(|event: &ClickEvent, window, _| {
+                if event.click_count() == 2 {
+                    window.titlebar_double_click();
+                }
+            })
+        };
         div()
             .flex()
             .items_center()
-            .gap(len(space::SPACE_5))
             .h(len(TITLEBAR_HEIGHT))
-            .pl(len(TRAFFIC_LIGHTS_WIDTH))
             .pr(len(space::SPACE_1))
             .text_size(px(12.))
+            .child(empty("titlebar-lights").flex_none().w(len(TRAFFIC_LIGHTS_WIDTH)))
             .child(
                 div()
                     .flex()
@@ -784,12 +792,13 @@ impl Workspace {
                         },
                     ))),
             )
-            .child(div().flex_1())
+            .child(empty("titlebar-middle").flex_1())
             .children(summary.into_iter().filter(|(n, _, _)| *n > 0).map(|(n, state, label)| {
                 div()
                     .id(label)
                     .flex()
                     .items_center()
+                    .ml(len(space::SPACE_5))
                     .gap(len(6.))
                     .cursor_pointer()
                     .text_color(if state == AgentState::Working {
@@ -804,11 +813,11 @@ impl Workspace {
             }))
             .child(
                 // The empty grid has its own primary button; one per screen.
-                chrome::button("new-terminal", "New terminal", Some("⌘T"), !self.layout.is_empty()).on_click(
-                    cx.listener(|this, _, window, cx| {
+                chrome::button("new-terminal", "New terminal", Some("⌘T"), !self.layout.is_empty())
+                    .ml(len(space::SPACE_5))
+                    .on_click(cx.listener(|this, _, window, cx| {
                         this.open_terminal(Placement::Tab, window, cx);
-                    }),
-                ),
+                    })),
             )
     }
 

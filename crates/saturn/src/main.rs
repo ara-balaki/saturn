@@ -12,8 +12,8 @@ mod workspace;
 use std::borrow::Cow;
 
 use gpui_kit::{
-    App, AppContext as _, Bounds, KeyBinding, Menu, MenuItem, TitlebarOptions, WindowBounds, WindowOptions, actions,
-    point, px, size,
+    App, AppContext as _, Bounds, KeyBinding, Menu, MenuItem, TitlebarOptions, WindowAppearance, WindowBounds,
+    WindowOptions, actions, point, px, size,
 };
 
 use crate::workspace::{
@@ -101,6 +101,8 @@ fn main() {
     gpui_kit::application().with_assets(assets::Assets).run(move |cx| {
         gpui_kit::init(cx);
         theme::install_component_theme(cx);
+        // Saturn is dark only: without this, macOS in light mode draws a pale window edge.
+        cx.set_window_appearance(Some(WindowAppearance::Dark));
         cx.text_system()
             .add_fonts(FONTS.iter().map(|font| Cow::Borrowed(*font)).collect())
             .expect("the bundled fonts load");
