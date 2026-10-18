@@ -10,6 +10,7 @@ mod editor_view;
 mod files_view;
 mod github;
 mod languages;
+mod menu_bar;
 mod notify;
 mod session;
 mod settings;
@@ -153,6 +154,28 @@ fn main() {
         // Automated runs (screenshots, spikes) must not take the keyboard from whatever the user is doing.
         if !spike::is_automated() {
             cx.activate(true);
+            show_menu_bar(cx);
         }
     });
+}
+
+/// Saturn's menu bar item. A click brings Saturn forward on the next agent that needs you.
+fn show_menu_bar(cx: &mut App) {
+    let (clicks, clicked) = async_channel::unbounded();
+    menu_bar::on_click(clicks);
+    menu_bar::set_shown(settings::load().menu_bar);
+    cx.spawn(async move |cx| {
+        while clicked.recv().await.is_ok() {
+            cx.update(|cx| {
+                cx.activate(true);
+                if let Some(window) = cx.windows().into_iter().next() {
+                    let _ = window.update(cx, |_, window, cx| {
+                        window.activate_window();
+                        window.dispatch_action(Box::new(NextAttention), cx);
+                    });
+                }
+            });
+        }
+    })
+    .detach();
 }

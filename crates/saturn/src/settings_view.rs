@@ -214,6 +214,13 @@ pub fn open(workspace: WeakEntity<Workspace>, ticket_command: String, window: &m
                 settings.notifications,
                 change(workspace.clone(), |settings, on| settings.notifications = on),
             ))
+            .child(setting_row(
+                "menu-bar",
+                "Menu bar icon",
+                "Saturn in the menu bar, with how many agents are waiting for you, so you see it while Saturn is hidden. Clicking it takes you to the next one.",
+                settings.menu_bar,
+                change(workspace.clone(), |settings, on| settings.menu_bar = on),
+            ))
             .child(clickup_section(&workspace, &token, &command, cx))
     });
 }

@@ -31,7 +31,7 @@ use crate::files_view::{FilesEvent, FilesView};
 use crate::session::{self, SavedGrid, SavedTab};
 use crate::settings::{self, AppearanceSetting, Settings};
 use crate::theme::{self, len};
-use crate::{dock, github, notify, settings_view, ticket_picker};
+use crate::{dock, github, menu_bar, notify, settings_view, ticket_picker};
 
 actions!(
     saturn,
@@ -145,6 +145,8 @@ pub struct Workspace {
     session_names: HashMap<TabId, String>,
     /// The number on the Dock icon right now.
     badge: usize,
+    /// Agents waiting for you, as last told to the menu bar.
+    waiting: usize,
     /// The sidebar's tree and changes, per repository or worktree it has shown, so switching back
     /// is instant and each keeps watching its folder.
     roots: HashMap<PathBuf, RootViews>,
@@ -413,6 +415,7 @@ impl Workspace {
             bridge,
             session_names: HashMap::new(),
             badge: 0,
+            waiting: 0,
         }
     }
 
@@ -694,11 +697,14 @@ impl Workspace {
     }
 
     pub fn change_settings(&mut self, change: impl FnOnce(&mut Settings), cx: &mut Context<Self>) {
-        let appearance = self.settings.appearance;
+        let (appearance, menu_bar) = (self.settings.appearance, self.settings.menu_bar);
         change(&mut self.settings);
         settings::save(&self.settings);
         if self.settings.appearance != appearance {
             theme::apply(self.settings.appearance, cx);
+        }
+        if self.settings.menu_bar != menu_bar {
+            menu_bar::set_shown(self.settings.menu_bar);
         }
         cx.notify();
     }
@@ -886,12 +892,14 @@ impl Workspace {
                 } else if !asks {
                     self.unseen.remove(&tab);
                 }
+                self.report_attention(window, cx);
                 cx.notify();
             }
             TerminalViewEvent::Bell => {
                 if !self.is_looking_at(tab, window) {
                     self.unseen.insert(tab);
                 }
+                self.report_attention(window, cx);
                 cx.notify();
             }
             TerminalViewEvent::TitleChanged => cx.notify(),
@@ -922,12 +930,27 @@ impl Workspace {
         notify::post(&format!("tab-{}", tab.0), &title, &body, sound);
     }
 
+    /// Tells the Dock and the menu bar how many agents wait for you. Called when states change,
+    /// not only on redraw: macOS doesn't redraw a hidden window, which is when these matter.
+    fn report_attention(&mut self, window: &Window, cx: &gpui_kit::App) {
+        if self.unseen.len() != self.badge {
+            self.badge = self.unseen.len();
+            dock::set_badge(self.badge);
+        }
+        let waiting = self.terminals.values().filter(|view| view.read(cx).state.asks_for_you()).count();
+        if waiting != self.waiting {
+            self.waiting = waiting;
+            menu_bar::set_waiting(window.window_handle().window_id().as_u64(), waiting);
+        }
+    }
+
     fn forget(&mut self, tab: TabId, window: &mut Window, cx: &mut Context<Self>) {
         self.terminals.remove(&tab);
         self.unseen.remove(&tab);
         self.names.remove(&tab);
         self.checkouts.remove(&tab);
         self.layout.remove_tab(tab);
+        self.report_attention(window, cx);
         self.after_layout_change(window, cx);
     }
 
@@ -1503,11 +1526,8 @@ impl Workspace {
 
 impl Render for Workspace {
     #[expect(clippy::too_many_lines, reason = "the window's action table, one line per action")]
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.unseen.len() != self.badge {
-            self.badge = self.unseen.len();
-            dock::set_badge(self.badge);
-        }
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.report_attention(window, cx);
         div()
             .size_full()
             .flex()

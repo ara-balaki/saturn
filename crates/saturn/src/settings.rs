@@ -22,6 +22,8 @@ pub struct Settings {
     pub format_on_save: bool,
     /// A notification when an agent needs you or finishes while Saturn is in the background.
     pub notifications: bool,
+    /// Saturn's item in the menu bar, with how many agents are waiting for you.
+    pub menu_bar: bool,
     pub appearance: AppearanceSetting,
     /// What starting an agent on a ticket does, per project folder.
     pub projects: std::collections::HashMap<PathBuf, ProjectSettings>,
@@ -91,6 +93,7 @@ impl Default for Settings {
             rename_sessions_from_commands: true,
             format_on_save: true,
             notifications: true,
+            menu_bar: true,
             appearance: AppearanceSetting::System,
             projects: std::collections::HashMap::new(),
         }

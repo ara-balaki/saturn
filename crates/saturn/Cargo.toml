@@ -94,12 +94,27 @@ tempfile.workspace = true
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = [
   "std",
+  "block2",
   "NSApplication",
+  "NSBezierPath",
+  "NSButton",
+  "NSCell",
+  "NSColor",
+  "NSControl",
   "NSDockTile",
+  "NSGraphics",
+  "NSImage",
   "NSResponder",
+  "NSStatusBar",
+  "NSStatusBarButton",
+  "NSStatusItem",
+  "NSView",
 ] }
 objc2-foundation = { version = "0.3", default-features = false, features = [
   "std",
+  "NSAffineTransform",
+  "NSGeometry",
+  "NSObject",
   "NSString",
   "NSBundle",
   "NSError",
