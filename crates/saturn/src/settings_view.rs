@@ -184,6 +184,7 @@ pub fn open(workspace: WeakEntity<Workspace>, ticket_command: String, window: &m
         };
         dialog
             .title("Settings")
+            .bg(chrome::dialog_surface())
             .w(px(480.))
             .child(appearance_row(&workspace, settings.appearance))
             .child(setting_row(

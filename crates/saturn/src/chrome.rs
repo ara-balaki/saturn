@@ -70,7 +70,7 @@ pub fn track() -> gpui_kit::Div {
         .gap(len(space::SPACE_1))
         .p(len(space::SPACE_1))
         .rounded(len(radius::RADIUS_MD))
-        .bg(theme::color(color::SURFACE))
+        .bg(theme::color(color::SURFACE).opacity(theme::GLASS_PANEL))
         .border_1()
         .border_color(theme::color(color::LINE))
 }
@@ -186,6 +186,11 @@ pub fn headline(light: &str, bold: &str, size: f32) -> impl IntoElement {
         .child(div().font_weight(FontWeight::SEMIBOLD).child(bold.to_owned()))
 }
 
+/// A dialog's own surface: solid, since the theme's background is clear for the glass.
+pub fn dialog_surface() -> gpui_kit::Hsla {
+    theme::color(color::SURFACE_RAISED)
+}
+
 /// Frosted glass over the whole window: what's drawn under it, blurred and faintly tinted with the
 /// ground. Drawn under an open dialog, so the dialog floats over a frosted window as macOS sheets
 /// and popovers do.
@@ -239,27 +244,14 @@ pub fn sidebar(
     panel().child(header).child(switch).children(strip).child(well().child(content)).into_any_element()
 }
 
-/// One repo in the sidebar's list: its name and, below, its branch and folder.
-pub fn repo_row(
-    id: impl Into<ElementId>,
-    name: &str,
-    detail: &str,
-    selected: bool,
-) -> gpui_kit::Stateful<gpui_kit::Div> {
+/// The sidebar's header: the folder it shows, its branch and path below, and an action.
+pub fn sidebar_header(name: &str, detail: &str, action: impl IntoElement) -> impl IntoElement {
     div()
-        .id(id)
-        .group("repo")
         .flex()
         .items_center()
         .gap(len(space::SPACE_3))
         .pl(len(space::SPACE_1))
-        .pr(len(space::SPACE_1))
-        .py(px(2.))
-        .rounded(len(radius::RADIUS_SM))
-        .cursor_pointer()
-        .when(selected, |row| row.bg(theme::color(color::CONTROL)))
-        .when(!selected, |row| row.hover(|s| s.bg(theme::color(color::CONTROL))))
-        .child(icon_button("repo-icon", "folder", false))
+        .child(icon_button("project", "folder", false))
         .child(
             div()
                 .flex_1()
@@ -269,7 +261,7 @@ pub fn repo_row(
                         .text_size(px(15.))
                         .line_height(px(20.))
                         .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme::color(if selected { color::INK } else { color::INK_MUTED }))
+                        .text_color(theme::color(color::INK))
                         .truncate()
                         .child(name.to_owned()),
                 )
@@ -282,6 +274,7 @@ pub fn repo_row(
                         .child(detail.to_owned()),
                 ),
         )
+        .child(action)
 }
 
 /// What the grid shows with no terminal open: the dot grid, a headline in two weights, one

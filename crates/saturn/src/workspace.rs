@@ -23,7 +23,7 @@ use saturn_core::session_name::rename_for_prompt;
 use saturn_design::{color, radius, shadow, space};
 use saturn_terminal::view::{TerminalView, TerminalViewEvent};
 
-use crate::changes_view::{self, ChangesEvent, ChangesView};
+use crate::changes_view::{ChangesEvent, ChangesView};
 use crate::chrome;
 use crate::clickup;
 use crate::editor_view::EditorView;
@@ -1462,6 +1462,7 @@ impl Workspace {
                             .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx))),
                     ),
             )
+            .child(self.render_repo_tabs(cx))
             .child(empty("titlebar-middle").flex_1())
             .children(activity)
             .child(
@@ -1483,74 +1484,78 @@ impl Workspace {
             }))
     }
 
-    /// The window's repos, top of the sidebar. The selected one shows the folder the sidebar is on
-    /// (a ticket's worktree, when following a pane in one) and the follow switch; any other can be
-    /// selected, or taken out of the list. Then a way to add one.
-    fn render_repos(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// The sidebar's header: the folder it shows (the selected repo, or a ticket's worktree when
+    /// following a pane in one), and the follow switch.
+    fn render_sidebar_header(&self, cx: &mut Context<Self>) -> AnyElement {
         let home = std::env::var_os("HOME").map(PathBuf::from);
-        let short = |path: &Path| match home.as_deref().and_then(|home| path.strip_prefix(home).ok()) {
+        let short = match home.as_deref().and_then(|home| self.root.strip_prefix(home).ok()) {
             Some(rest) => format!("~/{}", rest.display()),
-            None => path.display().to_string(),
+            None => self.root.display().to_string(),
         };
+        let name = self.root.file_name().map_or_else(|| "/".to_owned(), |name| name.to_string_lossy().into_owned());
+        let branch = self.roots.get(&self.root).and_then(|views| views.branch.clone());
+        let detail = branch.map_or_else(|| short.clone(), |branch| format!("{branch} · {short}"));
+        let follow = chrome::icon_button("follow-pane", if self.follow_pane { "locate-fixed" } else { "locate" }, true)
+            .when(self.follow_pane, |button| button.bg(theme::color(color::CONTROL_PRESSED)))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.follow_pane = !this.follow_pane;
+                this.sync_root(window, cx);
+                cx.notify();
+            }));
+        chrome::sidebar_header(&name, &detail, follow).into_any_element()
+    }
+
+    /// The window's repos, in the title bar: the selected one raised, ✕ on hover to take one out
+    /// (its panes stay), then a button to add one.
+    fn render_repo_tabs(&self, cx: &mut Context<Self>) -> AnyElement {
         let removable = self.projects.len() > 1;
-        let mut list = div().flex().flex_col().gap(px(2.));
+        let mut track = chrome::track();
         for (index, project) in self.projects.iter().enumerate() {
             let selected = *project == self.project;
-            let shown = if selected { &self.root } else { project };
-            let name = shown.file_name().map_or_else(|| "/".to_owned(), |name| name.to_string_lossy().into_owned());
-            let branch = self.roots.get(shown).and_then(|views| views.branch.clone());
-            let detail = branch.map_or_else(|| short(shown), |branch| format!("{branch} · {}", short(shown)));
-            let mut row = chrome::repo_row(("repo", index), &name, &detail, selected);
-            if selected {
-                row = row.child(
-                    chrome::icon_button("follow-pane", if self.follow_pane { "locate-fixed" } else { "locate" }, true)
-                        .when(self.follow_pane, |button| button.bg(theme::color(color::CONTROL_PRESSED)))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.follow_pane = !this.follow_pane;
-                            this.sync_root(window, cx);
-                            cx.notify();
-                        })),
-                );
-            } else {
-                let picked = project.clone();
-                row = row
-                    .on_click(cx.listener(move |this, _, window, cx| this.select_project(picked.clone(), window, cx)));
-                if removable {
-                    let removed = project.clone();
-                    row = row.child(
-                        chrome::icon_button(("remove-repo", index), "x", true)
-                            .invisible()
-                            .group_hover("repo", gpui_kit::Styled::visible)
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                cx.stop_propagation();
-                                this.remove_project(&removed, window, cx);
-                            })),
-                    );
-                }
-            }
-            list = list.child(row);
+            let name = project.file_name().map_or_else(|| "/".to_owned(), |name| name.to_string_lossy().into_owned());
+            let picked = project.clone();
+            let removed = project.clone();
+            // Each tab its own hover group, so only the one under the mouse shows its ✕.
+            let group = gpui_kit::SharedString::from(format!("repo-{index}"));
+            track = track.child(
+                chrome::track_item(("repo", index), selected)
+                    .group(group.clone())
+                    .pl(len(space::SPACE_3))
+                    .pr(len(if removable { space::SPACE_1 } else { space::SPACE_3 }))
+                    .text_color(theme::color(if selected { color::INK } else { color::INK_MUTED }))
+                    .child(name)
+                    .when(removable, |item| {
+                        item.child(
+                            div()
+                                .id(("remove-repo", index))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .size(px(16.))
+                                .rounded(len(radius::RADIUS_XS))
+                                .invisible()
+                                .group_hover(group, gpui_kit::Styled::visible)
+                                .hover(|s| s.bg(theme::color(color::CONTROL_HOVER)))
+                                .child(chrome::icon("x", 12., theme::color(color::INK_FAINT)))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    cx.stop_propagation();
+                                    this.remove_project(&removed, window, cx);
+                                })),
+                        )
+                    })
+                    .on_click(cx.listener(move |this, _, window, cx| this.select_project(picked.clone(), window, cx))),
+            );
         }
-        list.child(
-            div()
-                .id("add-repo")
-                .flex()
-                .items_center()
-                .gap(len(space::SPACE_2))
-                .h(px(24.))
-                .px(len(space::SPACE_2))
-                .rounded(len(radius::RADIUS_SM))
-                .cursor_pointer()
-                .text_size(px(12.))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(theme::color(color::INK_FAINT))
-                .hover(|s| s.bg(theme::color(color::CONTROL)).text_color(theme::color(color::INK_MUTED)))
-                .child(chrome::icon("plus", 14., theme::color(color::INK_FAINT)))
-                .child("Add repo…")
-                .child(div().flex_1())
-                .child("⌘O")
-                .on_click(cx.listener(|_, _, window, cx| Self::open_project(window, cx))),
-        )
-        .into_any_element()
+        div()
+            .flex()
+            .items_center()
+            .gap(len(space::SPACE_2))
+            .child(track)
+            .child(
+                chrome::button("add-repo", "Add repo", Some("⌘O"), false)
+                    .on_click(cx.listener(|_, _, window, cx| Self::open_project(window, cx))),
+            )
+            .into_any_element()
     }
 
     /// Sidebar | (editor / grid), with draggable dividers. The panels stay in the same place in
@@ -1571,13 +1576,10 @@ impl Workspace {
         let switch = self.render_sidebar_switch(cx);
         let root = self.current_root();
         let (files, changes) = (root.files.clone(), root.changes.clone());
-        let repos = self.render_repos(cx);
+        let header = self.render_sidebar_header(cx);
         let sidebar = match self.sidebar_tab {
-            SidebarTab::Files => chrome::sidebar(repos, switch, None, files),
-            SidebarTab::Changes => {
-                let strip = changes_view::scope_strip(&changes, cx).into_any_element();
-                chrome::sidebar(repos, switch, Some(strip), changes)
-            }
+            SidebarTab::Files => chrome::sidebar(header, switch, None, files),
+            SidebarTab::Changes => chrome::sidebar(header, switch, None, changes),
         };
         div().flex_1().min_h_0().child(
             h_resizable("workbench")

@@ -13,6 +13,16 @@ const ICONS: &[(&str, &[u8])] = &[
     ("icons/git-compare.svg", include_bytes!("../assets/icons/git-compare.svg")),
     ("icons/locate.svg", include_bytes!("../assets/icons/locate.svg")),
     ("icons/locate-fixed.svg", include_bytes!("../assets/icons/locate-fixed.svg")),
+    ("icons/square-dot.svg", include_bytes!("../assets/icons/square-dot.svg")),
+    ("icons/square-plus.svg", include_bytes!("../assets/icons/square-plus.svg")),
+    ("icons/square-minus.svg", include_bytes!("../assets/icons/square-minus.svg")),
+    ("icons/square-arrow-right.svg", include_bytes!("../assets/icons/square-arrow-right.svg")),
+    ("icons/square-x.svg", include_bytes!("../assets/icons/square-x.svg")),
+    ("icons/git-branch.svg", include_bytes!("../assets/icons/git-branch.svg")),
+    ("icons/git-pull-request.svg", include_bytes!("../assets/icons/git-pull-request.svg")),
+    ("icons/git-pull-request-draft.svg", include_bytes!("../assets/icons/git-pull-request-draft.svg")),
+    ("icons/git-pull-request-closed.svg", include_bytes!("../assets/icons/git-pull-request-closed.svg")),
+    ("icons/git-merge.svg", include_bytes!("../assets/icons/git-merge.svg")),
 ];
 
 pub struct Assets;

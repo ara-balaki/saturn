@@ -47,7 +47,10 @@ fn component_theme(appearance: Appearance) -> gpui_kit::component::ThemeConfig {
 
     let hex = |token: Token| hex(token, appearance);
     let colors = serde_json::json!({
-        "background": hex(c::SURFACE),
+        // The root view paints this under the whole window; clear, so the glass (the desktop's
+        // blur through the ground and the panes) shows. Dialogs, which also default to it, set
+        // their own surface (chrome::dialog_surface).
+        "background": "#00000000",
         "foreground": hex(c::INK),
         "border": hex(c::LINE),
         "input.border": hex(c::LINE_STRONG),

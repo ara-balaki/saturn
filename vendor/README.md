@@ -1,8 +1,9 @@
 # Vendored GPUI
 
 `gpui-pre` and `gpui-pre-apple` 0.3.9 from crates.io (Apache-2.0, see each crate's
-`LICENSE-APACHE`), with two patches: a **backdrop blur** primitive, so a panel can show what's
-under it frosted, and drop shadows that stay outside their element. The root `Cargo.toml` points
+`LICENSE-APACHE`), with three patches: a **backdrop blur** primitive, so a panel can show what's
+under it frosted; drop shadows that stay outside their element; and translucent layers that stack
+instead of adding up, so a see-through window stays see-through. The root `Cargo.toml` points
 Saturn at these copies with `[patch.crates-io]`; the workspace excludes them, so Saturn's lints and
 formatter leave them alone. `gpui-pre`'s examples were left out.
 
@@ -16,7 +17,8 @@ written against this version of GPUI. Every change is marked "Saturn's patch":
 - `gpui-pre/src/window.rs`: `Window::paint_backdrop_blur`.
 - `gpui-pre-apple/build.rs`: exports `BackdropBlur` and `BackdropBlurInputIndex` to the header.
 - `gpui-pre-apple/src/metal_renderer.rs`: the layer's texture stays readable; a blur batch copies
-  what was drawn so far into a mipmapped texture and draws the blurs from it.
+  what was drawn so far into a mipmapped texture and draws the blurs from it; and the pipelines
+  blend alpha "over" (`OneMinusSourceAlpha`) instead of adding it.
 - `gpui-pre-apple/src/shaders.metal`: `backdrop_blur_vertex` and `backdrop_blur_fragment`; and
   `shadow_fragment` clips a drop shadow to outside its element, as CSS does, so shadows don't
   tint translucent panels.

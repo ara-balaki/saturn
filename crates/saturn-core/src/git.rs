@@ -77,6 +77,79 @@ pub fn parse_porcelain(raw: &[u8]) -> Vec<(PathBuf, FileState)> {
     files
 }
 
+/// How much of a changed file is staged for the next commit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Staged {
+    No,
+    /// Some of its changes are staged, some aren't.
+    Partly,
+    Yes,
+}
+
+/// A changed file as the Changes list shows it: its path from the repository's top, whether git
+/// tracks it yet, and how much of it is staged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Change {
+    pub path: String,
+    pub untracked: bool,
+    pub staged: Staged,
+}
+
+/// Reads `git status --porcelain=v1 -z` for staging: the first column is the index (staged), the
+/// second the working tree (not staged yet).
+pub fn parse_changes(raw: &[u8]) -> Vec<Change> {
+    let mut entries = raw.split(|byte| *byte == 0).filter(|entry| entry.len() > 3);
+    let mut changes = Vec::new();
+    while let Some(entry) = entries.next() {
+        let (x, y) = (entry[0], entry[1]);
+        let path = String::from_utf8_lossy(&entry[3..]).into_owned();
+        if matches!(x, b'R' | b'C') {
+            entries.next(); // the old path
+        }
+        let staged = match (x, y) {
+            (b'?' | b' ', _) => Staged::No,
+            (_, b' ') => Staged::Yes,
+            _ => Staged::Partly,
+        };
+        changes.push(Change { path, untracked: x == b'?', staged });
+    }
+    changes
+}
+
+/// The changed files in `repo`, for staging.
+pub fn changes(repo: &Path) -> Vec<Change> {
+    let Some(top) = toplevel(repo) else { return Vec::new() };
+    let Ok(output) = git(&top).args(["status", "--porcelain=v1", "-z", "--untracked-files=all"]).output() else {
+        return Vec::new();
+    };
+    if output.status.success() { parse_changes(&output.stdout) } else { Vec::new() }
+}
+
+/// Stages `paths` (relative to the repository's top) for the next commit.
+pub fn stage(repo: &Path, paths: &[String]) -> Result<(), String> {
+    change_index(repo, &["add", "--"], paths)
+}
+
+/// Takes `paths` out of the next commit again, keeping their changes in the working tree.
+pub fn unstage(repo: &Path, paths: &[String]) -> Result<(), String> {
+    change_index(repo, &["restore", "--staged", "--"], paths)
+}
+
+fn change_index(repo: &Path, command: &[&str], paths: &[String]) -> Result<(), String> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let top = toplevel(repo).ok_or_else(|| format!("{} is not a git repository", repo.display()))?;
+    // Writing the index needs git's lock, so not `git()`, which reads without it.
+    let output = Command::new("git")
+        .args(command)
+        .args(paths)
+        .current_dir(&top)
+        .output()
+        .map_err(|error| format!("git could not run: {error}"))?;
+    if output.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&output.stderr).trim().to_owned()) }
+}
+
 /// What a review covers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Scope {
@@ -271,6 +344,37 @@ mod tests {
         assert_eq!(main_worktree(&worktree), Some(main.clone()));
         assert_eq!(main_worktree(&main), Some(main));
         let _ = std::fs::remove_dir_all(&worktree);
+    }
+
+    #[test]
+    fn reads_what_is_staged() {
+        let raw = b"M  staged.ts\0 M unstaged.ts\0MM both.ts\0?? new.ts\0A  added.ts\0R  to.ts\0from.ts\0";
+        let changes = parse_changes(raw);
+        let staged: Vec<(&str, Staged, bool)> =
+            changes.iter().map(|change| (change.path.as_str(), change.staged, change.untracked)).collect();
+        assert_eq!(
+            staged,
+            [
+                ("staged.ts", Staged::Yes, false),
+                ("unstaged.ts", Staged::No, false),
+                ("both.ts", Staged::Partly, false),
+                ("new.ts", Staged::No, true),
+                ("added.ts", Staged::Yes, false),
+                ("to.ts", Staged::Yes, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn stages_and_unstages() {
+        let dir = repo();
+        std::fs::write(dir.path().join("new.txt"), "hi").expect("written");
+        let staged_of = |dir: &Path| changes(dir).into_iter().find(|change| change.path == "new.txt").map(|c| c.staged);
+        assert_eq!(staged_of(dir.path()), Some(Staged::No));
+        stage(dir.path(), &["new.txt".to_owned()]).expect("staged");
+        assert_eq!(staged_of(dir.path()), Some(Staged::Yes));
+        unstage(dir.path(), &["new.txt".to_owned()]).expect("unstaged");
+        assert_eq!(staged_of(dir.path()), Some(Staged::No));
     }
 
     #[test]
