@@ -121,6 +121,12 @@ fn component_theme(appearance: Appearance) -> gpui_kit::component::ThemeConfig {
         "editor.active_line_number": hex(c::INK_MUTED),
         "editor.invisible": hex(c::LINE_STRONG),
         "editor.gutter.background": "#00000000",
+        // Language server underlines, in the palette: errors red, warnings the warm text colour
+        // (orange means an agent needs you), notes blue, hints (unused, deprecated) faint.
+        "error": hex(c::RED),
+        "warning": hex(c::AMBER_TEXT),
+        "info": hex(c::BLUE),
+        "hint": hex(c::INK_FAINT),
         "syntax": syntax(appearance),
     });
     serde_json::from_value(serde_json::json!({
