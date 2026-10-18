@@ -500,6 +500,11 @@ impl Workspace {
             ChangesEvent::Updated { files, scope } => {
                 this.editor.update(cx, |editor, cx| editor.refresh_review(files.clone(), *scope, cx));
             }
+            ChangesEvent::History { repo } => {
+                this.editor.update(cx, |editor, cx| editor.show_history(repo, cx));
+                this.editor_open = true;
+                cx.notify();
+            }
         })
     }
 
@@ -732,6 +737,14 @@ impl Workspace {
     }
 
     /// Shows the Changes tab and reviews its first file once the changes are read (spikes).
+    /// Opens the History tab for the folder the sidebar shows (for spikes and screenshots).
+    pub fn show_history(&mut self, cx: &mut Context<Self>) {
+        let root = self.root.clone();
+        self.editor.update(cx, |editor, cx| editor.show_history(&root, cx));
+        self.editor_open = true;
+        cx.notify();
+    }
+
     /// Gives the panes made-up agents, so screenshots show the Agents tab without running Claude.
     pub fn fake_agents(&mut self, cx: &mut Context<Self>) {
         let samples = [

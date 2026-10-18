@@ -8,6 +8,7 @@ pub mod clickup;
 pub mod files;
 pub mod format;
 pub mod git;
+pub mod git_graph;
 pub mod layout;
 pub mod program_status;
 pub mod pull_request;

@@ -179,6 +179,12 @@ pub fn patch(repo: &Path, scope: Scope) -> String {
     patch
 }
 
+/// What one commit changed: against its first parent (so a merge shows what it brought in), or
+/// everything, for the first commit.
+pub fn commit_patch(repo: &Path, hash: &str) -> String {
+    run(repo, &["show", "--no-color", "--no-ext-diff", "-M", "--first-parent", "--format=", hash]).unwrap_or_default()
+}
+
 /// The checked-out branch, or `None` when detached or outside a repository.
 pub fn branch(repo: &Path) -> Option<String> {
     run(repo, &["symbolic-ref", "--quiet", "--short", "HEAD"]).map(|name| name.trim().to_owned())

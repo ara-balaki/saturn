@@ -41,7 +41,8 @@ It isn't an IDE and doesn't try to replace yours. It's the place the agents live
   rustfmt, whichever the project uses). Files an agent changes reload by themselves; if you have
   unsaved edits, Saturn asks first.
 - **Review what changed.** The Changes tab lists every changed file, with a diff for each, for your
-  uncommitted work or for the whole branch. A pane whose branch has a pull request shows its number
+  uncommitted work or for the whole branch. History shows every branch as a graph, with tags,
+  authors and dates; click a commit to see its diff. A pane whose branch has a pull request shows its number
   and state, from the `gh` CLI.
 - **Follows the agent you're looking at.** Focus a pane that works in another git worktree, and the
   sidebar switches to that worktree.

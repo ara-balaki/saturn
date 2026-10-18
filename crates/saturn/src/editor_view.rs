@@ -12,10 +12,11 @@ use gpui_kit::{
     prelude::FluentBuilder as _, px,
 };
 use saturn_core::format;
-use saturn_core::git::Scope;
+use saturn_core::git::{self, Scope};
 use saturn_design::{color, radius, space};
 
 use crate::chrome;
+use crate::history_view::{HistoryEvent, HistoryView};
 use crate::theme::{self, len};
 
 /// Files larger than this open read-only elsewhere; the editor keeps the whole text in memory.
@@ -41,10 +42,21 @@ impl OpenFile {
     }
 }
 
-/// The review of a scope's changes, in the Changes tab.
+/// A review of changes in the Changes tab: a scope's (kept current as agents work), or one
+/// commit's (`scope` is `None`).
 struct Review {
     state: Entity<DiffState>,
-    scope: Scope,
+    scope: Option<Scope>,
+    label: String,
+}
+
+/// Which of the panel's tabs is in front.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum Front {
+    #[default]
+    File,
+    Review,
+    History,
 }
 
 #[derive(Default)]
@@ -52,8 +64,11 @@ pub struct EditorView {
     files: Vec<OpenFile>,
     active: usize,
     review: Option<Review>,
-    /// Whether the Changes tab is in front of the files.
-    showing_review: bool,
+    front: Front,
+    /// Every branch's commits as a graph, once opened.
+    history: Option<Entity<HistoryView>>,
+    /// Keeps History's clicks reaching this panel while it's open.
+    history_events: Option<Subscription>,
     /// Why the last file could not be opened or saved, shown in the strip until the next action.
     problem: Option<String>,
 }
@@ -62,7 +77,7 @@ impl EditorView {
     /// Opens `path` in a tab, or brings its tab forward if it is already open.
     pub fn open(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
         self.problem = None;
-        self.showing_review = false;
+        self.front = Front::File;
         if let Some(index) = self.files.iter().position(|file| file.path == path) {
             self.active = index;
             cx.notify();
@@ -144,7 +159,7 @@ impl EditorView {
 
     /// The question when the active file changed on disk under unsaved changes.
     fn render_disk_notice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let file = self.files.get(self.active).filter(|file| file.changed_on_disk && !self.showing_review)?;
+        let file = self.files.get(self.active).filter(|file| file.changed_on_disk && self.front == Front::File)?;
         Some(
             div()
                 .flex()
@@ -171,23 +186,70 @@ impl EditorView {
 
     /// Shows `files` in the Changes tab, scrolled to `path`.
     pub fn review(&mut self, files: Vec<DiffFile>, scope: Scope, path: &str, cx: &mut Context<Self>) {
+        let label = match scope {
+            Scope::Uncommitted => "Uncommitted changes",
+            Scope::Branch => "Branch changes",
+        };
+        self.show_review(files, Some(scope), label.to_owned(), path, cx);
+    }
+
+    fn show_review(
+        &mut self,
+        files: Vec<DiffFile>,
+        scope: Option<Scope>,
+        label: String,
+        path: &str,
+        cx: &mut Context<Self>,
+    ) {
         let state = if let Some(review) = &mut self.review {
             review.scope = scope;
+            review.label = label;
             review.state.update(cx, |state, cx| state.set_files(files, cx));
             review.state.clone()
         } else {
             let state = cx.new(|cx| DiffState::new(files, cx));
-            self.review = Some(Review { state: state.clone(), scope });
+            self.review = Some(Review { state: state.clone(), scope, label });
             state
         };
         state.update(cx, |state, cx| state.scroll_to_file(path, cx));
-        self.showing_review = true;
+        self.front = Front::Review;
+        cx.notify();
+    }
+
+    /// Opens the History tab for `repo`, reading it afresh.
+    pub fn show_history(&mut self, repo: &Path, cx: &mut Context<Self>) {
+        match &self.history {
+            Some(history) if history.read(cx).repo() == repo => history.update(cx, HistoryView::reload),
+            _ => {
+                let history = cx.new(|cx| HistoryView::new(repo, cx));
+                self.history_events = Some(cx.subscribe(&history, |_, history, event: &HistoryEvent, cx| {
+                    let HistoryEvent::Open { hash } = event;
+                    let (repo, hash) = (history.read(cx).repo().to_owned(), hash.clone());
+                    cx.spawn(async move |this, cx| {
+                        let files = cx
+                            .background_spawn({
+                                let hash = hash.clone();
+                                async move { DiffFile::parse(&git::commit_patch(&repo, &hash)).unwrap_or_default() }
+                            })
+                            .await;
+                        let _ = this.update(cx, |this, cx| {
+                            let path = files.first().map(|file| file.path().to_string()).unwrap_or_default();
+                            let label = format!("Commit {}", &hash[..hash.len().min(7)]);
+                            this.show_review(files, None, label, &path, cx);
+                        });
+                    })
+                    .detach();
+                }));
+                self.history = Some(history);
+            }
+        }
+        self.front = Front::History;
         cx.notify();
     }
 
     /// Keeps an open review current while agents keep working.
     pub fn refresh_review(&mut self, files: Vec<DiffFile>, scope: Scope, cx: &mut Context<Self>) {
-        if let Some(review) = self.review.as_ref().filter(|review| review.scope == scope) {
+        if let Some(review) = self.review.as_ref().filter(|review| review.scope == Some(scope)) {
             review.state.update(cx, |state, cx| state.set_files(files, cx));
         }
     }
@@ -195,7 +257,7 @@ impl EditorView {
     /// Writes the active file to disk and, if `format` is on, runs the project's formatter on it.
     /// The formatted text comes back through the file watcher, like any change on disk.
     pub fn save(&mut self, root: &Path, format: bool, cx: &mut Context<Self>) {
-        if self.showing_review {
+        if self.front != Front::File {
             return;
         }
         let Some(file) = self.files.get_mut(self.active) else { return };
@@ -262,12 +324,10 @@ impl EditorView {
 
     fn render_review_tab(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let review = self.review.as_ref()?;
-        let label = match review.scope {
-            Scope::Uncommitted => "Uncommitted changes",
-            Scope::Branch => "Branch changes",
-        };
+        let label = review.label.clone();
+        let in_front = self.front == Front::Review;
         Some(
-            chrome::track_item("review-tab", self.showing_review)
+            chrome::track_item("review-tab", in_front)
                 .group("review-tab")
                 .pl(len(space::SPACE_3))
                 .pr(len(space::SPACE_1))
@@ -283,18 +343,53 @@ impl EditorView {
                         .rounded(len(radius::RADIUS_XS))
                         .hover(|s| s.bg(theme::fill_control()))
                         .child(chrome::icon("x", 11., theme::color(color::INK_MUTED)))
-                        .when(!self.showing_review, |slot| {
-                            slot.invisible().group_hover("review-tab", gpui_kit::Styled::visible)
-                        })
+                        .when(!in_front, |slot| slot.invisible().group_hover("review-tab", gpui_kit::Styled::visible))
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.review = None;
-                            this.showing_review = false;
+                            this.front = Front::File;
                             cx.notify();
                         })),
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.showing_review = true;
+                    this.front = Front::Review;
+                    cx.notify();
+                }))
+                .into_any_element(),
+        )
+    }
+
+    fn render_history_tab(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.history.as_ref()?;
+        let in_front = self.front == Front::History;
+        Some(
+            chrome::track_item("history-tab", in_front)
+                .group("history-tab")
+                .pl(len(space::SPACE_3))
+                .pr(len(space::SPACE_1))
+                .child(chrome::icon("git-branch", 13., theme::color(color::INK_MUTED)))
+                .child("History")
+                .child(
+                    div()
+                        .id("history-close")
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .size(px(20.))
+                        .rounded(len(radius::RADIUS_XS))
+                        .hover(|s| s.bg(theme::fill_control()))
+                        .child(chrome::icon("x", 11., theme::color(color::INK_MUTED)))
+                        .when(!in_front, |slot| slot.invisible().group_hover("history-tab", gpui_kit::Styled::visible))
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.history = None;
+                            this.history_events = None;
+                            this.front = if this.review.is_some() { Front::Review } else { Front::File };
+                            cx.notify();
+                        })),
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.front = Front::History;
                     cx.notify();
                 }))
                 .into_any_element(),
@@ -303,7 +398,7 @@ impl EditorView {
 
     /// Unified or split, and stepping through the changes: the review's own controls.
     fn render_review_controls(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let review = self.review.as_ref().filter(|_| self.showing_review)?;
+        let review = self.review.as_ref().filter(|_| self.front == Front::Review)?;
         let mode = review.state.read(cx).mode();
         let state = review.state.clone();
         let pick = |label: &'static str, target: DiffMode| {
@@ -337,7 +432,7 @@ impl EditorView {
 
     fn render_tab(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
         let file = &self.files[index];
-        let selected = index == self.active && !self.showing_review;
+        let selected = index == self.active && self.front == Front::File;
         let dirty = file.dirty(cx);
         chrome::track_item(("editor-tab", index), selected)
             .group("editor-tab")
@@ -375,7 +470,7 @@ impl EditorView {
             )
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.active = index;
-                this.showing_review = false;
+                this.front = Front::File;
                 cx.notify();
             }))
             .into_any_element()
@@ -384,8 +479,10 @@ impl EditorView {
 
 impl Render for EditorView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let body: Option<AnyElement> = if self.showing_review {
+        let body: Option<AnyElement> = if self.front == Front::Review {
             self.review.as_ref().map(|review| Diff::new(&review.state).size_full().into_any_element())
+        } else if self.front == Front::History {
+            self.history.clone().map(gpui_kit::IntoElement::into_any_element)
         } else {
             self.files
                 .get(self.active)
@@ -426,6 +523,7 @@ impl Render for EditorView {
                     .items_center()
                     .gap(px(2.))
                     .h(len(chrome::CONTROL_HEIGHT))
+                    .children(self.render_history_tab(cx))
                     .children(self.render_review_tab(cx))
                     .children((0..self.files.len()).map(|index| self.render_tab(index, cx)))
                     .child(div().flex_1())

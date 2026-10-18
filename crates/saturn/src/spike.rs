@@ -6,7 +6,7 @@
 //! - `SATURN_OPEN_SETTINGS=1` opens the Settings dialog on start; `SATURN_OPEN_FILE=path` opens a file
 //!   in the editor (`SATURN_SAVE=1` saves it after a moment); `SATURN_REVIEW=1` shows the Changes tab and reviews the first change.
 //! - `SATURN_MORE_REPOS=a:b` adds more repos to the window, as ⌘O would; `SATURN_FAKE_AGENTS=1`
-//!   gives the panes made-up agents.
+//!   gives the panes made-up agents; `SATURN_HISTORY=1` opens the History tab.
 //! - `SATURN_SCREENSHOT=path.png` saves what the window draws after `SATURN_SCREENSHOT_AFTER`
 //!   seconds (needs the `capture` feature); `SATURN_QUIT_AFTER` quits after that many seconds.
 
@@ -71,6 +71,9 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
     if std::env::var_os("SATURN_OPEN_SETTINGS").is_some() {
         // After the window (and the Root that hosts dialogs) exists.
         cx.defer_in(window, Workspace::open_settings);
+    }
+    if std::env::var_os("SATURN_HISTORY").is_some() {
+        cx.defer_in(window, |workspace, _, cx| workspace.show_history(cx));
     }
     if std::env::var_os("SATURN_FAKE_AGENTS").is_some() {
         cx.defer_in(window, |workspace, _, cx| workspace.fake_agents(cx));

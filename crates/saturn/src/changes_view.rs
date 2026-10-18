@@ -27,6 +27,8 @@ pub enum ChangesEvent {
     Open { files: Vec<DiffFile>, scope: Scope, path: String },
     /// The changes were read again; an open review should show the new ones.
     Updated { files: Vec<DiffFile>, scope: Scope },
+    /// Show the repository's history.
+    History { repo: PathBuf },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -329,6 +331,10 @@ impl ChangesView {
                     .text_size(px(12.))
                     .text_color(theme::color(color::INK_MUTED))
                     .child(self.branch.clone().unwrap_or_else(|| "No branch".to_owned())),
+            )
+            .child(
+                chrome::button("history", "History", None, false)
+                    .on_click(cx.listener(|this, _, _, cx| cx.emit(ChangesEvent::History { repo: this.repo.clone() }))),
             )
             .child(
                 chrome::button("branch-diff", "Branch diff", None, false)
