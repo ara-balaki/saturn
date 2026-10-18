@@ -6,7 +6,7 @@ use gpui_kit::{
     ParentElement as _, Pixels, SharedString, StatefulInteractiveElement as _, Styled as _, StyledText, Window, canvas,
     div, fill, linear_color_stop, linear_gradient, pattern_slash, point, prelude::FluentBuilder as _, px, size, svg,
 };
-use saturn_design::{color, radius, shadow, space};
+use saturn_design::{color, radius, space};
 
 use crate::theme::{self, len};
 
@@ -38,7 +38,6 @@ fn cta_fill<E: gpui_kit::Styled + gpui_kit::ParentElement>(element: E, corner: P
             linear_color_stop(theme::color(color::PURPLE_DEEP), 1.),
         )
         .color_space(ColorSpace::Oklab))
-        .shadow(theme::shadows(shadow::GLOSS))
         .child(
             div().absolute().top_0().left_0().size_full().rounded(corner).bg(linear_gradient(
                 225.,
@@ -68,8 +67,11 @@ pub fn icon_tile(id: impl Into<ElementId>, name: &str, kind: TileKind, tile: f32
         _ if tile > 32. => radius::RADIUS_LG,
         _ => radius::RADIUS_MD,
     };
-    let quiet = matches!(kind, TileKind::Off | TileKind::Round);
-    let glyph = theme::color(if quiet { color::INK_MUTED } else { color::INK });
+    let glyph = theme::color(match kind {
+        TileKind::Off | TileKind::Round => color::INK_MUTED,
+        TileKind::Current => color::INK_ON_ACCENT,
+        TileKind::Plain => color::INK,
+    });
     let tile_element = div()
         .id(id)
         .flex()
@@ -80,11 +82,10 @@ pub fn icon_tile(id: impl Into<ElementId>, name: &str, kind: TileKind, tile: f32
         .rounded(len(corner))
         .cursor_pointer()
         .map(|tile| match kind {
-            TileKind::Plain => tile
-                .bg(theme::color(color::CONTROL))
-                .shadow(theme::shadows(shadow::LIFT))
-                .hover(|s| s.bg(theme::color(color::CONTROL_HOVER))),
-            TileKind::Current => tile.bg(brand_gradient()).shadow(theme::shadows(shadow::GLOSS)),
+            TileKind::Plain => {
+                tile.bg(theme::color(color::CONTROL)).hover(|s| s.bg(theme::color(color::CONTROL_HOVER)))
+            }
+            TileKind::Current => tile.bg(brand_gradient()),
             TileKind::Off => tile.hover(|s| s.bg(theme::color(color::CONTROL))),
             TileKind::Round => tile
                 .border_1()
@@ -118,16 +119,13 @@ pub fn button(
         .cursor_pointer()
         .text_size(px(12.))
         .font_weight(FontWeight::SEMIBOLD)
-        .text_color(theme::color(color::INK));
+        .text_color(theme::color(if primary { color::INK_ON_ACCENT } else { color::INK }));
     let element = if primary {
         cta_fill(element, px(height / 2.))
     } else {
-        element
-            .bg(theme::color(color::CONTROL))
-            .shadow(theme::shadows(shadow::LIFT))
-            .hover(|s| s.bg(theme::color(color::CONTROL_HOVER)))
+        element.bg(theme::color(color::CONTROL)).hover(|s| s.bg(theme::color(color::CONTROL_HOVER)))
     };
-    let hint = if primary { theme::color(color::INK).opacity(0.72) } else { theme::color(color::INK_MUTED) };
+    let hint = if primary { theme::color(color::INK_ON_ACCENT).opacity(0.72) } else { theme::color(color::INK_MUTED) };
     element.child(
         div()
             .relative()
@@ -207,14 +205,8 @@ pub fn diagonal_lines(ground: gpui_kit::Hsla) -> impl IntoElement {
 
 /// A segmented switch whose selected pill is solid white.
 pub fn pills(options: &[(&'static str, bool)]) -> impl IntoElement {
-    div()
-        .flex()
-        .gap(px(2.))
-        .p(px(3.))
-        .rounded_full()
-        .bg(theme::color(color::CONTROL))
-        .shadow(theme::shadows(shadow::LIFT))
-        .children(options.iter().map(|(label, selected)| {
+    div().flex().gap(px(2.)).p(px(3.)).rounded_full().bg(theme::color(color::CONTROL)).children(options.iter().map(
+        |(label, selected)| {
             div()
                 .px(len(space::SPACE_5))
                 .h(px(28.))
@@ -231,7 +223,8 @@ pub fn pills(options: &[(&'static str, bool)]) -> impl IntoElement {
                     }
                 })
                 .child(*label)
-        }))
+        },
+    ))
 }
 
 /// A panel on the ground: `surface`, `radius-xl`, one-pixel `line`.

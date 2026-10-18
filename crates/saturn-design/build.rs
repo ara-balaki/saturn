@@ -8,6 +8,9 @@ use std::{env, fs};
 
 use serde_json::Value;
 
+/// The themes in design/tokens.json, in the order `Token` holds them.
+const THEMES: [&str; 2] = ["dark", "light"];
+
 fn const_name(name: &str) -> String {
     name.replace(['-', '.'], "_").to_uppercase()
 }
@@ -26,11 +29,22 @@ fn parse_color(value: &str) -> (u32, f32) {
     (rgb, parts.get(3).copied().unwrap_or(1.0))
 }
 
-/// Follows `{alias}` references to a literal colour.
-fn resolve_color(colors: &HashMap<String, String>, value: &str) -> (u32, f32) {
+/// A token's value in `theme`: a plain string is every theme's; a missing theme borrows `dark`'s.
+fn themed<'a>(value: &'a Value, theme: &str) -> &'a str {
+    match value {
+        Value::String(text) => text,
+        Value::Object(themes) => {
+            themes.get(theme).or_else(|| themes.get("dark")).and_then(Value::as_str).expect("a theme value")
+        }
+        _ => panic!("a token value is a string or a map of themes"),
+    }
+}
+
+/// Follows `{alias}` references to a literal colour, in `theme`.
+fn resolve_color(colors: &HashMap<String, Value>, value: &str, theme: &str) -> (u32, f32) {
     let mut value = value;
     while let Some(alias) = value.strip_prefix('{').and_then(|v| v.strip_suffix('}')) {
-        value = colors.get(alias).unwrap_or_else(|| panic!("unknown colour alias {alias}"));
+        value = themed(colors.get(alias).unwrap_or_else(|| panic!("unknown colour alias {alias}")), theme);
     }
     parse_color(value)
 }
@@ -80,22 +94,22 @@ fn main() {
     let tokens: Value =
         serde_json::from_str(&fs::read_to_string(&root).expect("design/tokens.json")).expect("valid JSON");
 
-    let colors: HashMap<String, String> = tokens["color"]["tokens"]
+    let colors: HashMap<String, Value> = tokens["color"]["tokens"]
         .as_array()
         .expect("colour tokens")
         .iter()
-        .map(|t| (t["name"].as_str().expect("name").to_owned(), t["value"].as_str().expect("value").to_owned()))
+        .map(|t| (t["name"].as_str().expect("name").to_owned(), t["value"].clone()))
         .collect();
-    let resolve = |value: &str| resolve_color(&colors, value);
 
     let mut out = String::from("// Generated from design/tokens.json by crates/saturn-design/build.rs.\n\n");
-    out.push_str("pub mod color {\n    use super::Color;\n");
+    out.push_str("pub mod color {\n    use super::{Color, Token};\n");
     for token in tokens["color"]["tokens"].as_array().expect("colour tokens") {
-        let (rgb, alpha) = resolve(token["value"].as_str().expect("value"));
+        let [(dark, dark_alpha), (light, light_alpha)] =
+            THEMES.map(|theme| resolve_color(&colors, themed(&token["value"], theme), theme));
         let usage = token["usage"].as_str().unwrap_or_default().replace('`', "");
         writeln!(
             out,
-            "    /// {usage}\n    pub const {}: Color = Color {{ rgb: 0x{rgb:06x}, alpha: {alpha:?} }};",
+            "    /// {usage}\n    pub const {}: Token = Token {{ dark: Color {{ rgb: 0x{dark:06x}, alpha: {dark_alpha:?} }}, light: Color {{ rgb: 0x{light:06x}, alpha: {light_alpha:?} }} }};",
             const_name(token["name"].as_str().expect("name"))
         )
         .ok();
@@ -117,15 +131,14 @@ fn main() {
         out.push_str("}\n\n");
     }
 
-    out.push_str("pub mod shadow {\n    use super::{Color, Shadow};\n");
+    out.push_str("pub mod shadow {\n    use super::{Color, Shadow, Shadows};\n");
     for token in tokens["shadow"]["tokens"].as_array().expect("shadow tokens") {
-        let layers = shadow_layers(token["value"].as_str().expect("value"));
+        let [dark, light] = THEMES.map(|theme| shadow_layers(themed(&token["value"], theme)).join(", "));
         let usage = token["usage"].as_str().unwrap_or_default().replace('`', "");
         writeln!(
             out,
-            "    /// {usage}\n    pub const {}: &[Shadow] = &[{}];",
-            const_name(token["name"].as_str().expect("name")),
-            layers.join(", ")
+            "    /// {usage}\n    pub const {}: Shadows = Shadows {{ dark: &[{dark}], light: &[{light}] }};",
+            const_name(token["name"].as_str().expect("name"))
         )
         .ok();
     }

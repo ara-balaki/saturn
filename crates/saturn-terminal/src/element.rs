@@ -222,7 +222,7 @@ impl TerminalElement {
         };
 
         let selection = content.selection;
-        let selection_color = hsla(palette::SELECTION, 0.55);
+        let selection_color = hsla(palette::selection(), palette::selection_opacity());
         let mut backgrounds: Vec<(usize, usize, usize, Hsla)> = Vec::new();
         let mut spans: Vec<Span> = Vec::new();
         let mut singles: Vec<(usize, usize, String, TextStyle)> = Vec::new();
@@ -242,7 +242,7 @@ impl TerminalElement {
             }
 
             let selected = selection.is_some_and(|range| range.contains(indexed.point));
-            if selected || bg != palette::BACKGROUND {
+            if selected || bg != palette::background() {
                 let color = if selected { selection_color } else { hsla(bg, 1.0) };
                 match backgrounds.last_mut() {
                     Some(last) if last.0 == row && last.2 == col && last.3 == color => last.2 = col + width,
@@ -311,7 +311,7 @@ impl TerminalElement {
                     (true, _) => {
                         let text = (cell.c != ' ' && cell.c != '\0').then(|| {
                             let style = TextStyle {
-                                color: hsla(palette::BACKGROUND, 1.0),
+                                color: hsla(palette::background(), 1.0),
                                 bold: cell.flags.contains(Flags::BOLD),
                                 italic: cell.flags.contains(Flags::ITALIC),
                                 underline: false,
@@ -334,7 +334,7 @@ fn paint_frame(frame: &Frame, window: &mut Window, cx: &mut App) {
     for (origin, line) in &frame.lines {
         let _ = line.paint(*origin, frame.line_height, TextAlign::Left, None, window, cx);
     }
-    let cursor_color = hsla(palette::CURSOR, 1.0);
+    let cursor_color = hsla(palette::cursor(), 1.0);
     match &frame.cursor {
         Some(CursorPaint::Block { bounds, text }) => {
             window.paint_quad(fill(*bounds, cursor_color));

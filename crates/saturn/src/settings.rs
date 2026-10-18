@@ -13,11 +13,38 @@ pub struct Settings {
     pub name_tabs_after_sessions: bool,
     /// A slash command whose first word is a ticket (`/start abc-224`) names the session after it.
     pub rename_sessions_from_commands: bool,
+    pub appearance: AppearanceSetting,
+}
+
+/// Light or dark, or whichever macOS is in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AppearanceSetting {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+impl AppearanceSetting {
+    /// The appearance to draw in, given the one macOS is in.
+    pub fn resolve(self, system: saturn_design::Appearance) -> saturn_design::Appearance {
+        match self {
+            Self::System => system,
+            Self::Light => saturn_design::Appearance::Light,
+            Self::Dark => saturn_design::Appearance::Dark,
+        }
+    }
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { last_project: None, name_tabs_after_sessions: true, rename_sessions_from_commands: true }
+        Self {
+            last_project: None,
+            name_tabs_after_sessions: true,
+            rename_sessions_from_commands: true,
+            appearance: AppearanceSetting::System,
+        }
     }
 }
 
@@ -64,4 +91,25 @@ pub fn startup_project() -> PathBuf {
         .or_else(|| load().last_project.filter(|path| path.is_dir()))
         .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
         .unwrap_or_else(|| PathBuf::from("/"))
+}
+
+#[cfg(test)]
+mod tests {
+    use saturn_design::Appearance;
+
+    use super::*;
+
+    #[test]
+    fn appearance_follows_the_system_unless_chosen() {
+        assert_eq!(AppearanceSetting::System.resolve(Appearance::Light), Appearance::Light);
+        assert_eq!(AppearanceSetting::Dark.resolve(Appearance::Light), Appearance::Dark);
+        assert_eq!(AppearanceSetting::Light.resolve(Appearance::Dark), Appearance::Light);
+    }
+
+    #[test]
+    fn settings_saved_before_appearance_existed_still_load() {
+        let settings: Settings = serde_json::from_str(r#"{"name_tabs_after_sessions": false}"#).expect("loads");
+        assert_eq!(settings.appearance, AppearanceSetting::System);
+        assert!(!settings.name_tabs_after_sessions);
+    }
 }

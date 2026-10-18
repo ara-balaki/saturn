@@ -6,39 +6,57 @@ use alacritty_terminal::vte::ansi::{Color, NamedColor, Rgb};
 use saturn_design::color;
 
 #[expect(clippy::cast_possible_truncation, reason = "taking the bytes of 0xRRGGBB")]
-const fn rgb(token: saturn_design::Color) -> Rgb {
-    Rgb { r: (token.rgb >> 16) as u8, g: (token.rgb >> 8) as u8, b: token.rgb as u8 }
+fn rgb(token: saturn_design::Token) -> Rgb {
+    let rgb = token.get().rgb;
+    Rgb { r: (rgb >> 16) as u8, g: (rgb >> 8) as u8, b: rgb as u8 }
 }
 
-pub const FOREGROUND: Rgb = rgb(color::TERM_WHITE);
-pub const BACKGROUND: Rgb = rgb(color::SURFACE);
-pub const CURSOR: Rgb = rgb(color::INK);
-pub const SELECTION: Rgb = rgb(color::PURPLE);
+// Each is read when a frame is drawn, so a change of appearance recolours every terminal.
+
+pub fn foreground() -> Rgb {
+    rgb(color::TERM_WHITE)
+}
+
+pub fn background() -> Rgb {
+    rgb(color::SURFACE)
+}
+
+pub fn cursor() -> Rgb {
+    rgb(color::INK)
+}
+
+pub fn selection() -> Rgb {
+    rgb(color::PURPLE)
+}
+
+/// How strongly selected text is tinted: less on a light background, where purple is louder.
+pub fn selection_opacity() -> f32 {
+    match saturn_design::appearance() {
+        saturn_design::Appearance::Dark => 0.55,
+        saturn_design::Appearance::Light => 0.28,
+    }
+}
 
 /// ANSI 0–15: the eight `term-*` colours, then their bright versions.
-const ANSI: [Rgb; 16] = [
-    rgb(color::TERM_BLACK),
-    rgb(color::TERM_RED),
-    rgb(color::TERM_GREEN),
-    rgb(color::TERM_YELLOW),
-    rgb(color::TERM_BLUE),
-    rgb(color::TERM_MAGENTA),
-    rgb(color::TERM_CYAN),
-    rgb(color::TERM_WHITE),
-    rgb(color::INK_FAINT),
-    rgb(color::TERM_RED),
-    rgb(color::TERM_GREEN),
-    rgb(color::TERM_YELLOW),
-    rgb(color::TERM_BLUE),
-    rgb(color::TERM_MAGENTA),
-    rgb(color::TERM_CYAN),
-    rgb(color::INK),
-];
+fn ansi(index: u8) -> Rgb {
+    rgb(match index {
+        0 => color::TERM_BLACK,
+        1 | 9 => color::TERM_RED,
+        2 | 10 => color::TERM_GREEN,
+        3 | 11 => color::TERM_YELLOW,
+        4 | 12 => color::TERM_BLUE,
+        5 | 13 => color::TERM_MAGENTA,
+        6 | 14 => color::TERM_CYAN,
+        7 => color::TERM_WHITE,
+        8 => color::INK_FAINT,
+        _ => color::INK,
+    })
+}
 
 /// The xterm 256-colour palette: ANSI, a 6×6×6 cube, then 24 greys.
 fn indexed(index: u8) -> Rgb {
     match index {
-        0..=15 => ANSI[usize::from(index)],
+        0..=15 => ansi(index),
         16..=231 => {
             let level = |value: u8| if value == 0 { 0 } else { 55 + value * 40 };
             let cube = index - 16;
@@ -67,19 +85,20 @@ pub fn resolve(color: Color, overrides: &Colors) -> Rgb {
 
 fn named(name: NamedColor) -> Rgb {
     match name {
-        NamedColor::Foreground | NamedColor::BrightForeground => FOREGROUND,
-        NamedColor::Background => BACKGROUND,
-        NamedColor::Cursor => CURSOR,
-        NamedColor::DimForeground => dim(FOREGROUND),
-        NamedColor::DimBlack => dim(ANSI[0]),
-        NamedColor::DimRed => dim(ANSI[1]),
-        NamedColor::DimGreen => dim(ANSI[2]),
-        NamedColor::DimYellow => dim(ANSI[3]),
-        NamedColor::DimBlue => dim(ANSI[4]),
-        NamedColor::DimMagenta => dim(ANSI[5]),
-        NamedColor::DimCyan => dim(ANSI[6]),
-        NamedColor::DimWhite => dim(ANSI[7]),
-        other => ANSI[(other as usize).min(15)],
+        NamedColor::Foreground | NamedColor::BrightForeground => foreground(),
+        NamedColor::Background => background(),
+        NamedColor::Cursor => cursor(),
+        NamedColor::DimForeground => dim(foreground()),
+        NamedColor::DimBlack => dim(ansi(0)),
+        NamedColor::DimRed => dim(ansi(1)),
+        NamedColor::DimGreen => dim(ansi(2)),
+        NamedColor::DimYellow => dim(ansi(3)),
+        NamedColor::DimBlue => dim(ansi(4)),
+        NamedColor::DimMagenta => dim(ansi(5)),
+        NamedColor::DimCyan => dim(ansi(6)),
+        NamedColor::DimWhite => dim(ansi(7)),
+        #[expect(clippy::cast_possible_truncation, reason = "the named colours below 16 are the ANSI ones")]
+        other => ansi((other as usize).min(15) as u8),
     }
 }
 

@@ -20,7 +20,7 @@ use saturn_design::{color, radius, shadow, space};
 use saturn_terminal::view::{TerminalView, TerminalViewEvent};
 
 use crate::chrome::{self, TileKind};
-use crate::settings::{self, Settings};
+use crate::settings::{self, AppearanceSetting, Settings};
 use crate::theme::{self, len};
 use crate::{dock, settings_view};
 
@@ -172,7 +172,7 @@ fn status_dot(state: AgentState) -> impl IntoElement {
 
 /// `glow-needs-you` as it breathes: `t` from 0 (the token itself) to 1 (wider and brighter).
 fn breathing_glow(t: f32) -> Vec<saturn_design::Shadow> {
-    let mut glow = shadow::GLOW_NEEDS_YOU.to_vec();
+    let mut glow = shadow::GLOW_NEEDS_YOU.get().to_vec();
     if let Some(halo) = glow.get_mut(1) {
         halo.blur += 10. * t;
         halo.color.alpha += 0.14 * t;
@@ -214,6 +214,13 @@ impl Workspace {
             }
         })
         .detach();
+        // Following the system: redraw when macOS switches between light and dark.
+        cx.observe_window_appearance(window, |this, _, cx| {
+            if this.settings.appearance == AppearanceSetting::System {
+                theme::apply(AppearanceSetting::System, cx);
+            }
+        })
+        .detach();
         let (bridge, calls) = start_bridge().unzip();
         if let Some(calls) = calls {
             cx.spawn(async move |this, cx| {
@@ -248,8 +255,12 @@ impl Workspace {
     }
 
     pub fn change_settings(&mut self, change: impl FnOnce(&mut Settings), cx: &mut Context<Self>) {
+        let appearance = self.settings.appearance;
         change(&mut self.settings);
         settings::save(&self.settings);
+        if self.settings.appearance != appearance {
+            theme::apply(self.settings.appearance, cx);
+        }
         cx.notify();
     }
 
@@ -519,7 +530,7 @@ impl Workspace {
         // A tab hidden behind another that needs you turns yellow, so it can't be missed.
         let calling = !selected && state == AgentState::NeedsYou && self.unseen.contains(&tab);
         let (background, foreground) = match (calling, selected) {
-            (true, _) => (theme::color(color::YELLOW), theme::color(color::INK_INVERSE)),
+            (true, _) => (theme::color(color::YELLOW), theme::color(color::INK_ON_SIGNAL)),
             (false, true) => (theme::color(color::CONTROL_PRESSED), theme::color(color::INK)),
             (false, false) => (gpui_kit::transparent_black(), theme::color(color::INK_MUTED)),
         };
@@ -551,7 +562,6 @@ impl Workspace {
             .max_w(px(220.))
             .rounded(len(radius::RADIUS_LG))
             .bg(background)
-            .when(selected && !calling, |tab| tab.shadow(theme::shadows(shadow::LIFT)))
             .text_color(foreground)
             .text_size(px(12.))
             .font_weight(FontWeight::SEMIBOLD)
@@ -631,7 +641,6 @@ impl Workspace {
                     // header rounds its own: the pane's radius minus its one-pixel border.
                     .rounded_t(len(radius::RADIUS_XL - 1.))
                     .bg(theme::color(color::SURFACE_RAISED))
-                    .shadow(theme::shadows(shadow::LIFT))
                     .child(
                         div()
                             .id(("tab-strip", cell_id.key()))
@@ -672,7 +681,7 @@ impl Workspace {
                 .with_animation(
                     ("breathe", cell_id.key()),
                     Animation::new(Duration::from_millis(2400)).repeat().with_easing(bounce(ease_in_out)),
-                    |pane, t| pane.shadow(theme::shadows(&breathing_glow(t))),
+                    |pane, t| pane.shadow(theme::layers(&breathing_glow(t))),
                 )
                 .into_any_element();
         }

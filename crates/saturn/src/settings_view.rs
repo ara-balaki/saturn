@@ -2,10 +2,13 @@
 
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::switch::Switch;
-use gpui_kit::{App, FontWeight, IntoElement, ParentElement as _, Styled as _, WeakEntity, Window, div, px};
+use gpui_kit::{
+    App, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, StatefulInteractiveElement as _,
+    Styled as _, WeakEntity, Window, div, prelude::FluentBuilder as _, px,
+};
 use saturn_design::{color, space};
 
-use crate::settings::Settings;
+use crate::settings::{AppearanceSetting, Settings};
 use crate::theme::{self, len};
 use crate::workspace::Workspace;
 
@@ -35,6 +38,49 @@ fn setting_row(
         .child(div().flex_none().pt(len(space::SPACE_1)).child(Switch::new(id).checked(checked).on_click(on_change)))
 }
 
+/// System / Light / Dark as a segmented switch; the selected one is solid `ink`.
+fn appearance_row(workspace: &WeakEntity<Workspace>, current: AppearanceSetting) -> impl IntoElement {
+    let options =
+        [("System", AppearanceSetting::System), ("Light", AppearanceSetting::Light), ("Dark", AppearanceSetting::Dark)];
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(len(space::SPACE_6))
+        .py(len(space::SPACE_3))
+        .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).child("Appearance"))
+        .child(div().flex().gap(px(2.)).p(px(3.)).rounded_full().bg(theme::color(color::CONTROL)).children(
+            options.map(|(label, setting)| {
+                let workspace = workspace.clone();
+                let selected = setting == current;
+                div()
+                    .id(label)
+                    .flex()
+                    .items_center()
+                    .h(px(28.))
+                    .px(len(space::SPACE_5))
+                    .rounded_full()
+                    .cursor_pointer()
+                    .text_size(px(12.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .map(|pill| {
+                        if selected {
+                            pill.bg(theme::color(color::INK)).text_color(theme::color(color::INK_INVERSE))
+                        } else {
+                            pill.text_color(theme::color(color::INK_MUTED))
+                                .hover(|s| s.text_color(theme::color(color::INK)))
+                        }
+                    })
+                    .child(label)
+                    .on_click(move |_, _, cx| {
+                        let _ = workspace.update(cx, |workspace, cx| {
+                            workspace.change_settings(|settings| settings.appearance = setting, cx);
+                        });
+                    })
+            }),
+        ))
+}
+
 /// Opens the Settings dialog. Each switch saves at once.
 pub fn open(workspace: WeakEntity<Workspace>, window: &mut Window, cx: &mut App) {
     window.open_dialog(cx, move |dialog, _, cx| {
@@ -48,6 +94,7 @@ pub fn open(workspace: WeakEntity<Workspace>, window: &mut Window, cx: &mut App)
         dialog
             .title("Settings")
             .w(px(480.))
+            .child(appearance_row(&workspace, settings.appearance))
             .child(setting_row(
                 "name-tabs",
                 "Name tabs after Claude's session",
