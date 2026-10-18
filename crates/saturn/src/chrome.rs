@@ -58,6 +58,11 @@ pub fn panel() -> gpui_kit::Div {
         .overflow_hidden()
 }
 
+/// A card with no strip: just content, edge to edge (a list, an empty state).
+pub fn card() -> gpui_kit::Div {
+    panel().p_0()
+}
+
 /// A card's content, under its strip: edge to edge, below one hairline.
 pub fn well() -> gpui_kit::Div {
     div()
@@ -311,9 +316,9 @@ pub fn empty_grid(
     project_name: &str,
     new_terminal: impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut App) + 'static,
 ) -> AnyElement {
-    panel()
+    card()
         .child(
-            well().child(dot_grid()).child(
+            div().relative().flex_1().min_h_0().child(dot_grid()).child(
                 div().absolute().size_full().flex().items_center().justify_center().child(
                     div()
                         .flex()

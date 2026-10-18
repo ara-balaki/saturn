@@ -134,7 +134,7 @@ mod tests {
             assert!((glow[0].spread - 1.0).abs() < f32::EPSILON);
             assert!(!glow[0].inset);
         }
-        assert!((shadow::GLOW_NEEDS_YOU.dark[1].blur - 30.0).abs() < f32::EPSILON);
+        assert!((shadow::GLOW_NEEDS_YOU.dark[1].blur - 12.0).abs() < f32::EPSILON);
     }
 
     #[test]

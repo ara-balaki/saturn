@@ -299,8 +299,8 @@ fn status_dot(state: AgentState) -> impl IntoElement {
 fn breathing_glow(t: f32) -> Vec<saturn_design::Shadow> {
     let mut glow = shadow::GLOW_NEEDS_YOU.get().to_vec();
     if let Some(halo) = glow.get_mut(1) {
-        halo.blur += 10. * t;
-        halo.color.alpha += 0.14 * t;
+        halo.blur += 4. * t;
+        halo.color.alpha += 0.12 * t;
     }
     glow
 }
@@ -1468,9 +1468,15 @@ impl Workspace {
             .children(activity)
             .child(
                 // New terminals come from each pane's ＋ (and ⌘T); the title bar adds repos. One
-                // primary button per screen: New agent when ClickUp is connected, else this.
-                chrome::button("add-repo", "Add repo", Some("⌘O"), !self.clickup.connected())
-                    .on_click(cx.listener(|_, _, window, cx| Self::open_project(window, cx))),
+                // primary button per screen: New agent when ClickUp is connected, else this, unless
+                // the empty grid shows its own.
+                chrome::button(
+                    "add-repo",
+                    "Add repo",
+                    Some("⌘O"),
+                    !self.clickup.connected() && !self.layout.is_empty(),
+                )
+                .on_click(cx.listener(|_, _, window, cx| Self::open_project(window, cx))),
             )
             .children(self.clickup.connected().then(|| {
                 chrome::button("new-agent", "New agent", Some("⌘⇧T"), true)

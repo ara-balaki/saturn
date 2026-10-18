@@ -74,7 +74,7 @@ impl AppView {
 
     fn render_recent(recent: &[PathBuf], cx: &mut Context<Self>) -> impl IntoElement {
         let home = std::env::var_os("HOME").map(PathBuf::from);
-        chrome::well().flex_none().children(recent.iter().enumerate().map(|(index, project)| {
+        div().flex().flex_col().p(len(space::SPACE_1)).children(recent.iter().enumerate().map(|(index, project)| {
             let name =
                 project.file_name().map_or_else(|| project.display().to_string(), |n| n.to_string_lossy().into_owned());
             let folder = match home.as_deref().and_then(|home| project.parent()?.strip_prefix(home).ok()) {
@@ -126,7 +126,6 @@ impl AppView {
             .size_full()
             .flex()
             .flex_col()
-            .bg(theme::color(color::GROUND))
             .font_family(saturn_design::font::SANS)
             .track_focus(&self.focus)
             .key_context("Welcome")
@@ -158,7 +157,7 @@ impl AppView {
                                     },
                                 )),
                         )
-                        .children((!recent.is_empty()).then(|| chrome::panel().child(Self::render_recent(&recent, cx))))
+                        .children((!recent.is_empty()).then(|| chrome::card().child(Self::render_recent(&recent, cx))))
                         .child(div().flex().child(open)),
                 ),
             )

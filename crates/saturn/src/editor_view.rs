@@ -392,9 +392,9 @@ impl Render for EditorView {
                 .map(|file| Editor::new(&file.state).appearance(false).bordered(false).size_full().into_any_element())
         };
         let Some(body) = body else {
-            return chrome::panel()
+            return chrome::card()
                 .child(
-                    chrome::well().flex().items_center().justify_center().child(
+                    div().relative().flex_1().min_h_0().flex().items_center().justify_center().child(
                         div()
                             .flex()
                             .flex_col()
