@@ -1,18 +1,20 @@
 //! The database diagram, in the editor panel: every table as a box with its columns, and a line for
 //! every foreign key. Scroll or drag to pan, pinch (or ⌘-scroll) to zoom. Clicking a table focuses
-//! it: its relations light up and unrelated tables step back.
+//! it: its relations light up and unrelated tables step back; double-clicking also zooms to it.
+//! Searching highlights the tables whose names match, and Enter zooms to the first.
 
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Bounds, Context, FontWeight, Hsla, InteractiveElement as _, IntoElement,
+    AnyElement, App, AppContext as _, Bounds, Context, Entity, FontWeight, Hsla, InteractiveElement as _, IntoElement,
     MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement as _, PathBuilder, PinchEvent, Pixels, Point, Render,
-    ScrollWheelEvent, StatefulInteractiveElement as _, Styled as _, Window, canvas, div, point,
+    ScrollWheelEvent, StatefulInteractiveElement as _, Styled as _, Subscription, Window, canvas, div, point,
     prelude::FluentBuilder as _, px,
 };
-use saturn_core::schema::{self, HEADER_HEIGHT, Key, Placed, ROW_HEIGHT, Schema};
+use saturn_core::schema::{self, FRAME_TITLE, Frame, HEADER_HEIGHT, Key, Placed, ROW_HEIGHT, Schema};
 use saturn_design::{color, radius, space};
 
 use crate::chrome;
@@ -27,6 +29,8 @@ pub struct SchemaView {
     repo: PathBuf,
     schema: Schema,
     placed: Vec<Placed>,
+    /// The groups' labelled areas, when the schema has groups.
+    groups: Vec<Frame>,
     loaded: bool,
     zoom: f32,
     /// Where the diagram's origin sits in the view, in pixels.
@@ -38,6 +42,10 @@ pub struct SchemaView {
     /// Where a drag started, to pan by.
     dragging_from: Option<Point<Pixels>>,
     focused: Option<usize>,
+    /// The search field, made on the first frame (it needs the window).
+    search: Option<Entity<InputState>>,
+    query: String,
+    search_events: Option<Subscription>,
 }
 
 impl SchemaView {
@@ -46,6 +54,7 @@ impl SchemaView {
             repo: repo.to_owned(),
             schema: Schema::default(),
             placed: Vec::new(),
+            groups: Vec::new(),
             loaded: false,
             zoom: 1.,
             offset: point(px(MARGIN), px(MARGIN)),
@@ -53,11 +62,15 @@ impl SchemaView {
             fit_pending: true,
             dragging_from: None,
             focused: None,
+            search: None,
+            query: String::new(),
+            search_events: None,
         };
         if std::env::var_os("SATURN_SCHEMA").is_some() {
             // Screenshots: the test window stops drawing before a background read would land.
             view.schema = schema::load(repo);
-            view.placed = schema::layout(&view.schema);
+            let layout = schema::layout(&view.schema);
+            (view.placed, view.groups) = (layout.tables, layout.groups);
             view.loaded = true;
         } else {
             view.reload(cx);
@@ -73,16 +86,16 @@ impl SchemaView {
     pub fn reload(&mut self, cx: &mut Context<Self>) {
         let repo = self.repo.clone();
         cx.spawn(async move |this, cx| {
-            let (schema, placed) = cx
+            let (schema, layout) = cx
                 .background_spawn(async move {
                     let schema = schema::load(&repo);
-                    let placed = schema::layout(&schema);
-                    (schema, placed)
+                    let layout = schema::layout(&schema);
+                    (schema, layout)
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 this.schema = schema;
-                this.placed = placed;
+                (this.placed, this.groups) = (layout.tables, layout.groups);
                 this.loaded = true;
                 this.fit_pending = true;
                 cx.notify();
@@ -93,7 +106,9 @@ impl SchemaView {
 
     /// The whole diagram in diagram units.
     fn extent(&self) -> (f32, f32) {
-        self.placed.iter().fold((0., 0.), |(w, h), p| (w.max(p.x + p.width), h.max(p.y + p.height)))
+        let tables =
+            self.placed.iter().fold((0., 0.), |(w, h): (f32, f32), p| (w.max(p.x + p.width), h.max(p.y + p.height)));
+        self.groups.iter().fold(tables, |(w, h), g| (w.max(g.x + g.width), h.max(g.y + g.height)))
     }
 
     /// Zooms so the whole diagram fits, at most 100%.
@@ -118,13 +133,116 @@ impl SchemaView {
         cx.notify();
     }
 
+    /// Zooms to `table` (up to 100%) with it in the middle, and focuses it.
+    fn zoom_to(&mut self, table: usize, cx: &mut Context<Self>) {
+        let Some(place) = self.placed.get(table).copied() else { return };
+        self.zoom_to_area(place.x, place.y, place.width, place.height, cx);
+        self.focused = Some(table);
+        cx.notify();
+    }
+
+    /// Zooms so the area fills the view (up to 100%), centred.
+    fn zoom_to_area(&mut self, x: f32, y: f32, width: f32, height: f32, cx: &mut Context<Self>) {
+        let Some(bounds) = self.bounds.get() else { return };
+        let (view_w, view_h) = (f32::from(bounds.size.width), f32::from(bounds.size.height));
+        self.zoom = ((view_w - MARGIN * 2.) / width).min((view_h - MARGIN * 2.) / height).clamp(MIN_ZOOM, 1.);
+        self.offset =
+            point(px(view_w / 2. - (x + width / 2.) * self.zoom), px(view_h / 2. - (y + height / 2.) * self.zoom));
+        cx.notify();
+    }
+
+    /// A group's area: a soft panel with its name and size on top. Double-click it to zoom to it.
+    fn render_group(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
+        let frame = &self.groups[index];
+        let z = self.zoom;
+        let (x, y, width, height) = (frame.x, frame.y, frame.width, frame.height);
+        div()
+            .id(("group", index))
+            .absolute()
+            .left(self.offset.x + px(x * z))
+            .top(self.offset.y + px(y * z))
+            .w(px(width * z))
+            .h(px(height * z))
+            .rounded(px(radius::RADIUS_LG * z.max(0.5)))
+            .bg(theme::overlay(0.025))
+            .border_1()
+            .border_color(theme::overlay(0.07))
+            .child(
+                div()
+                    .h(px(FRAME_TITLE * z))
+                    .px(px(24. * z))
+                    .flex()
+                    .items_center()
+                    .gap(px(8. * z))
+                    .text_size(px(15. * z))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme::color(color::INK_MUTED))
+                    .child(frame.name.clone())
+                    .child(
+                        div()
+                            .text_size(px(12. * z))
+                            .font_weight(FontWeight::NORMAL)
+                            .text_color(theme::color(color::INK_FAINT))
+                            .child(match frame.tables {
+                                1 => "1 table".to_owned(),
+                                n => format!("{n} tables"),
+                            }),
+                    ),
+            )
+            .on_click(cx.listener(move |this, event: &gpui_kit::ClickEvent, _, cx| {
+                if event.click_count() >= 2 {
+                    this.zoom_to_area(x, y, width, height, cx);
+                }
+            }))
+            .into_any_element()
+    }
+
+    /// Tables whose names contain the search, in order.
+    fn matches(&self) -> Vec<usize> {
+        let query = self.query.trim().to_lowercase();
+        if query.is_empty() {
+            return Vec::new();
+        }
+        (0..self.schema.tables.len()).filter(|&i| self.schema.tables[i].name.to_lowercase().contains(&query)).collect()
+    }
+
+    /// The search field, top left; made once, when the window is at hand.
+    fn search_field(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<InputState> {
+        if let Some(search) = &self.search {
+            return search.clone();
+        }
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search tables"));
+        self.search_events = Some(cx.subscribe(&search, |this, search, event: &InputEvent, cx| match event {
+            InputEvent::Change => {
+                this.query = search.read(cx).value().to_string();
+                cx.notify();
+            }
+            InputEvent::PressEnter { .. } => {
+                if let Some(&first) = this.matches().first() {
+                    this.zoom_to(first, cx);
+                }
+            }
+            _ => {}
+        }));
+        self.search = Some(search.clone());
+        search
+    }
+
     fn zoom_centre(&mut self, factor: f32, cx: &mut Context<Self>) {
         let centre = self.bounds.get().map_or(point(px(0.), px(0.)), |bounds| bounds.center());
         self.zoom_at(factor, centre, cx);
     }
 
-    /// Tables related to the focused one, and itself.
+    /// The tables to keep bright: the search's matches while searching, else the focused table and
+    /// the tables related to it. `None` keeps them all bright.
     fn related(&self) -> Option<Vec<bool>> {
+        if !self.query.trim().is_empty() {
+            let mut lit = vec![false; self.schema.tables.len()];
+            for table in self.matches() {
+                lit[table] = true;
+            }
+            return Some(lit);
+        }
         let focused = self.focused?;
         let name = &self.schema.tables[focused].name;
         let mut related = vec![false; self.schema.tables.len()];
@@ -228,9 +346,13 @@ impl SchemaView {
                     )
             })))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.focused = if this.focused == Some(index) { None } else { Some(index) };
-                cx.notify();
+            .on_click(cx.listener(move |this, event: &gpui_kit::ClickEvent, _, cx| {
+                if event.click_count() >= 2 {
+                    this.zoom_to(index, cx);
+                } else {
+                    this.focused = if this.focused == Some(index) { None } else { Some(index) };
+                    cx.notify();
+                }
             }))
             .into_any_element()
     }
@@ -277,7 +399,7 @@ impl SchemaView {
             .text_size(px(11.))
             .text_color(theme::color(color::INK_FAINT))
             .child(format!(
-                "{sources} · {} tables · {} relations · click a table to focus it",
+                "{sources} · {} tables · {} relations · click a table to focus it, double-click to zoom to it",
                 self.schema.tables.len(),
                 self.schema.relations.len()
             ))
@@ -375,8 +497,6 @@ impl Render for SchemaView {
             .relative()
             .size_full()
             .overflow_hidden()
-            .child(chrome::dot_grid())
-            .child(relations(self, related.as_deref()))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseDownEvent, _, cx| {
@@ -408,10 +528,39 @@ impl Render for SchemaView {
             .on_pinch(cx.listener(|this, event: &PinchEvent, _, cx| {
                 this.zoom_at(1. + event.delta, event.position, cx);
             }));
+        // Groups at the back, then the relations' lines, then the tables on top.
+        for index in 0..self.groups.len() {
+            root = root.child(self.render_group(index, cx));
+        }
+        root = root.child(relations(self, related.as_deref()));
         for index in 0..self.schema.tables.len() {
             let dimmed = related.as_ref().is_some_and(|related| !related[index]);
             root = root.child(self.render_table(index, dimmed, cx));
         }
-        root.child(self.render_controls(cx)).child(self.render_caption()).into_any_element()
+        let search = self.search_field(window, cx);
+        let found = self.matches().len();
+        root.child(
+            div()
+                .absolute()
+                .top(len(space::SPACE_2))
+                .left(len(space::SPACE_2))
+                .w(px(260.))
+                .flex()
+                .items_center()
+                .gap(len(space::SPACE_2))
+                .child(div().flex_1().child(Input::new(&search).cleanable(true)))
+                .when(!self.query.trim().is_empty(), |row| {
+                    row.child(div().flex_none().text_size(px(11.)).text_color(theme::color(color::INK_FAINT)).child(
+                        match found {
+                            0 => "none".to_owned(),
+                            1 => "1 table".to_owned(),
+                            n => format!("{n} tables"),
+                        },
+                    ))
+                }),
+        )
+        .child(self.render_controls(cx))
+        .child(self.render_caption())
+        .into_any_element()
     }
 }

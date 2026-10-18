@@ -25,6 +25,9 @@ pub struct Column {
 pub struct Table {
     pub name: String,
     pub columns: Vec<Column>,
+    /// The part of the schema it belongs to: the schema file it's in, when the schema is split
+    /// into files, else its name's prefix (`FinanceCapex…` → `Finance`), when others share it.
+    pub group: Option<String>,
 }
 
 /// A foreign key: `from_table.from_column` points at `to_table.to_column`.
@@ -74,7 +77,38 @@ pub fn load(repo: &Path) -> Schema {
     let prisma = sources.first().is_some_and(|path| path.extension().is_some_and(|ext| ext == "prisma"));
     let mut schema = if prisma { parse_prisma(&texts.join("\n")) } else { parse_sql(&texts) };
     schema.sources = sources.iter().map(|path| path.strip_prefix(repo).unwrap_or(path).to_owned()).collect();
+    if prisma && sources.len() > 1 {
+        // A schema split into files is split by domain: each file is a group.
+        for (path, text) in sources.iter().zip(&texts) {
+            let group = path.file_stem().map(|stem| stem.to_string_lossy().replace(['-', '_'], " "));
+            for (model, _) in prisma_models(text) {
+                if let Some(table) = schema.tables.iter_mut().find(|table| table.name == model) {
+                    table.group.clone_from(&group);
+                }
+            }
+        }
+    }
+    if schema.tables.iter().all(|table| table.group.is_none()) {
+        group_by_prefix(&mut schema.tables);
+    }
     schema
+}
+
+/// Groups tables by their name's first word (`FinanceCapexPayment`, `finance_capex_payment` →
+/// `Finance`, `finance`) when at least two share it.
+pub fn group_by_prefix(tables: &mut [Table]) {
+    let prefix = |name: &str| -> String {
+        if let Some((first, _)) = name.split_once('_') {
+            return first.to_owned();
+        }
+        let end = name.char_indices().skip(1).find(|(_, c)| c.is_uppercase()).map_or(name.len(), |(i, _)| i);
+        name[..end].to_owned()
+    };
+    let prefixes: Vec<String> = tables.iter().map(|table| prefix(&table.name)).collect();
+    for (table, prefix) in tables.iter_mut().zip(&prefixes) {
+        let shared = prefixes.iter().filter(|other| *other == prefix).count() >= 2 && *prefix != table.name;
+        table.group = shared.then(|| prefix.clone());
+    }
 }
 
 /// Reads Prisma `model` blocks. A field whose type is another model is a relation, not a column;
@@ -84,7 +118,7 @@ pub fn parse_prisma(text: &str) -> Schema {
     let models: HashSet<&str> = blocks.iter().map(|(name, _)| name.as_str()).collect();
     let mut schema = Schema::default();
     for (name, body) in &blocks {
-        let mut table = Table { name: name.clone(), columns: Vec::new() };
+        let mut table = Table { name: name.clone(), columns: Vec::new(), group: None };
         let mut foreign: Vec<String> = Vec::new();
         for line in body.lines().map(|line| line.split("//").next().unwrap_or_default().trim()) {
             if line.is_empty() || line.starts_with("@@") {
@@ -172,7 +206,7 @@ pub fn parse_sql(files: &[String]) -> Schema {
             let Some(open) = statement.find('(') else { continue };
             let Some(close) = statement.rfind(')') else { continue };
             let name = table_name(&statement["create table".len()..open]);
-            let mut table = Table { name: name.clone(), columns: Vec::new() };
+            let mut table = Table { name: name.clone(), columns: Vec::new(), group: None };
             for item in split_top_level(&statement[open + 1..close]) {
                 apply_definition(&mut table, &mut relations, &item);
             }
@@ -375,81 +409,220 @@ pub fn box_height(columns: usize) -> f32 {
     HEADER_HEIGHT + ROW_HEIGHT * f32::from(u16::try_from(columns).unwrap_or(u16::MAX)) + 8.
 }
 
-/// Places every table. Each group of related tables starts from its most connected table and
-/// spreads right, one column per step along its relations; groups stack downwards, and tables
-/// with no relations end up in a grid at the bottom.
-pub fn layout(schema: &Schema) -> Vec<Placed> {
+/// A group's labelled area on the diagram.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Frame {
+    pub name: String,
+    pub tables: usize,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+/// Where everything goes, in diagram units.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Layout {
+    /// One per table, in the schema's order.
+    pub tables: Vec<Placed>,
+    /// One per group, when the schema has groups.
+    pub groups: Vec<Frame>,
+}
+
+/// Inside a group's frame: room for its title above, and padding around.
+pub const FRAME_TITLE: f32 = 40.;
+pub const FRAME_PADDING: f32 = 24.;
+const GROUP_GAP: f32 = 64.;
+
+/// A placed block of tables (a related cluster, the unrelated ones, or a whole group).
+struct Block {
+    /// (table, x, y) inside the block.
+    tables: Vec<(usize, f32, f32)>,
+    width: f32,
+    height: f32,
+}
+
+/// Places every table so the whole reads like a page, not a tower. Tables are laid out by group
+/// (when the schema has groups), each group in its own labelled frame. Inside a group, related
+/// tables start from the most connected one and spread right, one column per step along their
+/// relations; a column taller than the page wraps into the next, and tables with no relations
+/// pack into columns of their own. Groups then fill rows in name order, so related parts
+/// (`finance aging`, `finance capex`) sit side by side.
+pub fn layout(schema: &Schema) -> Layout {
+    let count = schema.tables.len();
     let index: HashMap<&str, usize> =
         schema.tables.iter().enumerate().map(|(i, table)| (table.name.as_str(), i)).collect();
-    let mut neighbours: Vec<Vec<usize>> = vec![Vec::new(); schema.tables.len()];
+    let mut neighbours: Vec<Vec<usize>> = vec![Vec::new(); count];
     for relation in &schema.relations {
         if let (Some(&a), Some(&b)) = (index.get(relation.from_table.as_str()), index.get(relation.to_table.as_str()))
             && a != b
+            && !neighbours[a].contains(&b)
         {
             neighbours[a].push(b);
             neighbours[b].push(a);
         }
     }
-    let mut placed = vec![Placed { x: 0., y: 0., width: BOX_WIDTH, height: 0. }; schema.tables.len()];
-    for (i, table) in schema.tables.iter().enumerate() {
-        placed[i].height = box_height(table.columns.len());
+    let heights: Vec<f32> = schema.tables.iter().map(|table| box_height(table.columns.len())).collect();
+
+    // Groups in name order; tables without one last, unframed when nothing has a group.
+    let mut names: Vec<Option<&str>> = schema.tables.iter().map(|table| table.group.as_deref()).collect();
+    names.sort_unstable_by(|a, b| a.is_none().cmp(&b.is_none()).then(a.cmp(b)));
+    names.dedup();
+    let framed = names.iter().any(Option::is_some);
+
+    let mut group_blocks: Vec<(Option<&str>, usize, Block)> = Vec::new();
+    for name in names {
+        let members: Vec<usize> = (0..count).filter(|&i| schema.tables[i].group.as_deref() == name).collect();
+        let blocks = arrange(&members, &neighbours, &heights);
+        let page = page_width(&members, &heights);
+        let mut block = pack(blocks, page, COLUMN_GAP);
+        if framed {
+            for table in &mut block.tables {
+                table.1 += FRAME_PADDING;
+                table.2 += FRAME_TITLE;
+            }
+            block.width += FRAME_PADDING * 2.;
+            block.height += FRAME_TITLE + FRAME_PADDING;
+        }
+        group_blocks.push((name, members.len(), block));
     }
-    let mut seen = vec![false; schema.tables.len()];
-    let mut order: Vec<usize> = (0..schema.tables.len()).collect();
-    order.sort_by_key(|&i| std::cmp::Reverse(neighbours[i].len()));
-    let mut top = 0.0_f32;
+
+    let all: Vec<usize> = (0..count).collect();
+    let page = page_width(&all, &heights) * if framed { 1.25 } else { 1. };
+    let mut result =
+        Layout { tables: vec![Placed { x: 0., y: 0., width: BOX_WIDTH, height: 0. }; count], groups: Vec::new() };
+    let (mut x, mut y, mut row_height) = (0.0_f32, 0.0_f32, 0.0_f32);
+    for (name, tables, block) in &group_blocks {
+        if x > 0. && x + block.width > page {
+            x = 0.;
+            y += row_height + GROUP_GAP;
+            row_height = 0.;
+        }
+        for &(table, bx, by) in &block.tables {
+            result.tables[table] = Placed { x: x + bx, y: y + by, width: BOX_WIDTH, height: heights[table] };
+        }
+        if framed {
+            result.groups.push(Frame {
+                name: name.unwrap_or("other").to_owned(),
+                tables: *tables,
+                x,
+                y,
+                width: block.width,
+                height: block.height,
+            });
+        }
+        x += block.width + GROUP_GAP;
+        row_height = row_height.max(block.height);
+    }
+    result
+}
+
+/// How wide a page should be for these tables: a 16:10 rectangle holding them with their gaps.
+fn page_width(tables: &[usize], heights: &[f32]) -> f32 {
+    let area: f32 = tables.iter().map(|&t| (BOX_WIDTH + COLUMN_GAP) * (heights[t] + ROW_GAP)).sum();
+    let tallest = tables.iter().map(|&t| heights[t]).fold(0., f32::max);
+    (area / 1.6).sqrt().max(tallest) * 1.6
+}
+
+/// The clusters of related tables among `members` (starting from the most connected), then the
+/// ones related to nothing here, as blocks.
+fn arrange(members: &[usize], neighbours: &[Vec<usize>], heights: &[f32]) -> Vec<Block> {
+    let inside = |t: usize| members.contains(&t);
+    let page_height = page_width(members, heights) / 1.6;
+    let mut seen: HashSet<usize> = HashSet::new();
+    let mut order = members.to_vec();
+    let degree = |t: usize| neighbours[t].iter().filter(|&&n| inside(n)).count();
+    order.sort_by_key(|&t| std::cmp::Reverse(degree(t)));
+    let mut blocks = Vec::new();
     let mut loners = Vec::new();
     for &start in &order {
-        if seen[start] {
+        if !seen.insert(start) {
             continue;
         }
-        if neighbours[start].is_empty() {
-            seen[start] = true;
+        if degree(start) == 0 {
             loners.push(start);
             continue;
         }
-        // Breadth first from the hub: each step along a relation is one column further right.
         let mut layers: Vec<Vec<usize>> = Vec::new();
         let mut queue = VecDeque::from([(start, 0_usize)]);
-        seen[start] = true;
         while let Some((table, depth)) = queue.pop_front() {
             if layers.len() <= depth {
                 layers.push(Vec::new());
             }
             layers[depth].push(table);
             for &next in &neighbours[table] {
-                if !seen[next] {
-                    seen[next] = true;
+                if inside(next) && seen.insert(next) {
                     queue.push_back((next, depth + 1));
                 }
             }
         }
-        let mut bottom = top;
-        for (depth, layer) in layers.iter().enumerate() {
-            let x = f32::from(u16::try_from(depth).unwrap_or(u16::MAX)) * (BOX_WIDTH + COLUMN_GAP);
-            let mut y = top;
+        let mut block = Block { tables: Vec::new(), width: 0., height: 0. };
+        let mut x = 0.;
+        for layer in &layers {
+            let mut y = 0.;
             for &table in layer {
-                placed[table].x = x;
-                placed[table].y = y;
-                y += placed[table].height + ROW_GAP;
+                // Wrap into a new column rather than run past the page.
+                if y > 0. && y + heights[table] > page_height {
+                    x += BOX_WIDTH + ROW_GAP;
+                    y = 0.;
+                }
+                block.tables.push((table, x, y));
+                y += heights[table] + ROW_GAP;
+                block.height = block.height.max(y - ROW_GAP);
             }
-            bottom = bottom.max(y);
+            x += BOX_WIDTH + COLUMN_GAP;
         }
-        top = bottom + ROW_GAP;
+        block.width = x - COLUMN_GAP;
+        blocks.push(block);
     }
-    // Unrelated tables: a grid, four across.
-    let mut row_height = 0.0_f32;
-    for (n, &table) in loners.iter().enumerate() {
-        let column = n % 4;
-        if column == 0 && n > 0 {
-            top += row_height + ROW_GAP;
+    if !loners.is_empty() {
+        // Masonry: each table into the shortest column, as many columns as keep it page-high.
+        let total: f32 = loners.iter().map(|&t| heights[t] + ROW_GAP).sum();
+        #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "a small, positive column count")]
+        let columns = ((total / page_height).ceil() as usize).clamp(1, loners.len());
+        let mut tops = vec![0.0_f32; columns];
+        let mut block = Block { tables: Vec::new(), width: 0., height: 0. };
+        for &table in &loners {
+            let (column, top) = tops
+                .iter()
+                .copied()
+                .enumerate()
+                .fold((0, f32::MAX), |best, (i, y)| if y < best.1 { (i, y) } else { best });
+            block.tables.push((table, column_x(column, ROW_GAP), top));
+            tops[column] = top + heights[table] + ROW_GAP;
+        }
+        block.width = column_x(columns, ROW_GAP) - ROW_GAP;
+        block.height = tops.iter().copied().fold(0., f32::max) - ROW_GAP;
+        blocks.push(block);
+    }
+    blocks
+}
+
+/// Blocks in rows, tallest first, each row as wide as `page` allows.
+fn pack(mut blocks: Vec<Block>, page: f32, gap: f32) -> Block {
+    blocks.sort_by(|a, b| b.height.total_cmp(&a.height));
+    let mut packed = Block { tables: Vec::new(), width: 0., height: 0. };
+    let (mut x, mut y, mut row_height) = (0.0_f32, 0.0_f32, 0.0_f32);
+    for block in blocks {
+        if x > 0. && x + block.width > page {
+            x = 0.;
+            y += row_height + gap;
             row_height = 0.;
         }
-        placed[table].x = f32::from(u16::try_from(column).unwrap_or(0)) * (BOX_WIDTH + COLUMN_GAP);
-        placed[table].y = top;
-        row_height = row_height.max(placed[table].height);
+        for (table, bx, by) in block.tables {
+            packed.tables.push((table, x + bx, y + by));
+        }
+        packed.width = packed.width.max(x + block.width);
+        packed.height = packed.height.max(y + block.height);
+        x += block.width + gap;
+        row_height = row_height.max(block.height);
     }
-    placed
+    packed
+}
+
+/// The left edge of column `n` of boxes, `gap` apart.
+fn column_x(n: usize, gap: f32) -> f32 {
+    f32::from(u16::try_from(n).unwrap_or(u16::MAX)) * (BOX_WIDTH + gap)
 }
 
 /// The zoom (at most 1) and offset that fit a `width` × `height` diagram into a `view_width` ×
@@ -555,11 +728,89 @@ mod tests {
     #[test]
     fn lays_related_tables_out_from_the_hub() {
         let schema = parse_prisma(PRISMA);
-        let placed = layout(&schema);
+        let placed = layout(&schema).tables;
         assert_eq!(placed.len(), 2);
         // User and Post are related: side by side, one column apart.
         assert!((placed[1].x - placed[0].x).abs() > BOX_WIDTH);
         assert!((placed[0].height - box_height(3)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn a_big_schema_reads_like_a_page_not_a_tower() {
+        // A hub with 20 related tables, a few small groups, and 40 tables on their own.
+        let column = |name: &str| Column { name: name.into(), ty: "Int".into(), key: None, nullable: false };
+        let table = |name: String, columns: usize| Table {
+            name,
+            columns: (0..columns).map(|i| column(&format!("c{i}"))).collect(),
+            group: None,
+        };
+        let mut schema = Schema::default();
+        schema.tables.push(table("Hub".into(), 10));
+        for i in 0..20 {
+            schema.tables.push(table(format!("Spoke{i}"), 4 + i % 9));
+            schema.relations.push(Relation {
+                from_table: format!("Spoke{i}"),
+                from_column: "c0".into(),
+                to_table: "Hub".into(),
+                to_column: "c0".into(),
+            });
+        }
+        for i in 0..40 {
+            schema.tables.push(table(format!("Lone{i}"), 3 + i % 12));
+        }
+        let placed = layout(&schema).tables;
+        let width = placed.iter().map(|p| p.x + p.width).fold(0., f32::max);
+        let height = placed.iter().map(|p| p.y + p.height).fold(0., f32::max);
+        let ratio = width / height;
+        assert!((0.8..=3.0).contains(&ratio), "{width} × {height}");
+        // No two boxes overlap.
+        for (i, a) in placed.iter().enumerate() {
+            for b in &placed[i + 1..] {
+                let apart =
+                    a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y;
+                assert!(apart, "{a:?} overlaps {b:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_schema_split_into_files_is_grouped_by_file() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        std::fs::create_dir_all(dir.path().join("prisma")).expect("folder");
+        std::fs::write(dir.path().join("prisma/finance-capex.prisma"), "model Capex {\n id Int @id\n}\nmodel CapexLine {\n id Int @id\n capex Capex @relation(fields: [capexId], references: [id])\n capexId Int\n}").expect("written");
+        std::fs::write(dir.path().join("prisma/base.prisma"), "model User {\n id Int @id\n}").expect("written");
+        let schema = load(dir.path());
+        let groups: Vec<(&str, Option<&str>)> =
+            schema.tables.iter().map(|t| (t.name.as_str(), t.group.as_deref())).collect();
+        assert!(
+            groups.contains(&("Capex", Some("finance capex")))
+                && groups.contains(&("CapexLine", Some("finance capex")))
+        );
+        assert!(groups.contains(&("User", Some("base"))));
+        assert_eq!(schema.relations.len(), 1);
+    }
+
+    #[test]
+    fn groups_by_name_prefix_and_frames_each_group() {
+        let names = ["FinanceInvoice", "FinanceBudget", "ScmStock", "ScmInbound", "User"];
+        let mut tables: Vec<Table> =
+            names.iter().map(|name| Table { name: (*name).into(), columns: Vec::new(), group: None }).collect();
+        group_by_prefix(&mut tables);
+        let groups: Vec<Option<&str>> = tables.iter().map(|t| t.group.as_deref()).collect();
+        assert_eq!(groups, [Some("Finance"), Some("Finance"), Some("Scm"), Some("Scm"), None]);
+        let schema = Schema { tables, ..Schema::default() };
+        let placed = layout(&schema);
+        assert_eq!(
+            placed.groups.iter().map(|g| (g.name.as_str(), g.tables)).collect::<Vec<_>>(),
+            [("Finance", 2), ("Scm", 2), ("other", 1)]
+        );
+        // Each table sits inside its group's frame.
+        for (table, place) in schema.tables.iter().zip(&placed.tables) {
+            let name = table.group.as_deref().unwrap_or("other");
+            let frame = placed.groups.iter().find(|g| g.name == name).expect("a frame");
+            assert!(place.x >= frame.x && place.x + place.width <= frame.x + frame.width);
+            assert!(place.y >= frame.y + FRAME_TITLE && place.y + place.height <= frame.y + frame.height);
+        }
     }
 
     #[test]

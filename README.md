@@ -44,8 +44,9 @@ It isn't an IDE and doesn't try to replace yours. It's the place the agents live
   uncommitted work or for the whole branch. History shows every branch as a graph, with tags,
   authors and dates; click a commit to see its diff.
 - **A diagram of the database.** When a project has a Prisma schema or SQL migrations, the
-  database button draws every table with its columns and keys, and a line for each foreign key.
-  Pinch to zoom, scroll or drag to pan, click a table to see what it's connected to. A pane whose branch has a pull request shows its number
+  database button draws every table with its columns and keys, and a line for each foreign key,
+  grouped by schema file (or by name prefix). Pinch to zoom, scroll or drag to pan, search by
+  name, click a table to see what it's connected to, double-click to zoom to it. A pane whose branch has a pull request shows its number
   and state, from the `gh` CLI.
 - **Follows the agent you're looking at.** Focus a pane that works in another git worktree, and the
   sidebar switches to that worktree.
