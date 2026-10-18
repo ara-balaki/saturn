@@ -1,5 +1,6 @@
-//! The grid as it was, per project, so Saturn opens where it left off: the shape of the grid, and
-//! for each tab its folder, the name typed for it, and the Claude session it was running.
+//! The window as it was, per project, so Saturn opens where it left off: the repos it held, the
+//! shape of the grid, and for each tab its folder, the name typed for it, and the Claude session
+//! it was running.
 //! Kept in `~/Library/Application Support/Saturn/sessions.json`.
 
 use std::collections::HashMap;
@@ -10,6 +11,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SavedGrid {
+    /// The other repos the window held, after the one it's saved under.
+    #[serde(default)]
+    pub projects: Vec<PathBuf>,
     pub shape: Shape,
     /// One per tab, in the order the shape lists them.
     pub tabs: Vec<SavedTab>,

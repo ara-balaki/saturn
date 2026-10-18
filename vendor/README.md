@@ -1,10 +1,10 @@
 # Vendored GPUI
 
 `gpui-pre` and `gpui-pre-apple` 0.3.9 from crates.io (Apache-2.0, see each crate's
-`LICENSE-APACHE`), with one patch: a **backdrop blur** primitive, so a panel can show what's under
-it frosted. The root `Cargo.toml` points Saturn at these copies with `[patch.crates-io]`; the
-workspace excludes them, so Saturn's lints and formatter leave them alone. `gpui-pre`'s examples
-were left out.
+`LICENSE-APACHE`), with two patches: a **backdrop blur** primitive, so a panel can show what's
+under it frosted, and drop shadows that stay outside their element. The root `Cargo.toml` points
+Saturn at these copies with `[patch.crates-io]`; the workspace excludes them, so Saturn's lints and
+formatter leave them alone. `gpui-pre`'s examples were left out.
 
 The idea and the shape of the API come from the
 [`gpui_rn` fork](https://github.com/rngpui/zed-react-native-gpui) (Apache-2.0); the code here is
@@ -17,6 +17,8 @@ written against this version of GPUI. Every change is marked "Saturn's patch":
 - `gpui-pre-apple/build.rs`: exports `BackdropBlur` and `BackdropBlurInputIndex` to the header.
 - `gpui-pre-apple/src/metal_renderer.rs`: the layer's texture stays readable; a blur batch copies
   what was drawn so far into a mipmapped texture and draws the blurs from it.
-- `gpui-pre-apple/src/shaders.metal`: `backdrop_blur_vertex` and `backdrop_blur_fragment`.
+- `gpui-pre-apple/src/shaders.metal`: `backdrop_blur_vertex` and `backdrop_blur_fragment`; and
+  `shadow_fragment` clips a drop shadow to outside its element, as CSS does, so shadows don't
+  tint translucent panels.
 
 To move to a newer GPUI: copy the new crates here, then re-apply the changes above.

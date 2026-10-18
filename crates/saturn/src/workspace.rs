@@ -126,6 +126,9 @@ impl Render for DividerPreview {
 }
 
 pub struct Workspace {
+    /// The repos this window holds, in the sidebar's order. The first names the saved session.
+    projects: Vec<PathBuf>,
+    /// The selected repo: where new tabs and ticket worktrees go, and whose ticket settings apply.
     project: PathBuf,
     layout: Layout,
     terminals: HashMap<TabId, Entity<TerminalView>>,
@@ -401,6 +404,7 @@ impl Workspace {
             root: project.clone(),
             follow_pane: true,
             editor: cx.new(|_| EditorView::default()),
+            projects: vec![project.clone()],
             project,
             layout: Layout::default(),
             terminals: HashMap::new(),
@@ -459,6 +463,9 @@ impl Workspace {
             .map(|view| view.read(cx).cwd.clone());
         let target =
             pane_folder.map_or_else(|| self.project.clone(), |folder| git::toplevel(&folder).unwrap_or(folder));
+        if let Some(owner) = self.project_of(&target) {
+            self.project = owner;
+        }
         if target == self.root {
             return;
         }
@@ -489,9 +496,59 @@ impl Workspace {
         settings_view::open(cx.weak_entity(), command, window, cx);
     }
 
-    /// The project the window was opened on.
+    /// The selected repo.
     pub fn project_path(&self) -> &Path {
         &self.project
+    }
+
+    /// The repo of this window that `folder` belongs to: the repo itself, a folder inside it, or
+    /// one of its worktrees.
+    fn project_of(&self, folder: &Path) -> Option<PathBuf> {
+        if let Some(project) = self.projects.iter().find(|project| folder.starts_with(project)) {
+            return Some(project.clone());
+        }
+        let main = git::main_worktree(folder)?;
+        self.projects.iter().find(|project| **project == main).cloned()
+    }
+
+    /// Shows `project` in the sidebar and makes it where new tabs open. Choosing a repo by hand
+    /// stops the sidebar following panes, so the choice sticks.
+    fn select_project(&mut self, project: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.follow_pane = false;
+        self.project = project;
+        if !self.roots.contains_key(&self.project) {
+            let views = Self::root_views(&self.project, window, cx);
+            self.roots.insert(self.project.clone(), views);
+        }
+        self.root = self.project.clone();
+        cx.notify();
+    }
+
+    /// Adds a repo to the window (or selects it, if it's here already).
+    pub fn add_project(&mut self, project: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        settings::remember_project(&project);
+        if !self.projects.contains(&project) {
+            self.projects.push(project.clone());
+        }
+        self.select_project(project, window, cx);
+        if self.layout.is_empty() {
+            self.open_terminal(Placement::Tab, window, cx);
+        }
+        self.save_session(cx);
+    }
+
+    /// Takes a repo out of the window's list. Its panes stay where they are.
+    fn remove_project(&mut self, project: &Path, window: &mut Window, cx: &mut Context<Self>) {
+        if self.projects.len() < 2 {
+            return;
+        }
+        self.projects.retain(|p| p != project);
+        if self.project == project {
+            let first = self.projects[0].clone();
+            self.select_project(first, window, cx);
+        }
+        self.save_session(cx);
+        cx.notify();
     }
 
     pub fn clickup(&self) -> &ClickUpState {
@@ -766,11 +823,13 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<TabId> {
-        let cwd = self
+        // In the focused pane's folder when it's in the repo the sidebar shows, else at that repo's top.
+        let pane_folder = self
             .layout
             .focused_tab()
             .and_then(|focused| self.terminals.get(&focused))
-            .map_or_else(|| self.project.clone(), |view| view.read(cx).cwd.clone());
+            .map(|view| view.read(cx).cwd.clone());
+        let cwd = pane_folder.filter(|folder| folder.starts_with(&self.root)).unwrap_or_else(|| self.root.clone());
         let tab = self.spawn_terminal(&cwd, window, cx)?;
         match placement {
             Placement::Tab => self.layout.add_tab(tab, None),
@@ -821,6 +880,13 @@ impl Workspace {
     /// resume command typed (not run) where one was running. False when nothing was saved.
     pub fn restore(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(saved) = session::load(&self.project) else { return false };
+        for project in &saved.projects {
+            if project.is_dir() && !self.projects.contains(project) {
+                self.projects.push(project.clone());
+                let views = Self::root_views(project, window, cx);
+                self.roots.insert(project.clone(), views);
+            }
+        }
         let mut tabs = Vec::new();
         for saved_tab in &saved.tabs {
             let cwd = if saved_tab.cwd.is_dir() { saved_tab.cwd.clone() } else { self.project.clone() };
@@ -851,7 +917,9 @@ impl Workspace {
     /// Remembers the grid for the next start.
     fn save_session(&self, cx: &gpui_kit::App) {
         let tabs: Vec<TabId> = self.layout.tabs().collect();
+        let home = &self.projects[0];
         let grid = (!tabs.is_empty()).then(|| SavedGrid {
+            projects: self.projects[1..].to_vec(),
             shape: self.layout.shape(),
             tabs: tabs
                 .iter()
@@ -862,7 +930,7 @@ impl Workspace {
                 })
                 .collect(),
         });
-        session::save(&self.project, grid);
+        session::save(home, grid);
     }
 
     /// Opens a terminal next to a given cell (from its header buttons).
@@ -1059,28 +1127,18 @@ impl Workspace {
         self.update_layout(window, cx, |layout| layout.move_tab(tab, cell, index));
     }
 
+    /// Asks for a folder and adds it to the window's repos.
     fn open_project(window: &mut Window, cx: &mut Context<Self>) {
         let paths = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
             multiple: false,
-            prompt: Some("Open Project".into()),
+            prompt: Some("Add Repo".into()),
         });
         cx.spawn_in(window, async move |this, cx| {
             let Ok(Ok(Some(paths))) = paths.await else { return };
             let Some(project) = paths.into_iter().next() else { return };
-            settings::remember_project(&project);
-            let _ = this.update_in(cx, |this, window, cx| {
-                let views = Self::root_views(&project, window, cx);
-                this.roots = HashMap::from([(project.clone(), views)]);
-                this.root = project.clone();
-                this.project = project;
-                this.sync_root(window, cx);
-                if this.layout.is_empty() {
-                    this.open_terminal(Placement::Tab, window, cx);
-                }
-                cx.notify();
-            });
+            let _ = this.update_in(cx, |this, window, cx| this.add_project(project, window, cx));
         })
         .detach();
     }
@@ -1425,6 +1483,76 @@ impl Workspace {
             }))
     }
 
+    /// The window's repos, top of the sidebar. The selected one shows the folder the sidebar is on
+    /// (a ticket's worktree, when following a pane in one) and the follow switch; any other can be
+    /// selected, or taken out of the list. Then a way to add one.
+    fn render_repos(&self, cx: &mut Context<Self>) -> AnyElement {
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        let short = |path: &Path| match home.as_deref().and_then(|home| path.strip_prefix(home).ok()) {
+            Some(rest) => format!("~/{}", rest.display()),
+            None => path.display().to_string(),
+        };
+        let removable = self.projects.len() > 1;
+        let mut list = div().flex().flex_col().gap(px(2.));
+        for (index, project) in self.projects.iter().enumerate() {
+            let selected = *project == self.project;
+            let shown = if selected { &self.root } else { project };
+            let name = shown.file_name().map_or_else(|| "/".to_owned(), |name| name.to_string_lossy().into_owned());
+            let branch = self.roots.get(shown).and_then(|views| views.branch.clone());
+            let detail = branch.map_or_else(|| short(shown), |branch| format!("{branch} · {}", short(shown)));
+            let mut row = chrome::repo_row(("repo", index), &name, &detail, selected);
+            if selected {
+                row = row.child(
+                    chrome::icon_button("follow-pane", if self.follow_pane { "locate-fixed" } else { "locate" }, true)
+                        .when(self.follow_pane, |button| button.bg(theme::color(color::CONTROL_PRESSED)))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.follow_pane = !this.follow_pane;
+                            this.sync_root(window, cx);
+                            cx.notify();
+                        })),
+                );
+            } else {
+                let picked = project.clone();
+                row = row
+                    .on_click(cx.listener(move |this, _, window, cx| this.select_project(picked.clone(), window, cx)));
+                if removable {
+                    let removed = project.clone();
+                    row = row.child(
+                        chrome::icon_button(("remove-repo", index), "x", true)
+                            .invisible()
+                            .group_hover("repo", gpui_kit::Styled::visible)
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                cx.stop_propagation();
+                                this.remove_project(&removed, window, cx);
+                            })),
+                    );
+                }
+            }
+            list = list.child(row);
+        }
+        list.child(
+            div()
+                .id("add-repo")
+                .flex()
+                .items_center()
+                .gap(len(space::SPACE_2))
+                .h(px(24.))
+                .px(len(space::SPACE_2))
+                .rounded(len(radius::RADIUS_SM))
+                .cursor_pointer()
+                .text_size(px(12.))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme::color(color::INK_FAINT))
+                .hover(|s| s.bg(theme::color(color::CONTROL)).text_color(theme::color(color::INK_MUTED)))
+                .child(chrome::icon("plus", 14., theme::color(color::INK_FAINT)))
+                .child("Add repo…")
+                .child(div().flex_1())
+                .child("⌘O")
+                .on_click(cx.listener(|_, _, window, cx| Self::open_project(window, cx))),
+        )
+        .into_any_element()
+    }
+
     /// Sidebar | (editor / grid), with draggable dividers. The panels stay in the same place in
     /// the tree when toggled, so terminals never restart.
     fn render_workbench(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1442,27 +1570,13 @@ impl Workspace {
         };
         let switch = self.render_sidebar_switch(cx);
         let root = self.current_root();
-        let (files, changes, branch) = (root.files.clone(), root.changes.clone(), root.branch.clone());
-        let root_name =
-            self.root.file_name().map_or_else(|| "/".to_owned(), |name| name.to_string_lossy().into_owned());
-        let home = std::env::var_os("HOME").map(PathBuf::from);
-        let short_path = match home.as_deref().and_then(|home| self.root.strip_prefix(home).ok()) {
-            Some(rest) => format!("~/{}", rest.display()),
-            None => self.root.display().to_string(),
-        };
-        let detail = branch.map_or_else(|| short_path.clone(), |branch| format!("{branch} · {short_path}"));
-        let follow = chrome::icon_button("follow-pane", if self.follow_pane { "locate-fixed" } else { "locate" }, true)
-            .when(self.follow_pane, |button| button.bg(theme::color(color::CONTROL_PRESSED)))
-            .on_click(cx.listener(|this, _, window, cx| {
-                this.follow_pane = !this.follow_pane;
-                this.sync_root(window, cx);
-                cx.notify();
-            }));
+        let (files, changes) = (root.files.clone(), root.changes.clone());
+        let repos = self.render_repos(cx);
         let sidebar = match self.sidebar_tab {
-            SidebarTab::Files => chrome::sidebar(&root_name, &detail, follow, switch, None, files),
+            SidebarTab::Files => chrome::sidebar(repos, switch, None, files),
             SidebarTab::Changes => {
                 let strip = changes_view::scope_strip(&changes, cx).into_any_element();
-                chrome::sidebar(&root_name, &detail, follow, switch, Some(strip), changes)
+                chrome::sidebar(repos, switch, Some(strip), changes)
             }
         };
         div().flex_1().min_h_0().child(

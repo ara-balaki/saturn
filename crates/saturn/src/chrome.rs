@@ -228,52 +228,60 @@ pub fn dot_grid() -> impl IntoElement {
     .left_0()
 }
 
-/// The sidebar: the folder it shows (with an action at the end of its header), the Files/Changes
-/// switch with whatever belongs to the chosen view, and that view in the well.
+/// The sidebar: its header (the window's repos), the Files/Changes switch, an optional strip of
+/// controls for the tab, and the tab's content in a well.
 pub fn sidebar(
-    project_name: &str,
-    project_path: &str,
-    header_action: impl IntoElement,
+    header: impl IntoElement,
     switch: impl IntoElement,
     strip: Option<AnyElement>,
     content: impl IntoElement,
 ) -> AnyElement {
-    panel()
+    panel().child(header).child(switch).children(strip).child(well().child(content)).into_any_element()
+}
+
+/// One repo in the sidebar's list: its name and, below, its branch and folder.
+pub fn repo_row(
+    id: impl Into<ElementId>,
+    name: &str,
+    detail: &str,
+    selected: bool,
+) -> gpui_kit::Stateful<gpui_kit::Div> {
+    div()
+        .id(id)
+        .group("repo")
+        .flex()
+        .items_center()
+        .gap(len(space::SPACE_3))
+        .pl(len(space::SPACE_1))
+        .pr(len(space::SPACE_1))
+        .py(px(2.))
+        .rounded(len(radius::RADIUS_SM))
+        .cursor_pointer()
+        .when(selected, |row| row.bg(theme::color(color::CONTROL)))
+        .when(!selected, |row| row.hover(|s| s.bg(theme::color(color::CONTROL))))
+        .child(icon_button("repo-icon", "folder", false))
         .child(
             div()
-                .flex()
-                .items_center()
-                .gap(len(space::SPACE_3))
-                .pl(len(space::SPACE_1))
-                .child(icon_button("project", "folder", false))
+                .flex_1()
+                .min_w_0()
                 .child(
                     div()
-                        .flex_1()
-                        .min_w_0()
-                        .child(
-                            div()
-                                .text_size(px(15.))
-                                .line_height(px(20.))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme::color(color::INK))
-                                .truncate()
-                                .child(project_name.to_owned()),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(11.))
-                                .line_height(px(14.))
-                                .text_color(theme::color(color::INK_FAINT))
-                                .truncate()
-                                .child(project_path.to_owned()),
-                        ),
+                        .text_size(px(15.))
+                        .line_height(px(20.))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme::color(if selected { color::INK } else { color::INK_MUTED }))
+                        .truncate()
+                        .child(name.to_owned()),
                 )
-                .child(header_action),
+                .child(
+                    div()
+                        .text_size(px(11.))
+                        .line_height(px(14.))
+                        .text_color(theme::color(color::INK_FAINT))
+                        .truncate()
+                        .child(detail.to_owned()),
+                ),
         )
-        .child(switch)
-        .children(strip)
-        .child(well().child(content))
-        .into_any_element()
 }
 
 /// What the grid shows with no terminal open: the dot grid, a headline in two weights, one

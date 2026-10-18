@@ -124,6 +124,14 @@ pub fn merge_base(repo: &Path) -> Option<String> {
     run(repo, &["merge-base", "HEAD", &default_branch]).map(|sha| sha.trim().to_owned())
 }
 
+/// The main checkout of the repository `dir` is in: itself for a normal checkout, the original
+/// for a linked worktree (`git worktree add`), so a ticket's worktree belongs to its repository.
+pub fn main_worktree(dir: &Path) -> Option<PathBuf> {
+    let common = run(dir, &["rev-parse", "--path-format=absolute", "--git-common-dir"])?;
+    let common = PathBuf::from(common.trim());
+    common.parent().map(Path::to_path_buf)
+}
+
 /// A worktree for `ticket` next to `repo` (`../<repo>-<ticket>`) on a branch named after the
 /// ticket, made from the current `HEAD`, or the one already there. Returns its folder.
 pub fn ticket_worktree(repo: &Path, ticket: &str) -> Result<PathBuf, String> {
@@ -253,6 +261,16 @@ mod tests {
         assert_eq!(branch(&first).as_deref(), Some("abc-240"));
         assert_eq!(ticket_worktree(dir.path(), "ABC-240").expect("reused"), first);
         let _ = std::fs::remove_dir_all(&first);
+    }
+
+    #[test]
+    fn a_worktree_belongs_to_its_main_checkout() {
+        let dir = repo();
+        let main = toplevel(dir.path()).expect("a repository");
+        let worktree = ticket_worktree(dir.path(), "ABC-241").expect("created");
+        assert_eq!(main_worktree(&worktree), Some(main.clone()));
+        assert_eq!(main_worktree(&main), Some(main));
+        let _ = std::fs::remove_dir_all(&worktree);
     }
 
     #[test]
