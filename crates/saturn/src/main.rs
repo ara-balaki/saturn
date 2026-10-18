@@ -11,6 +11,7 @@ mod editor_view;
 mod files_view;
 mod github;
 mod history_view;
+mod impact_view;
 mod languages;
 mod menu_bar;
 mod notify;

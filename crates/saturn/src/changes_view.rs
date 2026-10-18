@@ -29,6 +29,8 @@ pub enum ChangesEvent {
     Updated { files: Vec<DiffFile>, scope: Scope },
     /// Show the repository's history.
     History { repo: PathBuf },
+    /// Show what the changes reach.
+    Impact { repo: PathBuf },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -331,6 +333,10 @@ impl ChangesView {
                     .text_size(px(12.))
                     .text_color(theme::color(color::INK_MUTED))
                     .child(self.branch.clone().unwrap_or_else(|| "No branch".to_owned())),
+            )
+            .child(
+                chrome::button("impact", "Impact", None, false)
+                    .on_click(cx.listener(|this, _, _, cx| cx.emit(ChangesEvent::Impact { repo: this.repo.clone() }))),
             )
             .child(
                 chrome::button("history", "History", None, false)

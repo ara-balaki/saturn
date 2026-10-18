@@ -19,6 +19,7 @@ use gpui_kit::component::tooltip::Tooltip;
 
 use crate::chrome;
 use crate::history_view::{HistoryEvent, HistoryView};
+use crate::impact_view::ImpactView;
 use crate::schema_view::SchemaView;
 use crate::theme::{self, len};
 
@@ -61,6 +62,7 @@ enum Front {
     Review,
     History,
     Schema,
+    Impact,
 }
 
 #[derive(Default)]
@@ -75,6 +77,8 @@ pub struct EditorView {
     history_events: Option<Subscription>,
     /// The database diagram, once opened.
     schema: Option<Entity<SchemaView>>,
+    /// What the changes reach, once opened.
+    impact: Option<Entity<ImpactView>>,
     /// Whether the panel takes the grid's room too, for a diagram or the history.
     maximized: bool,
     /// Why the last file could not be opened or saved, shown in the strip until the next action.
@@ -241,6 +245,22 @@ impl EditorView {
             _ => self.schema = Some(cx.new(|cx| SchemaView::new(repo, cx))),
         }
         self.front = Front::Schema;
+        cx.notify();
+    }
+
+    /// Opens the Impact tab for `repo`, reading the imports afresh, focused on `file` if given.
+    pub fn show_impact(&mut self, repo: &Path, file: Option<PathBuf>, cx: &mut Context<Self>) {
+        match &self.impact {
+            Some(impact) if impact.read(cx).repo() == repo => impact.update(cx, ImpactView::reload),
+            _ => {
+                let editor = cx.weak_entity();
+                self.impact = Some(cx.new(|cx| ImpactView::new(repo, editor, cx)));
+            }
+        }
+        if let (Some(impact), Some(file)) = (&self.impact, file) {
+            impact.update(cx, |impact, cx| impact.focus(file, cx));
+        }
+        self.front = Front::Impact;
         cx.notify();
     }
 
@@ -423,6 +443,64 @@ impl EditorView {
         )
     }
 
+    fn render_impact_tab(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.impact.as_ref()?;
+        let in_front = self.front == Front::Impact;
+        Some(
+            chrome::track_item("impact-tab", in_front)
+                .group("impact-tab")
+                .pl(len(space::SPACE_3))
+                .pr(len(space::SPACE_1))
+                .child(chrome::icon("waypoints", 13., theme::color(color::INK_MUTED)))
+                .child("Impact")
+                .child(
+                    div()
+                        .id("impact-close")
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .size(px(20.))
+                        .rounded(len(radius::RADIUS_XS))
+                        .hover(|s| s.bg(theme::fill_control()))
+                        .child(chrome::icon("x", 11., theme::color(color::INK_MUTED)))
+                        .when(!in_front, |slot| slot.invisible().group_hover("impact-tab", gpui_kit::Styled::visible))
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.impact = None;
+                            this.front = if this.review.is_some() { Front::Review } else { Front::File };
+                            cx.notify();
+                        })),
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.front = Front::Impact;
+                    cx.notify();
+                }))
+                .into_any_element(),
+        )
+    }
+
+    /// For a JavaScript or TypeScript file in a repository: a button that shows what it uses and
+    /// what uses it.
+    fn render_impact_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let file = self.files.get(self.active).filter(|_| self.front == Front::File)?;
+        let script = file
+            .path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| matches!(ext, "ts" | "tsx" | "mts" | "cts" | "js" | "jsx" | "mjs" | "cjs"));
+        if !script {
+            return None;
+        }
+        let repo = file.path.ancestors().skip(1).find(|folder| folder.join(".git").exists())?.to_owned();
+        let relative = file.path.strip_prefix(&repo).ok()?.to_owned();
+        Some(
+            chrome::icon_button("file-impact", "waypoints", true)
+                .tooltip(|window, cx| Tooltip::new("What this file uses, and what uses it").build(window, cx))
+                .on_click(cx.listener(move |this, _, _, cx| this.show_impact(&repo, Some(relative.clone()), cx)))
+                .into_any_element(),
+        )
+    }
+
     fn render_history_tab(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.history.as_ref()?;
         let in_front = self.front == Front::History;
@@ -549,6 +627,8 @@ impl Render for EditorView {
             self.history.clone().map(gpui_kit::IntoElement::into_any_element)
         } else if self.front == Front::Schema {
             self.schema.clone().map(gpui_kit::IntoElement::into_any_element)
+        } else if self.front == Front::Impact {
+            self.impact.clone().map(gpui_kit::IntoElement::into_any_element)
         } else {
             self.files
                 .get(self.active)
@@ -591,10 +671,12 @@ impl Render for EditorView {
                     .h(len(chrome::CONTROL_HEIGHT))
                     .children(self.render_schema_tab(cx))
                     .children(self.render_history_tab(cx))
+                    .children(self.render_impact_tab(cx))
                     .children(self.render_review_tab(cx))
                     .children((0..self.files.len()).map(|index| self.render_tab(index, cx)))
                     .child(div().flex_1())
                     .children(self.render_disk_notice(cx))
+                    .children(self.render_impact_button(cx))
                     .children(self.render_review_controls(cx))
                     .child(
                         chrome::icon_button(

@@ -588,12 +588,20 @@ impl Workspace {
                 this.editor_open = true;
                 cx.notify();
             }
+            ChangesEvent::Impact { repo } => {
+                this.show_impact(repo, cx);
+            }
         })
     }
 
     pub fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let command = self.settings.project(&self.project).ticket_command;
         settings_view::open(cx.weak_entity(), command, window, cx);
+    }
+
+    /// The folder the sidebar shows: the selected repo, or one of its worktrees.
+    pub fn root(&self) -> &Path {
+        &self.root
     }
 
     /// The selected repo.
@@ -826,6 +834,18 @@ impl Workspace {
         self.editor.update(cx, |editor, cx| {
             editor.show_schema(&root, cx);
             if std::env::var_os("SATURN_SCHEMA").is_some() {
+                editor.maximize(cx);
+            }
+        });
+        self.editor_open = true;
+        cx.notify();
+    }
+
+    /// Opens the Impact tab for `repo`.
+    pub fn show_impact(&mut self, repo: &Path, cx: &mut Context<Self>) {
+        self.editor.update(cx, |editor, cx| {
+            editor.show_impact(repo, None, cx);
+            if std::env::var_os("SATURN_IMPACT").is_some() {
                 editor.maximize(cx);
             }
         });
