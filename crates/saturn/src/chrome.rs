@@ -3,14 +3,29 @@
 //! cards. A card (radius 10) holds a strip of controls and, under a hairline, its content; controls
 //! that belong together sit in a track. Strokes and fills are relative (`theme::overlay`).
 
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::{
-    AnyElement, App, Bounds, ColorSpace, Corners, ElementId, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement as _, Pixels, SharedString, StatefulInteractiveElement as _, Styled as _, Window, canvas, div, fill,
-    linear_color_stop, linear_gradient, point, prelude::FluentBuilder as _, px, size, svg,
+    Action, AnyElement, AnyView, App, Bounds, ColorSpace, Corners, ElementId, FontWeight, InteractiveElement as _,
+    IntoElement, ParentElement as _, Pixels, SharedString, StatefulInteractiveElement as _, Styled as _, Window,
+    canvas, div, fill, linear_color_stop, linear_gradient, point, prelude::FluentBuilder as _, px, size, svg,
 };
 use saturn_design::{color, radius, space};
 
 use crate::theme::{self, len};
+
+/// A tooltip saying what a control does.
+pub fn tip(text: &'static str) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
+    move |window, cx| Tooltip::new(text).build(window, cx)
+}
+
+/// A tooltip saying what a control does, with the shortcut that does the same (as the keymap
+/// binds it, so it's never out of date).
+pub fn tip_for<A: Action + Clone>(
+    text: &'static str,
+    action: A,
+) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
+    move |window, cx| Tooltip::new(text).action(&action, None).build(window, cx)
+}
 
 /// Height of every control: tabs, buttons, track items, segments. Dense, as development tools are.
 pub const CONTROL_HEIGHT: f32 = 28.0;

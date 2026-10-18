@@ -1431,6 +1431,7 @@ impl Workspace {
             .when(!selected, |close| close.invisible().group_hover("tab", gpui_kit::Styled::visible))
             .hover(|s| s.bg(theme::fill_control()))
             .child(chrome::icon("x", 11., foreground))
+            .tooltip(chrome::tip_for("Close this terminal", CloseTab))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |this, _, window, cx| this.close_tab(tab, window, cx)));
 
@@ -1495,8 +1496,17 @@ impl Workspace {
         let terminal = self.terminals.get(&cell.active).cloned();
         let cell_id: CellId = cell.id;
         let header_button = |id: &'static str, icon: &str, placement: Placement, cx: &mut Context<Self>| {
-            chrome::icon_button((id, cell_id.key()), icon, true)
-                .on_click(cx.listener(move |this, _, window, cx| this.open_in_cell(cell_id, placement, window, cx)))
+            let button = chrome::icon_button((id, cell_id.key()), icon, true)
+                .on_click(cx.listener(move |this, _, window, cx| this.open_in_cell(cell_id, placement, window, cx)));
+            match placement {
+                Placement::Right => {
+                    button.tooltip(chrome::tip_for("Split right: a new terminal beside this one", SplitRight))
+                }
+                Placement::Down => {
+                    button.tooltip(chrome::tip_for("Split down: a new terminal below this one", SplitDown))
+                }
+                Placement::Tab => button.tooltip(chrome::tip_for("New terminal, as a tab here", NewTab)),
+            }
         };
 
         // A panel like every other: the tabs in its strip, the terminal in its well.
@@ -1680,6 +1690,7 @@ impl Workspace {
                         .when(state != AgentState::Working, |item| item.text_color(state_color(state)))
                         .child(status_dot(state))
                         .child(format!("{n} {label}"))
+                        .tooltip(chrome::tip_for("Go to the next agent that needs you", NextAttention))
                         .on_click(cx.listener(|this, _, window, cx| this.next_attention(window, cx))),
                 );
             }
@@ -1694,21 +1705,26 @@ impl Workspace {
             .child(empty("titlebar-lights").flex_none().w(len(TRAFFIC_LIGHTS_WIDTH)))
             .child(
                 chrome::track()
-                    .child(toggle("toggle-sidebar", "panel-left", self.sidebar_open).on_click(cx.listener(
-                        |this, _, _, cx| {
-                            this.sidebar_open = !this.sidebar_open;
-                            cx.notify();
-                        },
-                    )))
-                    .child(toggle("toggle-editor", "panel-top", self.editor_open).on_click(cx.listener(
-                        |this, _, _, cx| {
-                            this.editor_open = !this.editor_open;
-                            cx.notify();
-                        },
-                    )))
+                    .child(
+                        toggle("toggle-sidebar", "panel-left", self.sidebar_open)
+                            .tooltip(chrome::tip_for("Show or hide the sidebar", ToggleSidebar))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.sidebar_open = !this.sidebar_open;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        toggle("toggle-editor", "panel-top", self.editor_open)
+                            .tooltip(chrome::tip_for("Show or hide the editor", ToggleEditor))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.editor_open = !this.editor_open;
+                                cx.notify();
+                            })),
+                    )
                     .child(chrome::track_separator())
                     .child(
                         toggle("open-settings", "settings", false)
+                            .tooltip(chrome::tip_for("Settings", OpenSettings))
                             .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx))),
                     ),
             )
@@ -1725,10 +1741,12 @@ impl Workspace {
                     Some("⌘O"),
                     !self.clickup.connected() && !self.layout.is_empty(),
                 )
+                .tooltip(chrome::tip("Open another repository in this window"))
                 .on_click(cx.listener(|_, _, window, cx| Self::open_project(window, cx))),
             )
             .children(self.clickup.connected().then(|| {
                 chrome::button("new-agent", "New agent", Some("⌘⇧T"), true)
+                    .tooltip(chrome::tip("Start an agent on a ClickUp ticket, in its own worktree"))
                     .on_click(cx.listener(|_, _, window, cx| ticket_picker::open(cx.weak_entity(), window, cx)))
             }))
     }
@@ -1746,6 +1764,7 @@ impl Workspace {
         let detail = branch.map_or_else(|| short.clone(), |branch| format!("{branch} · {short}"));
         let follow = chrome::icon_button("follow-pane", if self.follow_pane { "locate-fixed" } else { "locate" }, true)
             .when(self.follow_pane, |button| button.bg(theme::fill_pressed()))
+            .tooltip(chrome::tip("Follow the focused terminal: the sidebar shows the folder it works in"))
             .on_click(cx.listener(|this, _, window, cx| {
                 this.follow_pane = !this.follow_pane;
                 this.sync_root(window, cx);
@@ -1754,7 +1773,7 @@ impl Workspace {
         // The database diagram, when this folder describes a database.
         let schema = self.roots.get(&self.root).is_some_and(|views| views.has_schema).then(|| {
             chrome::icon_button("show-schema", "database", true)
-                .tooltip(|window, cx| Tooltip::new("Database diagram").build(window, cx))
+                .tooltip(chrome::tip("Database diagram: the tables and how they connect"))
                 .on_click(cx.listener(|this, _, _, cx| this.show_schema(cx)))
         });
         chrome::sidebar_header(&name, &detail, div().flex().items_center().children(schema).child(follow))
@@ -1786,13 +1805,13 @@ impl Workspace {
                             div()
                                 .id(("remove-repo", index))
                                 .absolute()
-                                .top(px(6.))
-                                .right(px(4.))
+                                .top(px(5.))
+                                .right(px(5.))
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .size(px(16.))
-                                .rounded_full()
+                                .size(px(18.))
+                                .rounded(len(radius::RADIUS_XS))
                                 .bg(theme::color(color::SURFACE))
                                 .shadow(vec![gpui_kit::BoxShadow {
                                     color: theme::overlay(0.12),
@@ -1803,7 +1822,8 @@ impl Workspace {
                                 }])
                                 .invisible()
                                 .group_hover(group, gpui_kit::Styled::visible)
-                                .child(chrome::icon("x", 10., theme::color(color::INK_MUTED)))
+                                .child(chrome::icon("x", 11., theme::color(color::INK_MUTED)))
+                                .tooltip(chrome::tip("Close this repo here (its terminals keep running)"))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     cx.stop_propagation();
                                     this.remove_project(&removed, window, cx);

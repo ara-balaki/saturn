@@ -364,6 +364,7 @@ impl SchemaView {
                 .bg(theme::color(color::SURFACE))
                 .child(
                     chrome::icon_button("zoom-out", "zoom-out", true)
+                        .tooltip(chrome::tip("Zoom out (or pinch, or ⌘-scroll)"))
                         .on_click(cx.listener(|this, _, _, cx| this.zoom_centre(1. / 1.25, cx))),
                 )
                 .child(
@@ -376,13 +377,18 @@ impl SchemaView {
                 )
                 .child(
                     chrome::icon_button("zoom-in", "zoom-in", true)
+                        .tooltip(chrome::tip("Zoom in (or pinch, or ⌘-scroll)"))
                         .on_click(cx.listener(|this, _, _, cx| this.zoom_centre(1.25, cx))),
                 )
                 .child(chrome::track_separator())
-                .child(chrome::icon_button("fit", "scan", true).on_click(cx.listener(|this, _, _, cx| {
-                    this.fit();
-                    cx.notify();
-                }))),
+                .child(
+                    chrome::icon_button("fit", "scan", true).tooltip(chrome::tip("Fit the whole diagram")).on_click(
+                        cx.listener(|this, _, _, cx| {
+                            this.fit();
+                            cx.notify();
+                        }),
+                    ),
+                ),
         )
     }
 

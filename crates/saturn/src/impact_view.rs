@@ -283,6 +283,7 @@ impl ImpactView {
                     .border_color(theme::separator())
                     .child(
                         chrome::icon_button("impact-back", "arrow-left", true)
+                            .tooltip(chrome::tip("Back"))
                             .on_click(cx.listener(|this, _, _, cx| this.back(cx))),
                     )
                     .child(

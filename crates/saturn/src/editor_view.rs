@@ -580,7 +580,7 @@ impl EditorView {
                 .text_size(px(12.))
                 .children((errors > 0).then(|| count(lsp_types::DiagnosticSeverity::ERROR, errors)))
                 .children((warnings > 0).then(|| count(lsp_types::DiagnosticSeverity::WARNING, warnings)))
-                .tooltip(|window, cx| Tooltip::new("Errors and warnings").build(window, cx))
+                .tooltip(chrome::tip("Errors and warnings the language servers found"))
                 .on_click(cx.listener(|this, _, _, cx| this.show_problems(cx)))
                 .into_any_element(),
         )
@@ -606,6 +606,7 @@ impl EditorView {
                         .rounded(len(radius::RADIUS_XS))
                         .hover(|s| s.bg(theme::fill_control()))
                         .child(chrome::icon("x", 11., theme::color(color::INK_MUTED)))
+                        .tooltip(chrome::tip("Close"))
                         .when(!in_front, |slot| slot.invisible().group_hover("problems-tab", gpui_kit::Styled::visible))
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -940,6 +941,7 @@ impl EditorView {
                         .rounded(len(radius::RADIUS_XS))
                         .hover(|s| s.bg(theme::fill_control()))
                         .child(chrome::icon("x", 11., theme::color(color::INK_MUTED)))
+                        .tooltip(chrome::tip("Close"))
                         .when(!in_front, |slot| slot.invisible().group_hover("review-tab", gpui_kit::Styled::visible))
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -976,6 +978,7 @@ impl EditorView {
                         .rounded(len(radius::RADIUS_XS))
                         .hover(|s| s.bg(theme::fill_control()))
                         .child(chrome::icon("x", 11., theme::color(color::INK_MUTED)))
+                        .tooltip(chrome::tip("Close"))
                         .when(!in_front, |slot| slot.invisible().group_hover("schema-tab", gpui_kit::Styled::visible))
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -1012,6 +1015,7 @@ impl EditorView {
                         .rounded(len(radius::RADIUS_XS))
                         .hover(|s| s.bg(theme::fill_control()))
                         .child(chrome::icon("x", 11., theme::color(color::INK_MUTED)))
+                        .tooltip(chrome::tip("Close"))
                         .when(!in_front, |slot| slot.invisible().group_hover("impact-tab", gpui_kit::Styled::visible))
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -1039,7 +1043,7 @@ impl EditorView {
         let relative = file.path.strip_prefix(&repo).ok()?.to_owned();
         Some(
             chrome::icon_button("file-impact", "waypoints", true)
-                .tooltip(|window, cx| Tooltip::new("What this file uses, and what uses it").build(window, cx))
+                .tooltip(chrome::tip("Dependencies: what this file uses, and what uses it"))
                 .on_click(cx.listener(move |this, _, _, cx| this.show_impact(&repo, Some(relative.clone()), cx)))
                 .into_any_element(),
         )
@@ -1065,6 +1069,7 @@ impl EditorView {
                         .rounded(len(radius::RADIUS_XS))
                         .hover(|s| s.bg(theme::fill_control()))
                         .child(chrome::icon("x", 11., theme::color(color::INK_MUTED)))
+                        .tooltip(chrome::tip("Close"))
                         .when(!in_front, |slot| {
                             slot.invisible().group_hover("references-tab", gpui_kit::Styled::visible)
                         })
@@ -1103,6 +1108,7 @@ impl EditorView {
                         .rounded(len(radius::RADIUS_XS))
                         .hover(|s| s.bg(theme::fill_control()))
                         .child(chrome::icon("x", 11., theme::color(color::INK_MUTED)))
+                        .tooltip(chrome::tip("Close"))
                         .when(!in_front, |slot| slot.invisible().group_hover("history-tab", gpui_kit::Styled::visible))
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -1184,11 +1190,14 @@ impl EditorView {
                                     .group_hover("editor-tab", gpui_kit::Styled::invisible),
                             )
                         } else {
-                            slot.child(chrome::icon("x", 11., theme::color(color::INK_MUTED))).when(!selected, |slot| {
-                                slot.invisible().group_hover("editor-tab", gpui_kit::Styled::visible)
-                            })
+                            slot.child(chrome::icon("x", 11., theme::color(color::INK_MUTED)))
+                                .tooltip(chrome::tip("Close"))
+                                .when(!selected, |slot| {
+                                    slot.invisible().group_hover("editor-tab", gpui_kit::Styled::visible)
+                                })
                         }
                     })
+                    .tooltip(chrome::tip("Close"))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |this, _, _, cx| this.close(index, cx))),
             )
@@ -1275,7 +1284,7 @@ impl Render for EditorView {
                             if self.maximized { "minimize-2" } else { "maximize-2" },
                             true,
                         )
-                        .tooltip(|window, cx| Tooltip::new("Make the panel bigger or smaller").build(window, cx))
+                        .tooltip(chrome::tip("Make the editor bigger, or back"))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.maximized = !this.maximized;
                             cx.notify();
