@@ -143,7 +143,23 @@ impl Layout {
             }
         }
         layout.focused = focused.or_else(|| layout.cells().next().map(|cell| cell.id));
+        // Cells and rows dropped above leave their share behind; so could a grid saved before
+        // closing panes gave their space back.
+        layout.fill();
         layout
+    }
+
+    /// Scales the sizes so the rows fill the grid and each row's cells fill the row: what a
+    /// closed cell or row took goes to the ones left, in proportion.
+    fn fill(&mut self) {
+        let total: f32 = self.rows.iter().map(|row| row.size).sum();
+        for row in &mut self.rows {
+            row.size = if total > 0.0 { row.size / total } else { 1.0 };
+            let total: f32 = row.cells.iter().map(|cell| cell.size).sum();
+            for cell in &mut row.cells {
+                cell.size = if total > 0.0 { cell.size / total } else { 1.0 };
+            }
+        }
     }
 
     fn new_id(&mut self) -> u64 {
@@ -271,6 +287,7 @@ impl Layout {
         let neighbour = place.checked_sub(1).and_then(|i| order.get(i)).or_else(|| order.get(place + 1)).copied();
         self.rows[at.row].cells.remove(at.cell);
         self.rows.retain(|row| !row.cells.is_empty());
+        self.fill();
         if self.focused == Some(removed) {
             self.focused = neighbour;
         }
@@ -449,6 +466,31 @@ mod tests {
         layout.split_down(C, None);
         assert_eq!(shape(&layout), vec![vec![vec![1], vec![2]], vec![vec![3]]]);
         assert_eq!(layout.rows.iter().map(|r| r.size).collect::<Vec<_>>(), [0.5, 0.5]);
+    }
+
+    #[test]
+    fn closing_a_pane_gives_its_space_to_the_rest() {
+        let mut layout = Layout::default();
+        layout.add_tab(A, None);
+        layout.split_down(B, None);
+        layout.resize_rows(&[0.7, 0.3]);
+        layout.remove_tab(A);
+        assert_eq!(layout.rows.iter().map(|r| r.size).collect::<Vec<_>>(), [1.0]);
+
+        layout.split_right(C, None);
+        layout.split_right(D, None);
+        layout.remove_tab(B);
+        let sizes: Vec<f32> = layout.rows[0].cells.iter().map(|c| c.size).collect();
+        assert!((sizes.iter().sum::<f32>() - 1.0).abs() < 1e-6, "{sizes:?}");
+    }
+
+    #[test]
+    fn a_saved_grid_that_does_not_fill_is_stretched_to_fill() {
+        let mut layout = Layout::default();
+        layout.add_tab(A, None);
+        layout.resize_rows(&[0.3]);
+        let restored = Layout::from_shape(&layout.shape(), &[A]);
+        assert_eq!(restored.rows[0].size, 1.0);
     }
 
     #[test]
