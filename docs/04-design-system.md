@@ -25,6 +25,21 @@ from orange `#FF902F` through purple `#723CEB` to `#4C11CE`, with yellow `#FFEF6
 
 Yellow is reserved: nothing else in the interface uses it.
 
+## Nested corners
+
+Inner radius = outer radius − padding, so nested corners stay concentric. The tokens are built for
+it:
+
+| Outer                             | Padding     | Inner                                          |
+| --------------------------------- | ----------- | ---------------------------------------------- |
+| `radius-lg` 14 (panel, pane)      | `space-1` 4 | `radius-md` 10 (tabs, tree rows, header tiles) |
+| `radius-lg` 14                    | `space-3` 8 | `radius-sm` 6                                  |
+| `radius-md` 10 (tile, tab, input) | `space-1` 4 | `radius-sm` 6                                  |
+| `radius-xl` 22 (dialog)           | 12          | `radius-md` 10                                 |
+| `radius-pill`                     | any         | `radius-pill`                                  |
+
+When a new nesting doesn't land on a token, change the padding, not the radius.
+
 ## Fonts
 
 Plus Jakarta Sans for the interface and JetBrains Mono for terminals and code. Both are bundled with
