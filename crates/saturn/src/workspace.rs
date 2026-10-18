@@ -304,6 +304,9 @@ impl Workspace {
             cx.subscribe_in(&files, window, move |this, _, event: &FilesEvent, window, cx| match event {
                 FilesEvent::Open(path) => this.open_file(path, window, cx),
                 FilesEvent::GitChanged => changes.update(cx, ChangesView::reload),
+                FilesEvent::Changed(paths) => {
+                    this.editor.update(cx, |editor, cx| editor.files_changed(paths, window, cx));
+                }
             })
         };
         let changes_events = Self::follow_changes(&changes, cx);

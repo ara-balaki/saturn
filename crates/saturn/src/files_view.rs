@@ -28,6 +28,8 @@ pub enum FilesEvent {
     Open(PathBuf),
     /// Git reported a new state: the Changes list and any review should read it again.
     GitChanged,
+    /// Files changed on disk (not ignored ones); an open copy may need reloading.
+    Changed(Vec<PathBuf>),
 }
 
 pub struct FilesView {
@@ -83,6 +85,7 @@ impl FilesView {
         if changed.is_empty() {
             return;
         }
+        cx.emit(FilesEvent::Changed(changed.iter().map(|path| (*path).clone()).collect()));
         let folders: HashSet<PathBuf> = changed
             .iter()
             .filter(|path| !path.components().any(|part| part.as_os_str() == ".git"))

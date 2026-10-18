@@ -25,6 +25,8 @@ struct OpenFile {
     state: Entity<EditorState>,
     /// The text as it is on disk, to tell whether there are unsaved changes.
     saved: String,
+    /// The file changed on disk while it had unsaved changes here; the user picks which to keep.
+    changed_on_disk: bool,
     _changes: Subscription,
 }
 
@@ -89,9 +91,81 @@ impl EditorView {
                 cx.notify();
             }
         });
-        self.files.push(OpenFile { path: path.to_owned(), state, saved: text, _changes: changes });
+        self.files.push(OpenFile {
+            path: path.to_owned(),
+            state,
+            saved: text,
+            changed_on_disk: false,
+            _changes: changes,
+        });
         self.active = self.files.len() - 1;
         cx.notify();
+    }
+
+    /// Files changed on disk: an open copy without unsaved changes reloads; one with them asks.
+    pub fn files_changed(&mut self, paths: &[PathBuf], window: &mut Window, cx: &mut Context<Self>) {
+        for file in &mut self.files {
+            if !paths.contains(&file.path) {
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(&file.path) else { continue };
+            if text == file.saved {
+                continue;
+            }
+            if file.state.read(cx).value().as_ref() == file.saved {
+                file.state.update(cx, |state, cx| state.set_value(text.clone(), window, cx));
+                file.saved = text;
+            } else {
+                file.changed_on_disk = true;
+            }
+        }
+        cx.notify();
+    }
+
+    /// Takes the disk's version of the active file, dropping the unsaved changes.
+    fn reload_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(file) = self.files.get_mut(self.active) else { return };
+        if let Ok(text) = std::fs::read_to_string(&file.path) {
+            file.state.update(cx, |state, cx| state.set_value(text.clone(), window, cx));
+            file.saved = text;
+        }
+        file.changed_on_disk = false;
+        cx.notify();
+    }
+
+    /// Keeps the unsaved changes; saving will replace what is on disk.
+    fn keep_active(&mut self, cx: &mut Context<Self>) {
+        if let Some(file) = self.files.get_mut(self.active) {
+            file.changed_on_disk = false;
+        }
+        cx.notify();
+    }
+
+    /// The question when the active file changed on disk under unsaved changes.
+    fn render_disk_notice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let file = self.files.get(self.active).filter(|file| file.changed_on_disk && !self.showing_review)?;
+        Some(
+            div()
+                .flex()
+                .items_center()
+                .gap(len(space::SPACE_1))
+                .child(
+                    div()
+                        .px(len(space::SPACE_2))
+                        .text_size(px(12.))
+                        .text_color(theme::color(color::AMBER_TEXT))
+                        .child(format!("{} changed on disk", file.name())),
+                )
+                .child(
+                    chrome::button("disk-reload", "Reload", None, false)
+                        .on_click(cx.listener(|this, _, window, cx| this.reload_active(window, cx))),
+                )
+                .child(
+                    chrome::button("disk-keep", "Keep mine", None, false)
+                        .on_click(cx.listener(|this, _, _, cx| this.keep_active(cx))),
+                )
+                .into_any_element(),
+        )
     }
 
     /// Shows `files` in the Changes tab, scrolled to `path`.
@@ -127,6 +201,7 @@ impl EditorView {
         match std::fs::write(&file.path, &text) {
             Ok(()) => {
                 file.saved = text;
+                file.changed_on_disk = false;
                 self.problem = None;
             }
             Err(error) => self.problem = Some(format!("Could not save {}: {error}", file.name())),
@@ -313,6 +388,7 @@ impl Render for EditorView {
                     .children(self.render_review_tab(cx))
                     .children((0..self.files.len()).map(|index| self.render_tab(index, cx)))
                     .child(div().flex_1())
+                    .children(self.render_disk_notice(cx))
                     .children(self.render_review_controls(cx))
                     .children(self.problem.clone().map(|problem| {
                         div()
