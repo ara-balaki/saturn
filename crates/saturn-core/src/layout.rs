@@ -57,6 +57,36 @@ struct Position {
     cell: usize,
 }
 
+/// The grid's shape without its terminals, to save and restore: row and cell sizes, how many tabs
+/// each cell holds, which is in front, and which cell has focus.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Shape {
+    pub rows: Vec<RowShape>,
+    /// (row, cell) of the focused cell.
+    pub focused: Option<(usize, usize)>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct RowShape {
+    pub size: f32,
+    pub cells: Vec<CellShape>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CellShape {
+    pub size: f32,
+    pub tabs: usize,
+    /// Index of the tab in front.
+    pub active: usize,
+}
+
+impl Shape {
+    /// How many tabs the grid holds, in the order `Layout::tabs` lists them.
+    pub fn tab_count(&self) -> usize {
+        self.rows.iter().flat_map(|row| &row.cells).map(|cell| cell.tabs).sum()
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Layout {
     pub rows: Vec<Row>,
@@ -66,6 +96,56 @@ pub struct Layout {
 }
 
 impl Layout {
+    /// The grid's shape, for saving. Tabs are listed by `tabs()` in the same order.
+    pub fn shape(&self) -> Shape {
+        let focused = self.focused.and_then(|id| self.position(id)).map(|at| (at.row, at.cell));
+        let rows = self
+            .rows
+            .iter()
+            .map(|row| RowShape {
+                size: row.size,
+                cells: row
+                    .cells
+                    .iter()
+                    .map(|cell| CellShape {
+                        size: cell.size,
+                        tabs: cell.tabs.len(),
+                        active: cell.tabs.iter().position(|tab| *tab == cell.active).unwrap_or(0),
+                    })
+                    .collect(),
+            })
+            .collect();
+        Shape { rows, focused }
+    }
+
+    /// A grid of `shape`, filled with `tabs` in order. Cells left without tabs (too few given)
+    /// are dropped, and so are rows left without cells.
+    pub fn from_shape(shape: &Shape, tabs: &[TabId]) -> Self {
+        let mut layout = Self::default();
+        let mut next = tabs.iter().copied();
+        let mut focused = None;
+        for (row_index, row_shape) in shape.rows.iter().enumerate() {
+            let mut cells = Vec::new();
+            for (cell_index, cell_shape) in row_shape.cells.iter().enumerate() {
+                let cell_tabs: Vec<TabId> = next.by_ref().take(cell_shape.tabs).collect();
+                let Some(&first) = cell_tabs.first() else { continue };
+                let mut cell = layout.new_cell(first, cell_shape.size);
+                cell.active = *cell_tabs.get(cell_shape.active).unwrap_or(&first);
+                cell.tabs = cell_tabs;
+                if shape.focused == Some((row_index, cell_index)) {
+                    focused = Some(cell.id);
+                }
+                cells.push(cell);
+            }
+            if !cells.is_empty() {
+                let id = RowId(layout.new_id());
+                layout.rows.push(Row { id, cells, size: row_shape.size });
+            }
+        }
+        layout.focused = focused.or_else(|| layout.cells().next().map(|cell| cell.id));
+        layout
+    }
+
     fn new_id(&mut self) -> u64 {
         self.next_id += 1;
         self.next_id
@@ -527,5 +607,30 @@ mod tests {
         layout.focus_nth(2);
         layout.toggle_maximize();
         assert_eq!(layout.visible_tabs(), [B]);
+    }
+
+    #[test]
+    fn a_grid_survives_its_shape() {
+        let mut layout = Layout::default();
+        layout.add_tab(TabId(1), None);
+        layout.add_tab(TabId(2), None);
+        layout.split_right(TabId(3), None);
+        layout.split_down(TabId(4), None);
+        layout.activate_tab(TabId(1));
+        let shape = layout.shape();
+        assert_eq!(shape.tab_count(), 4);
+        let restored = Layout::from_shape(&shape, &[TabId(11), TabId(12), TabId(13), TabId(14)]);
+        assert_eq!(restored.shape(), shape);
+        assert_eq!(restored.focused_tab(), Some(TabId(11)), "the focused cell and its front tab come back");
+    }
+
+    #[test]
+    fn too_few_tabs_drop_the_cells_left_empty() {
+        let mut layout = Layout::default();
+        layout.add_tab(TabId(1), None);
+        layout.split_right(TabId(2), None);
+        let restored = Layout::from_shape(&layout.shape(), &[TabId(9)]);
+        assert_eq!(restored.tabs().collect::<Vec<_>>(), [TabId(9)]);
+        assert_eq!(restored.rows[0].cells.len(), 1);
     }
 }

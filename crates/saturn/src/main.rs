@@ -6,6 +6,7 @@ mod chrome;
 mod dock;
 mod editor_view;
 mod files_view;
+mod session;
 mod settings;
 mod settings_view;
 mod spike;
@@ -135,8 +136,11 @@ fn main() {
                             workspace.open_terminal(spike::placement(index, panes), window, cx);
                         }
                     }
+                    // Where the last session left off, else one shell in the project.
                     None => {
-                        workspace.open_terminal(Placement::Tab, window, cx);
+                        if !workspace.restore(window, cx) {
+                            workspace.open_terminal(Placement::Tab, window, cx);
+                        }
                     }
                 }
                 spike::start(&workspace, window, cx);

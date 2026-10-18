@@ -51,13 +51,17 @@ impl Default for Settings {
     }
 }
 
-fn file() -> Option<PathBuf> {
-    // Tests and spikes point Saturn at their own folder.
+/// Where Saturn keeps what it remembers. Tests and spikes point it at their own folder.
+pub fn data_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("SATURN_USER_DATA") {
-        return Some(PathBuf::from(dir).join("settings.json"));
+        return Some(PathBuf::from(dir));
     }
     let home = std::env::var_os("HOME")?;
-    Some(PathBuf::from(home).join("Library/Application Support/Saturn/settings.json"))
+    Some(PathBuf::from(home).join("Library/Application Support/Saturn"))
+}
+
+fn file() -> Option<PathBuf> {
+    data_dir().map(|dir| dir.join("settings.json"))
 }
 
 pub fn load() -> Settings {

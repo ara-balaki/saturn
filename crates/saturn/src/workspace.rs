@@ -24,6 +24,7 @@ use crate::changes_view::{self, ChangesEvent, ChangesView};
 use crate::chrome;
 use crate::editor_view::EditorView;
 use crate::files_view::{FilesEvent, FilesView};
+use crate::session::{self, SavedGrid, SavedTab};
 use crate::settings::{self, AppearanceSetting, Settings};
 use crate::theme::{self, len};
 use crate::{dock, settings_view};
@@ -150,6 +151,8 @@ pub struct Workspace {
     editor: Entity<EditorView>,
     /// What the sidebar shows.
     sidebar_tab: SidebarTab,
+    /// The Claude session running in each tab, from its hooks, so a restart can offer to resume it.
+    claude_sessions: HashMap<TabId, String>,
 }
 
 /// What the sidebar shows for one folder.
@@ -245,6 +248,12 @@ impl Workspace {
             }
         })
         .detach();
+        // Pane sizes change by dragging, which saves nothing on its own; quitting saves them.
+        cx.on_app_quit(|this, cx| {
+            this.save_session(cx);
+            async {}
+        })
+        .detach();
         // Following the system: redraw when macOS switches between light and dark.
         cx.observe_window_appearance(window, |this, _, cx| {
             if this.settings.appearance == AppearanceSetting::System {
@@ -266,6 +275,7 @@ impl Workspace {
         let roots = HashMap::from([(project.clone(), Self::root_views(&project, window, cx))]);
         Self {
             sidebar_tab: SidebarTab::Files,
+            claude_sessions: HashMap::new(),
             roots,
             root: project.clone(),
             follow_pane: true,
@@ -406,6 +416,19 @@ impl Workspace {
     fn handle_hook(&mut self, call: HookCall, cx: &mut Context<Self>) {
         let Some(tab) = call.pane.parse().ok().map(TabId) else { return call.done() };
         let Some(view) = self.terminals.get(&tab).cloned() else { return call.done() };
+        let session_before = self.claude_sessions.get(&tab).cloned();
+        match (call.event(), call.field("session_id")) {
+            ("SessionEnd", _) => {
+                self.claude_sessions.remove(&tab);
+            }
+            (_, Some(session)) => {
+                self.claude_sessions.insert(tab, session.to_owned());
+            }
+            _ => {}
+        }
+        if self.claude_sessions.get(&tab) != session_before.as_ref() {
+            self.save_session(cx);
+        }
         let state = match call.event() {
             "UserPromptSubmit" | "PostToolUse" => Some(AgentState::Working),
             "PermissionRequest" => Some(AgentState::NeedsYou),
@@ -451,6 +474,18 @@ impl Workspace {
             .focused_tab()
             .and_then(|focused| self.terminals.get(&focused))
             .map_or_else(|| self.project.clone(), |view| view.read(cx).cwd.clone());
+        let tab = self.spawn_terminal(&cwd, window, cx)?;
+        match placement {
+            Placement::Tab => self.layout.add_tab(tab, None),
+            Placement::Right => self.layout.split_right(tab, None),
+            Placement::Down => self.layout.split_down(tab, None),
+        }
+        self.after_layout_change(window, cx);
+        Some(tab)
+    }
+
+    /// Starts a shell in `cwd` in a new tab that is not in the grid yet.
+    fn spawn_terminal(&mut self, cwd: &Path, window: &mut Window, cx: &mut Context<Self>) -> Option<TabId> {
         self.next_tab += 1;
         let tab = TabId(self.next_tab);
         let mut env: Vec<(String, String)> = vec![
@@ -468,26 +503,68 @@ impl Workspace {
             env.push(("CLAUDE_CODE_PLUGIN_DIRS".into(), dirs));
         }
         let env: Vec<(&str, &str)> = env.iter().map(|(key, value)| (key.as_str(), value.as_str())).collect();
-        let (terminal, output) = match TerminalView::spawn(&cwd, &env) {
+        let (terminal, output) = match TerminalView::spawn(cwd, &env) {
             Ok(started) => started,
             Err(error) => {
                 eprintln!("saturn: could not start a shell in {}: {error:#}", cwd.display());
                 return None;
             }
         };
-        let view = cx.new(|cx| TerminalView::new(terminal, output, &cwd, cx));
+        let view = cx.new(|cx| TerminalView::new(terminal, output, cwd, cx));
         cx.subscribe_in(&view, window, move |this, _view, event, window, cx| {
             this.terminal_event(tab, event, window, cx);
         })
         .detach();
         self.terminals.insert(tab, view);
-        match placement {
-            Placement::Tab => self.layout.add_tab(tab, None),
-            Placement::Right => self.layout.split_right(tab, None),
-            Placement::Down => self.layout.split_down(tab, None),
-        }
-        self.after_layout_change(window, cx);
         Some(tab)
+    }
+
+    /// Opens the grid as it was: each tab in its folder, with its name, and a Claude session's
+    /// resume command typed (not run) where one was running. False when nothing was saved.
+    pub fn restore(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(saved) = session::load(&self.project) else { return false };
+        let mut tabs = Vec::new();
+        for saved_tab in &saved.tabs {
+            let cwd = if saved_tab.cwd.is_dir() { saved_tab.cwd.clone() } else { self.project.clone() };
+            let Some(tab) = self.spawn_terminal(&cwd, window, cx) else { continue };
+            if let Some(name) = &saved_tab.name {
+                self.names.insert(tab, name.clone());
+            }
+            if let Some(command) = saved_tab.claude_session.as_deref().and_then(session::resume_command)
+                && let Some(view) = self.terminals.get(&tab).cloned()
+            {
+                // Once the shell has drawn its prompt; typed text waits there for Enter.
+                cx.spawn(async move |_, cx| {
+                    cx.background_executor().timer(std::time::Duration::from_millis(800)).await;
+                    let () = view.update(cx, |view, _| view.write(command.into_bytes()));
+                })
+                .detach();
+            }
+            tabs.push(tab);
+        }
+        if tabs.is_empty() {
+            return false;
+        }
+        self.layout = Layout::from_shape(&saved.shape, &tabs);
+        self.after_layout_change(window, cx);
+        true
+    }
+
+    /// Remembers the grid for the next start.
+    fn save_session(&self, cx: &gpui_kit::App) {
+        let tabs: Vec<TabId> = self.layout.tabs().collect();
+        let grid = (!tabs.is_empty()).then(|| SavedGrid {
+            shape: self.layout.shape(),
+            tabs: tabs
+                .iter()
+                .map(|tab| SavedTab {
+                    cwd: self.terminals.get(tab).map_or_else(|| self.project.clone(), |view| view.read(cx).cwd.clone()),
+                    name: self.names.get(tab).cloned(),
+                    claude_session: self.claude_sessions.get(tab).cloned(),
+                })
+                .collect(),
+        });
+        session::save(&self.project, grid);
     }
 
     /// Opens a terminal next to a given cell (from its header buttons).
@@ -527,6 +604,7 @@ impl Workspace {
                 if self.layout.focused_tab() == Some(tab) {
                     self.sync_root(window, cx);
                 }
+                self.save_session(cx);
             }
         }
     }
@@ -542,6 +620,7 @@ impl Workspace {
     /// Focuses the terminal now in front and marks it seen.
     fn after_layout_change(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.sync_root(window, cx);
+        self.save_session(cx);
         if let Some(front) = self.layout.focused_tab() {
             self.unseen.remove(&front);
             if self.renaming.is_none()
