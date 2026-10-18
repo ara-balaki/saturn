@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { spawn, type IPty } from 'node-pty';
 
 import type { PtyCreateOptions } from '@shared/ipc';
+import { shellEnv } from '@shared/shell-env';
 
 // Output is collected and flushed on a short timer, so a busy terminal sends one IPC message per
 // frame instead of one per write.
@@ -41,13 +42,12 @@ export const createPtyManager = (sink: Sink) => {
       cols,
       rows,
       cwd: cwd ?? homedir(),
-      env: {
-        ...process.env,
+      env: shellEnv(process.env, {
         TERM: 'xterm-256color',
         COLORTERM: 'truecolor',
         TERM_PROGRAM: 'Saturn',
         SATURN_PANE_ID: id,
-      },
+      }),
     });
     const session: Session = { pty, pending: '', timer: undefined };
     sessions.set(id, session);
