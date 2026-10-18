@@ -42,7 +42,7 @@ pub fn panel() -> gpui_kit::Div {
         .min_h_0()
         .p(len(space::SPACE_1))
         .rounded(len(radius::RADIUS_MD))
-        .bg(theme::color(color::SURFACE_RAISED))
+        .bg(theme::color(color::SURFACE_RAISED).opacity(theme::GLASS_PANEL))
         .border_1()
         .border_color(theme::color(color::LINE))
 }
@@ -55,7 +55,7 @@ pub fn well() -> gpui_kit::Div {
         .min_w_0()
         .min_h_0()
         .rounded(len(radius::RADIUS_SM))
-        .bg(theme::color(color::SURFACE))
+        .bg(theme::color(color::SURFACE).opacity(theme::GLASS_WELL))
         .border_1()
         .border_color(theme::color(color::LINE))
         .overflow_hidden()

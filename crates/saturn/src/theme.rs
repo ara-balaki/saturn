@@ -33,6 +33,13 @@ pub fn layers(layers: &[Shadow]) -> Vec<BoxShadow> {
 }
 
 /// gpui-component's own controls (switches, dialogs, inputs, scrollbars) in Saturn's colours,
+// Glass: how much of the blurred desktop behind the window each layer covers. They stack (ground,
+// then a pane, then its well), so the gaps show the most desktop and text sits on the most cover:
+// about 30% in the gaps, 60% on a pane's strip, 75% behind terminal and editor text.
+pub const GLASS_GROUND: f32 = 0.3;
+pub const GLASS_PANEL: f32 = 0.43;
+pub const GLASS_WELL: f32 = 0.38;
+
 /// fonts and radii instead of the library's grey defaults, for one appearance.
 #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "radii are small whole pixels")]
 fn component_theme(appearance: Appearance) -> gpui_kit::component::ThemeConfig {
@@ -75,13 +82,14 @@ fn component_theme(appearance: Appearance) -> gpui_kit::component::ThemeConfig {
         "danger.foreground": hex(c::INK_ON_ACCENT),
     });
     let highlight = serde_json::json!({
-        "editor.background": hex(c::SURFACE),
+        // The editor sits in a well, which draws the glass; its own background stays clear.
+        "editor.background": "#00000000",
         "editor.foreground": hex(c::INK_BODY),
         "editor.active_line.background": hex(c::SURFACE_RAISED),
         "editor.line_number": hex(c::INK_FAINT),
         "editor.active_line_number": hex(c::INK_MUTED),
         "editor.invisible": hex(c::LINE_STRONG),
-        "editor.gutter.background": hex(c::SURFACE),
+        "editor.gutter.background": "#00000000",
         "syntax": syntax(appearance),
     });
     serde_json::from_value(serde_json::json!({

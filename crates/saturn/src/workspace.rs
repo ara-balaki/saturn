@@ -1535,7 +1535,7 @@ impl Render for Workspace {
             .px(len(space::SPACE_2))
             .pb(len(space::SPACE_2))
             // Slightly translucent: the window is blurred, so the desktop shows through the gaps.
-            .bg(theme::color(color::GROUND).opacity(0.86))
+            .bg(theme::color(color::GROUND).opacity(theme::GLASS_GROUND))
             .text_color(theme::color(color::INK))
             .font_family(saturn_design::font::SANS)
             .track_focus(&self.focus)
