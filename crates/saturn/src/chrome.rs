@@ -3,7 +3,7 @@
 //! radius 6) with the content; controls that belong together sit in a track.
 
 use gpui_kit::{
-    AnyElement, App, Bounds, ColorSpace, ElementId, FontWeight, InteractiveElement as _, IntoElement,
+    AnyElement, App, Bounds, ColorSpace, Corners, ElementId, FontWeight, InteractiveElement as _, IntoElement,
     ParentElement as _, Pixels, SharedString, StatefulInteractiveElement as _, Styled as _, Window, canvas, div, fill,
     linear_color_stop, linear_gradient, point, prelude::FluentBuilder as _, px, size, svg,
 };
@@ -184,6 +184,21 @@ pub fn headline(light: &str, bold: &str, size: f32) -> impl IntoElement {
         .text_color(theme::color(color::INK))
         .child(div().font_weight(FontWeight::LIGHT).child(light.to_owned()))
         .child(div().font_weight(FontWeight::SEMIBOLD).child(bold.to_owned()))
+}
+
+/// Frosted glass over the whole window: what's drawn under it, blurred and faintly tinted with the
+/// ground. Drawn under an open dialog, so the dialog floats over a frosted window as macOS sheets
+/// and popovers do.
+pub fn frost() -> impl IntoElement {
+    let tint = theme::color(color::GROUND).opacity(0.25);
+    canvas(
+        |_, _, _| (),
+        move |bounds, (), window, _| window.paint_backdrop_blur(bounds, Corners::default(), px(18.), tint),
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
 }
 
 /// The dot grid: faint dots on an 18px pitch, only inside empty areas.

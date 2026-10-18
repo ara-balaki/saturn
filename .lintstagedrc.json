@@ -1,4 +1,0 @@
-{
-  "*.rs": ["rustfmt --edition 2024"],
-  "*.{json,md,yml,yaml,toml}": ["oxfmt --no-error-on-unmatched-pattern"]
-}

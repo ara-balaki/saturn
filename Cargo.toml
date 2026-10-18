@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# GPUI with Saturn's patches (see vendor/README.md): built as dependencies, not linted as Saturn.
+exclude = ["vendor"]
 
 [workspace.package]
 version = "0.1.0"
@@ -55,3 +57,7 @@ lto = "thin"
 codegen-units = 1
 # Symbols are only for debugging; a release build ships without them.
 strip = "symbols"
+
+[patch.crates-io]
+gpui-pre = { path = "vendor/gpui-pre" }
+gpui-pre-apple = { path = "vendor/gpui-pre-apple" }

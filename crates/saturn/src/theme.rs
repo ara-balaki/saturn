@@ -59,7 +59,8 @@ fn component_theme(appearance: Appearance) -> gpui_kit::component::ThemeConfig {
         "secondary.foreground": hex(c::INK),
         "popover.background": hex(c::SURFACE_RAISED),
         "popover.foreground": hex(c::INK),
-        "overlay": if appearance == Appearance::Dark { "#00000099" } else { "#1a10302e" },
+        // Light, because the window under a dialog is frosted too (chrome::frost).
+        "overlay": if appearance == Appearance::Dark { "#00000059" } else { "#1a10301f" },
         "selection.background": format!("{}{}", hex(c::BLUE_VIVID), if appearance == Appearance::Dark { "73" } else { "40" }),
         "caret": hex(c::INK),
         "switch.background": hex(c::CONTROL_PRESSED),

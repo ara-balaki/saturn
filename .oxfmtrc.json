@@ -7,5 +7,5 @@
   "tabWidth": 2,
   "endOfLine": "lf",
   "sortPackageJson": false,
-  "ignorePatterns": ["target", "node_modules", "pnpm-lock.yaml", "Cargo.lock"]
+  "ignorePatterns": ["target", "node_modules", "pnpm-lock.yaml", "Cargo.lock", "vendor"]
 }

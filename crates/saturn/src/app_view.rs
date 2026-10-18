@@ -3,6 +3,8 @@
 
 use std::path::{Path, PathBuf};
 
+use gpui_kit::component::WindowExt as _;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AppContext as _, ClickEvent, Context, Entity, FocusHandle, FontWeight, InteractiveElement as _, IntoElement,
     ParentElement as _, PathPromptOptions, Render, StatefulInteractiveElement as _, Styled as _, Window, div, px,
@@ -164,10 +166,17 @@ impl AppView {
 }
 
 impl Render for AppView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        match &self.workspace {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let content = match &self.workspace {
             Some(workspace) => workspace.clone().into_any_element(),
             None => self.render_welcome(cx).into_any_element(),
-        }
+        };
+        // Dialogs draw above this view; the frost goes last in it, so it covers the window
+        // under them.
+        div()
+            .relative()
+            .size_full()
+            .child(content)
+            .when(window.has_active_dialog(cx), |view| view.child(chrome::frost()))
     }
 }
