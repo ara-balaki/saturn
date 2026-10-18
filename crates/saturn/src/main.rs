@@ -2,12 +2,12 @@
 
 mod assets;
 mod chrome;
+mod settings;
 mod spike;
 mod theme;
 mod workspace;
 
 use std::borrow::Cow;
-use std::path::PathBuf;
 
 use gpui_kit::{
     App, AppContext as _, Bounds, KeyBinding, Menu, MenuItem, TitlebarOptions, WindowBounds, WindowOptions, actions,
@@ -16,8 +16,8 @@ use gpui_kit::{
 
 use crate::workspace::{
     CloseTab, Copy, FocusDown, FocusLeft, FocusPane1, FocusPane2, FocusPane3, FocusPane4, FocusPane5, FocusPane6,
-    FocusPane7, FocusPane8, FocusPane9, FocusRight, FocusUp, NewTab, NextAttention, NextTab, Paste, Placement,
-    PreviousTab, SplitDown, SplitRight, ToggleEditor, ToggleMaximize, ToggleSidebar, Workspace,
+    FocusPane7, FocusPane8, FocusPane9, FocusRight, FocusUp, NewTab, NextAttention, NextTab, OpenProject, Paste,
+    Placement, PreviousTab, SplitDown, SplitRight, ToggleEditor, ToggleMaximize, ToggleSidebar, Workspace,
 };
 
 actions!(saturn, [Quit]);
@@ -43,6 +43,7 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-v", Paste, None),
         KeyBinding::new("cmd-c", Copy, None),
         KeyBinding::new("cmd-b", ToggleSidebar, None),
+        KeyBinding::new("cmd-o", OpenProject, None),
         KeyBinding::new("cmd-j", ToggleEditor, None),
         KeyBinding::new("cmd-1", FocusPane1, None),
         KeyBinding::new("cmd-2", FocusPane2, None),
@@ -59,6 +60,7 @@ fn bind_keys(cx: &mut App) {
 fn set_menus(cx: &mut App) {
     cx.set_menus(vec![
         Menu::new("Saturn").items([MenuItem::action("Quit Saturn", Quit)]),
+        Menu::new("File").items([MenuItem::action("Open Project…", OpenProject)]),
         Menu::new("Terminal").items([
             MenuItem::action("New Tab", NewTab),
             MenuItem::action("Split Right", SplitRight),
@@ -79,10 +81,7 @@ fn set_menus(cx: &mut App) {
 }
 
 fn main() {
-    let project = std::env::var_os("SATURN_PROJECT")
-        .map(PathBuf::from)
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("/"));
+    let project = settings::startup_project();
 
     gpui_kit::application().with_assets(assets::Assets).run(move |cx| {
         gpui_kit::init(cx);
@@ -105,7 +104,7 @@ fn main() {
         };
         gpui_kit::open_window(options, cx, |window, cx| {
             cx.new(|cx| {
-                let mut workspace = Workspace::new(project, cx);
+                let mut workspace = Workspace::new(project, window, cx);
                 let panes = spike::panes();
                 for index in 0..panes {
                     workspace.open_terminal(spike::placement(index, panes), window, cx);
@@ -118,6 +117,9 @@ fn main() {
             })
         })
         .expect("the window opens");
-        cx.activate(true);
+        // Automated runs (screenshots, spikes) must not take the keyboard from whatever the user is doing.
+        if !spike::is_automated() {
+            cx.activate(true);
+        }
     });
 }

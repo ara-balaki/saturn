@@ -16,6 +16,11 @@ fn var<T: std::str::FromStr>(name: &str) -> Option<T> {
     std::env::var(name).ok().and_then(|value| value.parse().ok())
 }
 
+/// Whether this run is driven by a script (screenshot or timed quit) rather than a person.
+pub fn is_automated() -> bool {
+    std::env::var_os("SATURN_SCREENSHOT").is_some() || std::env::var_os("SATURN_QUIT_AFTER").is_some()
+}
+
 pub fn panes() -> usize {
     var("SATURN_PANES").unwrap_or(0)
 }

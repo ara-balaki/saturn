@@ -5773,6 +5773,8 @@ dependencies = [
  "saturn-core",
  "saturn-design",
  "saturn-terminal",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

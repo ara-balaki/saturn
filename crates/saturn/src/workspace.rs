@@ -3,18 +3,21 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::resizable::{h_resizable, resizable_panel, v_resizable};
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, Entity, FocusHandle, Focusable as _, FontWeight, Hsla,
-    InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Render, StatefulInteractiveElement as _,
-    Styled as _, Window, actions, div, prelude::FluentBuilder as _, px, relative,
+    AnyElement, AppContext as _, ClickEvent, Context, CursorStyle, DragMoveEvent, Entity, FocusHandle, Focusable as _,
+    FontWeight, Hsla, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, PathPromptOptions,
+    PromptLevel, Render, StatefulInteractiveElement as _, Styled as _, Window, actions, div,
+    prelude::FluentBuilder as _, px, relative,
 };
 use saturn_core::agent_state::{AgentState, tab_title};
-use saturn_core::layout::{Cell, CellId, Direction, Layout, TabId};
+use saturn_core::layout::{Cell, CellId, Direction, Layout, RowId, TabId};
 use saturn_design::{color, radius, shadow, space};
 use saturn_terminal::view::{TerminalView, TerminalViewEvent};
 
 use crate::chrome::{self, TileKind};
+use crate::settings;
 use crate::theme::{self, len};
 
 actions!(
@@ -36,6 +39,7 @@ actions!(
         Copy,
         ToggleSidebar,
         ToggleEditor,
+        OpenProject,
         FocusPane1,
         FocusPane2,
         FocusPane3,
@@ -59,13 +63,61 @@ const TITLEBAR_HEIGHT: f32 = 44.0;
 const TRAFFIC_LIGHTS_WIDTH: f32 = 76.0;
 const PANE_HEADER_HEIGHT: f32 = 34.0;
 const TAB_HEIGHT: f32 = 26.0;
+/// No pane is dragged smaller than this share of its row or of the grid.
+const MIN_SHARE: f32 = 0.08;
+/// Programs a tab can close without asking, because nothing is lost.
+const SHELLS: &[&str] = &["zsh", "-zsh", "bash", "-bash", "fish", "sh", "login"];
+
+/// A tab being dragged to another place in the grid.
+#[derive(Clone)]
+struct DraggedTab {
+    tab: TabId,
+    name: String,
+}
+
+impl Render for DraggedTab {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px(len(space::SPACE_3))
+            .h(len(TAB_HEIGHT))
+            .flex()
+            .items_center()
+            .rounded(len(radius::RADIUS_MD))
+            .bg(theme::color(color::CONTROL))
+            .border_1()
+            .border_color(theme::color(color::PURPLE))
+            .text_size(px(12.))
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(theme::color(color::INK))
+            .font_family(saturn_design::font::SANS)
+            .child(self.name.clone())
+    }
+}
+
+/// A divider in the grid being dragged: between two rows, or between two cells of a row.
+#[derive(Clone, Copy)]
+enum GridDivider {
+    Rows(usize),
+    Cells(RowId, usize),
+}
+
+struct DividerPreview;
+
+impl Render for DividerPreview {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+    }
+}
 
 pub struct Workspace {
     project: PathBuf,
     layout: Layout,
     terminals: HashMap<TabId, Entity<TerminalView>>,
+    /// Names typed by hand; they win over the terminal's own title.
+    names: HashMap<TabId, String>,
     /// Tabs that changed into a state asking for the user while they looked elsewhere.
     unseen: HashSet<TabId>,
+    renaming: Option<(TabId, Entity<InputState>)>,
     next_tab: u64,
     focus: FocusHandle,
     sidebar_open: bool,
@@ -86,13 +138,47 @@ fn status_dot(state: AgentState) -> impl IntoElement {
     div().size(px(8.)).flex_none().rounded_full().bg(state_color(state))
 }
 
+/// Moves the divider after `index` to `at` (0–1 across the container), keeping both neighbours
+/// above the minimum share.
+fn move_divider(sizes: &[f32], index: usize, at: f32) -> Vec<f32> {
+    let total: f32 = sizes.iter().sum();
+    let before: f32 = sizes[..index].iter().sum();
+    let pair = sizes[index] + sizes[index + 1];
+    let minimum = total * MIN_SHARE;
+    let first = (at * total - before).clamp(minimum, (pair - minimum).max(minimum));
+    let mut next = sizes.to_vec();
+    next[index] = first;
+    next[index + 1] = pair - first;
+    next
+}
+
+/// The name of the program in the foreground of a terminal, e.g. `zsh` or `claude`.
+fn process_name(pid: i32) -> Option<String> {
+    let output = std::process::Command::new("ps").args(["-o", "comm=", "-p", &pid.to_string()]).output().ok()?;
+    let name = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let name = name.rsplit('/').next().unwrap_or(&name).to_owned();
+    (!name.is_empty()).then_some(name)
+}
+
 impl Workspace {
-    pub fn new(project: PathBuf, cx: &mut Context<Self>) -> Self {
+    pub fn new(project: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        // Coming back to the window counts as looking at the pane in front.
+        cx.observe_window_activation(window, |this, window, cx| {
+            if window.is_window_active()
+                && let Some(front) = this.layout.focused_tab()
+                && this.unseen.remove(&front)
+            {
+                cx.notify();
+            }
+        })
+        .detach();
         Self {
             project,
             layout: Layout::default(),
             terminals: HashMap::new(),
+            names: HashMap::new(),
             unseen: HashSet::new(),
+            renaming: None,
             next_tab: 0,
             focus: cx.focus_handle(),
             sidebar_open: true,
@@ -143,6 +229,12 @@ impl Workspace {
         Some(tab)
     }
 
+    /// Opens a terminal next to a given cell (from its header buttons).
+    fn open_in_cell(&mut self, cell: CellId, placement: Placement, window: &mut Window, cx: &mut Context<Self>) {
+        self.layout.focus_cell(cell);
+        self.open_terminal(placement, window, cx);
+    }
+
     pub fn terminal(&self, tab: TabId) -> Option<&Entity<TerminalView>> {
         self.terminals.get(&tab)
     }
@@ -176,6 +268,7 @@ impl Workspace {
     fn forget(&mut self, tab: TabId, window: &mut Window, cx: &mut Context<Self>) {
         self.terminals.remove(&tab);
         self.unseen.remove(&tab);
+        self.names.remove(&tab);
         self.layout.remove_tab(tab);
         self.after_layout_change(window, cx);
     }
@@ -184,7 +277,9 @@ impl Workspace {
     fn after_layout_change(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(front) = self.layout.focused_tab() {
             self.unseen.remove(&front);
-            if let Some(view) = self.terminals.get(&front) {
+            if self.renaming.is_none()
+                && let Some(view) = self.terminals.get(&front)
+            {
                 window.focus(&view.focus_handle(cx), cx);
             }
         } else {
@@ -198,14 +293,31 @@ impl Workspace {
         self.after_layout_change(window, cx);
     }
 
-    fn close_tab(&mut self, tab: TabId, cx: &mut Context<Self>) {
-        // The tab goes when its shell reports the exit.
-        if let Some(view) = self.terminals.get(&tab) {
+    /// Closes a tab, asking first when something other than the shell runs in it. The tab goes
+    /// when its shell reports the exit.
+    fn close_tab(&mut self, tab: TabId, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(view) = self.terminals.get(&tab).cloned() else { return };
+        let running =
+            view.read(cx).foreground_pid().and_then(process_name).filter(|name| !SHELLS.contains(&name.as_str()));
+        let Some(program) = running else {
             view.update(cx, |view, _| view.kill());
-        }
+            return;
+        };
+        let message = format!("Close {}?", self.tab_name(tab, cx));
+        let detail = format!("{program} is still running in it and will be stopped.");
+        let answer = window.prompt(PromptLevel::Warning, &message, Some(&detail), &["Close", "Cancel"], cx);
+        cx.spawn(async move |_, cx| {
+            if answer.await == Ok(0) {
+                view.update(cx, |view, _| view.kill());
+            }
+        })
+        .detach();
     }
 
     fn tab_name(&self, tab: TabId, cx: &Context<Self>) -> String {
+        if let Some(name) = self.names.get(&tab) {
+            return name.clone();
+        }
         self.terminals
             .get(&tab)
             .and_then(|view| view.read(cx).title.as_deref().and_then(tab_title))
@@ -216,9 +328,79 @@ impl Workspace {
         self.terminals.get(&tab).map_or(AgentState::Shell, |view| view.read(cx).state)
     }
 
-    fn render_tab(&self, cell: &Cell, tab: TabId, cx: &mut Context<Self>) -> AnyElement {
+    fn start_rename(&mut self, tab: TabId, window: &mut Window, cx: &mut Context<Self>) {
+        let name = self.tab_name(tab, cx);
+        let input = cx.new(|cx| InputState::new(window, cx).default_value(name));
+        cx.subscribe_in(&input, window, move |this, input, event, window, cx| match event {
+            InputEvent::PressEnter { .. } | InputEvent::Blur => {
+                let name = input.read(cx).value().trim().to_owned();
+                this.finish_rename(tab, Some(name), window, cx);
+            }
+            _ => {}
+        })
+        .detach();
+        input.update(cx, |input, cx| input.focus(window, cx));
+        self.renaming = Some((tab, input));
+        cx.notify();
+    }
+
+    /// Saves (or with `None`, drops) a typed name; an empty name goes back to the terminal title.
+    fn finish_rename(&mut self, tab: TabId, name: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        if self.renaming.as_ref().is_none_or(|(renaming, _)| *renaming != tab) {
+            return;
+        }
+        self.renaming = None;
+        match name {
+            Some(name) if !name.is_empty() => {
+                self.names.insert(tab, name);
+            }
+            Some(_) => {
+                self.names.remove(&tab);
+            }
+            None => {}
+        }
+        self.after_layout_change(window, cx);
+    }
+
+    fn drop_tab(
+        &mut self,
+        tab: TabId,
+        cell: CellId,
+        index: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.update_layout(window, cx, |layout| layout.move_tab(tab, cell, index));
+    }
+
+    fn open_project(window: &mut Window, cx: &mut Context<Self>) {
+        let paths = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Open Project".into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(paths))) = paths.await else { return };
+            let Some(project) = paths.into_iter().next() else { return };
+            settings::remember_project(&project);
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.project = project;
+                if this.layout.is_empty() {
+                    this.open_terminal(Placement::Tab, window, cx);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn render_tab(&self, cell: &Cell, index: usize, cx: &mut Context<Self>) -> AnyElement {
+        let tab = cell.tabs[index];
+        let cell_id = cell.id;
         let selected = tab == cell.active;
         let state = self.tab_state(tab, cx);
+        let name = self.tab_name(tab, cx);
         // A tab hidden behind another that needs you turns yellow, so it can't be missed.
         let calling = !selected && state == AgentState::NeedsYou && self.unseen.contains(&tab);
         let (background, foreground) = match (calling, selected) {
@@ -226,26 +408,60 @@ impl Workspace {
             (false, true) => (theme::color(color::CONTROL), theme::color(color::INK)),
             (false, false) => (gpui_kit::transparent_black(), theme::color(color::INK_MUTED)),
         };
+        let renaming = self.renaming.as_ref().filter(|(renaming, _)| *renaming == tab).map(|(_, input)| input.clone());
+
+        let close = div()
+            .id(("close", tab.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .size(px(16.))
+            .rounded(len(radius::RADIUS_SM))
+            .when(!selected, |close| close.invisible().group_hover("tab", gpui_kit::Styled::visible))
+            .hover(|s| s.bg(theme::color(color::CONTROL_HOVER)))
+            .child(chrome::icon("x", 11., foreground))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |this, _, window, cx| this.close_tab(tab, window, cx)));
+
         div()
             .id(("tab", tab.0))
+            .group("tab")
             .flex()
+            .flex_none()
             .items_center()
             .gap(len(6.))
             .h(len(TAB_HEIGHT))
-            .px(len(space::SPACE_3))
+            .pl(len(space::SPACE_3))
+            .pr(len(space::SPACE_1))
+            .max_w(px(220.))
             .rounded(len(radius::RADIUS_MD))
             .bg(background)
             .text_color(foreground)
             .text_size(px(12.))
             .font_weight(FontWeight::SEMIBOLD)
             .child(status_dot(state))
-            .child(self.tab_name(tab, cx))
+            .map(|tab_element| match renaming {
+                Some(input) => tab_element.child(div().w(px(140.)).child(Input::new(&input).appearance(false))),
+                None => tab_element.child(div().truncate().child(name.clone())),
+            })
+            .child(close)
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _, window, cx| {
                     this.update_layout(window, cx, |layout| layout.activate_tab(tab));
                 }),
             )
+            .on_mouse_down(MouseButton::Middle, cx.listener(move |this, _, window, cx| this.close_tab(tab, window, cx)))
+            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                if event.click_count() >= 2 {
+                    this.start_rename(tab, window, cx);
+                }
+            }))
+            .on_drag(DraggedTab { tab, name }, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
+            .drag_over::<DraggedTab>(|style, _, _, _| style.border_l_2().border_color(theme::color(color::PURPLE_TEXT)))
+            .on_drop(cx.listener(move |this, dragged: &DraggedTab, window, cx| {
+                this.drop_tab(dragged.tab, cell_id, Some(index), window, cx);
+            }))
             .into_any_element()
     }
 
@@ -264,6 +480,10 @@ impl Workspace {
         };
         let terminal = self.terminals.get(&cell.active).cloned();
         let cell_id: CellId = cell.id;
+        let header_button = |id: &'static str, icon: &str, placement: Placement, cx: &mut Context<Self>| {
+            chrome::icon_tile((id, cell_id.key()), icon, TileKind::Off, TAB_HEIGHT)
+                .on_click(cx.listener(move |this, _, window, cx| this.open_in_cell(cell_id, placement, window, cx)))
+        };
 
         let mut pane = div()
             .flex()
@@ -284,21 +504,42 @@ impl Workspace {
             )
             .child(
                 div()
+                    .id(("tabs", cell_id.key()))
                     .flex()
                     .items_center()
                     .gap(len(space::SPACE_1))
                     .h(len(PANE_HEADER_HEIGHT))
                     .p(len(space::SPACE_1))
                     .bg(theme::color(color::SURFACE_RAISED))
-                    .children(cell.tabs.iter().map(|tab| self.render_tab(cell, *tab, cx))),
+                    .child(
+                        div()
+                            .id(("tab-strip", cell_id.key()))
+                            .flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap(len(space::SPACE_1))
+                            .overflow_x_scroll()
+                            .children((0..cell.tabs.len()).map(|index| self.render_tab(cell, index, cx)))
+                            .on_drop(cx.listener(move |this, dragged: &DraggedTab, window, cx| {
+                                this.drop_tab(dragged.tab, cell_id, None, window, cx);
+                            })),
+                    )
+                    .child(header_button("split-right", "columns-2", Placement::Right, cx))
+                    .child(header_button("split-down", "rows-2", Placement::Down, cx))
+                    .child(header_button("new-tab", "plus", Placement::Tab, cx)),
             )
             .child(
                 div()
+                    .id(("body", cell_id.key()))
                     .flex_1()
                     .min_h_0()
                     .pt(len(space::SPACE_3))
                     .pl(len(space::SPACE_4))
                     .pb(len(space::SPACE_1))
+                    .drag_over::<DraggedTab>(|style, _, _, _| style.bg(theme::color(color::PURPLE).opacity(0.08)))
+                    .on_drop(cx.listener(move |this, dragged: &DraggedTab, window, cx| {
+                        this.drop_tab(dragged.tab, cell_id, None, window, cx);
+                    }))
                     .children(terminal),
             );
         if let Some(glow) = glow {
@@ -307,17 +548,65 @@ impl Workspace {
         pane.into_any_element()
     }
 
+    /// A divider between rows or cells: the grid's gap, draggable.
+    fn render_divider(divider: GridDivider, vertical: bool) -> AnyElement {
+        let id = match divider {
+            GridDivider::Rows(index) => ("row-divider", index as u64),
+            GridDivider::Cells(row, index) => ("cell-divider", row.key() * 1000 + index as u64),
+        };
+        div()
+            .id(id)
+            .flex_none()
+            .when(vertical, |d| d.w(len(space::SPACE_2)).h_full().cursor(CursorStyle::ResizeLeftRight))
+            .when(!vertical, |d| d.h(len(space::SPACE_2)).w_full().cursor(CursorStyle::ResizeUpDown))
+            .on_drag(divider, |_, _, _, cx| cx.new(|_| DividerPreview))
+            .into_any_element()
+    }
+
     fn render_grid(&self, cx: &mut Context<Self>) -> AnyElement {
         let maximized = self.layout.maximized;
-        let mut grid = div().flex().flex_col().flex_1().min_h_0().gap(len(space::SPACE_2));
-        for row in &self.layout.rows {
+        let row_sizes: Vec<f32> = self.layout.rows.iter().map(|row| row.size).collect();
+        let mut grid = div().id("grid").flex().flex_col().flex_1().min_h_0().on_drag_move(cx.listener(
+            move |this, event: &DragMoveEvent<GridDivider>, _, cx| {
+                if let GridDivider::Rows(index) = *event.drag(cx) {
+                    let at =
+                        f32::from(event.event.position.y - event.bounds.top()) / f32::from(event.bounds.size.height);
+                    let sizes = move_divider(&row_sizes, index, at);
+                    this.layout.resize_rows(&sizes);
+                    cx.notify();
+                }
+            },
+        ));
+        for (row_index, row) in self.layout.rows.iter().enumerate() {
             let shown: Vec<&Cell> = row.cells.iter().filter(|cell| maximized.is_none_or(|id| id == cell.id)).collect();
             if shown.is_empty() {
                 continue;
             }
-            let mut row_element = div().flex().gap(len(space::SPACE_2)).min_h_0().flex_basis(relative(0.));
+            if row_index > 0 && maximized.is_none() {
+                grid = grid.child(Self::render_divider(GridDivider::Rows(row_index - 1), false));
+            }
+            let row_id = row.id;
+            let cell_sizes: Vec<f32> = row.cells.iter().map(|cell| cell.size).collect();
+            let mut row_element =
+                div().id(("row", row_id.key())).flex().min_h_0().flex_basis(relative(0.)).on_drag_move(cx.listener(
+                    move |this, event: &DragMoveEvent<GridDivider>, _, cx| {
+                        if let GridDivider::Cells(dragged_row, index) = *event.drag(cx)
+                            && dragged_row == row_id
+                        {
+                            let at = f32::from(event.event.position.x - event.bounds.left())
+                                / f32::from(event.bounds.size.width);
+                            let sizes = move_divider(&cell_sizes, index, at);
+                            this.layout.resize_cells(row_id, &sizes);
+                            cx.notify();
+                        }
+                    },
+                ));
             row_element.style().flex_grow = Some(if maximized.is_some() { 1.0 } else { row.size });
-            for cell in shown {
+            for (cell_index, cell) in shown.into_iter().enumerate() {
+                if cell_index > 0 && maximized.is_none() {
+                    row_element =
+                        row_element.child(Self::render_divider(GridDivider::Cells(row_id, cell_index - 1), true));
+                }
                 let mut cell_element =
                     div().flex().min_w_0().flex_basis(relative(0.)).child(self.render_cell(cell, cx));
                 cell_element.style().flex_grow = Some(if maximized.is_some() { 1.0 } else { cell.size });
@@ -367,9 +656,11 @@ impl Workspace {
             .child(div().flex_1())
             .children(summary.into_iter().filter(|(n, _, _)| *n > 0).map(|(n, state, label)| {
                 div()
+                    .id(label)
                     .flex()
                     .items_center()
                     .gap(len(6.))
+                    .cursor_pointer()
                     .text_color(if state == AgentState::Working {
                         theme::color(color::INK_MUTED)
                     } else {
@@ -377,6 +668,7 @@ impl Workspace {
                     })
                     .child(status_dot(state))
                     .child(format!("{n} {label}"))
+                    .on_click(cx.listener(|this, _, window, cx| this.next_attention(window, cx)))
             }))
             .child(
                 div()
@@ -463,6 +755,10 @@ impl Workspace {
             self.update_layout(window, cx, |layout| layout.activate_tab(tab));
         }
     }
+
+    fn focused_view(&self) -> Option<Entity<TerminalView>> {
+        self.layout.focused_tab().and_then(|tab| self.terminals.get(&tab)).cloned()
+    }
 }
 
 impl Render for Workspace {
@@ -487,9 +783,9 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &SplitDown, window, cx| {
                 this.open_terminal(Placement::Down, window, cx);
             }))
-            .on_action(cx.listener(|this, _: &CloseTab, _, cx| {
+            .on_action(cx.listener(|this, _: &CloseTab, window, cx| {
                 if let Some(tab) = this.layout.focused_tab() {
-                    this.close_tab(tab, cx);
+                    this.close_tab(tab, window, cx);
                 }
             }))
             .on_action(
@@ -522,14 +818,15 @@ impl Render for Workspace {
                 this.editor_open = !this.editor_open;
                 cx.notify();
             }))
+            .on_action(cx.listener(|_, _: &OpenProject, window, cx| Self::open_project(window, cx)))
             .on_action(cx.listener(|this, _: &Copy, _, cx| {
-                if let Some(view) = this.layout.focused_tab().and_then(|tab| this.terminals.get(&tab)).cloned() {
+                if let Some(view) = this.focused_view() {
                     view.update(cx, |view, cx| view.copy_selection(cx));
                 }
             }))
             .on_action(cx.listener(|this, _: &Paste, _, cx| {
-                if let Some(view) = this.layout.focused_tab().and_then(|tab| this.terminals.get(&tab)).cloned() {
-                    view.update(cx, saturn_terminal::view::TerminalView::paste_from_clipboard);
+                if let Some(view) = this.focused_view() {
+                    view.update(cx, TerminalView::paste_from_clipboard);
                 }
             }))
             .on_action(
@@ -561,5 +858,24 @@ impl Render for Workspace {
             )
             .child(self.render_titlebar(cx))
             .child(self.render_workbench(cx))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::move_divider;
+
+    #[test]
+    fn moves_a_divider_and_keeps_the_pair_total() {
+        let sizes = move_divider(&[1.0, 1.0, 2.0], 0, 0.125);
+        assert!((sizes[0] - 0.5).abs() < 1e-6 && (sizes[1] - 1.5).abs() < 1e-6 && (sizes[2] - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn keeps_both_neighbours_above_the_minimum() {
+        let sizes = move_divider(&[1.0, 1.0], 0, 0.0);
+        assert!((sizes[0] - 2.0 * 0.08).abs() < 1e-6);
+        let sizes = move_divider(&[1.0, 1.0], 0, 1.0);
+        assert!((sizes[1] - 2.0 * 0.08).abs() < 1e-6);
     }
 }

@@ -11,6 +11,20 @@ pub struct CellId(u64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RowId(u64);
 
+impl CellId {
+    /// A number that stays the same for the cell's whole life, e.g. for UI element ids.
+    pub fn key(self) -> u64 {
+        self.0
+    }
+}
+
+impl RowId {
+    /// A number that stays the same for the row's whole life, e.g. for UI element ids.
+    pub fn key(self) -> u64 {
+        self.0
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Cell {
     pub id: CellId,

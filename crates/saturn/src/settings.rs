@@ -1,0 +1,51 @@
+//! What Saturn remembers between launches, in `~/Library/Application Support/Saturn/settings.json`.
+
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct Settings {
+    pub last_project: Option<PathBuf>,
+}
+
+fn file() -> Option<PathBuf> {
+    // Tests and spikes point Saturn at their own folder.
+    if let Some(dir) = std::env::var_os("SATURN_USER_DATA") {
+        return Some(PathBuf::from(dir).join("settings.json"));
+    }
+    let home = std::env::var_os("HOME")?;
+    Some(PathBuf::from(home).join("Library/Application Support/Saturn/settings.json"))
+}
+
+pub fn load() -> Settings {
+    file()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
+pub fn remember_project(project: &Path) {
+    let Some(path) = file() else { return };
+    let mut settings = load();
+    settings.last_project = Some(project.to_owned());
+    if let Some(dir) = path.parent()
+        && std::fs::create_dir_all(dir).is_ok()
+        && let Ok(text) = serde_json::to_string_pretty(&settings)
+    {
+        let _ = std::fs::write(path, text);
+    }
+}
+
+/// The folder to open: `SATURN_PROJECT`, else the folder Saturn was started in (when started from
+/// a terminal), else the last project, else home.
+pub fn startup_project() -> PathBuf {
+    if let Some(project) = std::env::var_os("SATURN_PROJECT") {
+        return PathBuf::from(project);
+    }
+    let started_in = std::env::current_dir().ok().filter(|dir| dir != Path::new("/"));
+    started_in
+        .or_else(|| load().last_project.filter(|path| path.is_dir()))
+        .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from("/"))
+}
