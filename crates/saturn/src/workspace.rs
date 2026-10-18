@@ -902,6 +902,10 @@ impl Workspace {
                 current: Some(message.to_owned()),
             });
             self.activity.insert(tab, Activity { steps, context: Some(context) });
+            // Not looked at yet, so the panes ring as they would.
+            if matches!(state, AgentState::NeedsYou | AgentState::YourTurn) {
+                self.unseen.insert(tab);
+            }
         }
         cx.notify();
     }
