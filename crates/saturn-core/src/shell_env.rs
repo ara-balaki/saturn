@@ -16,6 +16,26 @@ fn is_claude_session_marker(key: &str) -> bool {
         || key.starts_with("CLAUDE_CODE_MESSAGING_")
 }
 
+/// Marks where the login shell's `PATH` starts in its output, past anything its startup files print.
+const PATH_MARKER: &str = "__SATURN_PATH__";
+
+/// The `PATH` the user's login shell sets up. An app started from Finder gets only the system's
+/// short `PATH`, without Homebrew, nvm or `~/.cargo/bin`; tools Saturn runs (formatters) need the
+/// real one. `None` when the shell cannot be asked.
+pub fn login_path() -> Option<String> {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_owned());
+    let output = std::process::Command::new(shell)
+        .args(["-ilc", &format!("printf '\\n{PATH_MARKER}%s\\n' \"$PATH\"")])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    parse_login_path(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn parse_login_path(output: &str) -> Option<String> {
+    output.lines().find_map(|line| line.strip_prefix(PATH_MARKER)).map(str::to_owned).filter(|path| !path.is_empty())
+}
+
 /// The app's own environment minus Claude's session markers, with `extra` added last.
 pub fn shell_env<I, K, V>(base: I, extra: &[(&str, &str)]) -> Vec<(String, String)>
 where
@@ -68,5 +88,12 @@ mod tests {
     fn extras_replace_inherited_values() {
         let env = shell_env([("TERM", "dumb")], &[("TERM", "xterm-256color")]);
         assert_eq!(env, [("TERM".to_owned(), "xterm-256color".to_owned())]);
+    }
+
+    #[test]
+    fn the_login_path_is_read_past_whatever_the_shell_prints() {
+        let output = "Welcome back!\n\n__SATURN_PATH__/opt/homebrew/bin:/usr/bin\n";
+        assert_eq!(parse_login_path(output).as_deref(), Some("/opt/homebrew/bin:/usr/bin"));
+        assert_eq!(parse_login_path("no marker here"), None);
     }
 }

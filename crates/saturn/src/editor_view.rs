@@ -220,10 +220,14 @@ impl EditorView {
             let name = formatter.name;
             let outcome = cx
                 .background_spawn(async move {
-                    std::process::Command::new(&formatter.program)
-                        .args(&formatter.args)
-                        .current_dir(&formatter.dir)
-                        .output()
+                    let mut command = std::process::Command::new(&formatter.program);
+                    command.args(&formatter.args).current_dir(&formatter.dir);
+                    // Started from Finder, Saturn's own PATH lacks node and rustfmt; the login
+                    // shell's has them.
+                    if let Some(path) = crate::LOGIN_PATH.get() {
+                        command.env("PATH", path);
+                    }
+                    command.output()
                 })
                 .await;
             let problem = match outcome {

@@ -170,10 +170,16 @@ enum SidebarTab {
     Changes,
 }
 
-/// The Saturn plugin (`plugin/` in this repository) that Claude sessions in Saturn's panes load.
+/// The Saturn plugin that Claude sessions in Saturn's panes load: inside Saturn.app
+/// (`Contents/Resources/plugin`), else `plugin/` in this repository when run from source.
 fn plugin_dir() -> Option<PathBuf> {
+    let bundled = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|macos| macos.join("../Resources/plugin")))
+        .and_then(|dir| dir.canonicalize().ok());
     std::env::var_os("SATURN_PLUGIN_DIR")
         .map(PathBuf::from)
+        .or(bundled)
         .or_else(|| Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../plugin")).canonicalize().ok())
         .filter(|dir| dir.join(".claude-plugin/plugin.json").is_file())
 }

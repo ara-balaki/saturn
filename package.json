@@ -13,7 +13,9 @@
     "deps": "cargo machete && cargo deny check",
     "health": "pnpm run fmt:check && pnpm run lint && pnpm run test && pnpm run deps",
     "dev": "cargo run -p saturn",
-    "prepare": "husky"
+    "prepare": "husky",
+    "dist": "sh scripts/bundle.sh",
+    "install-app": "sh scripts/bundle.sh --install"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.3",

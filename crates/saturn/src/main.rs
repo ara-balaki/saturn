@@ -29,6 +29,9 @@ use crate::workspace::{
 
 actions!(saturn, [Quit]);
 
+/// The login shell's `PATH`, read once at start, for the tools Saturn runs itself.
+pub static LOGIN_PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
 /// One static file per weight the design system uses: GPUI draws a variable font only at its default
 /// weight. Instanced from the variable fonts with fontTools (OFL 1.1; neither declares a Reserved
 /// Font Name).
@@ -103,6 +106,12 @@ fn set_menus(cx: &mut App) {
 }
 
 fn main() {
+    // Off the main thread: an interactive shell's startup files can take a moment.
+    std::thread::spawn(|| {
+        if let Some(path) = saturn_core::shell_env::login_path() {
+            let _ = LOGIN_PATH.set(path);
+        }
+    });
     let project = settings::startup_project();
 
     gpui_kit::application().with_assets(assets::Assets).run(move |cx| {
