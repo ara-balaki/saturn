@@ -614,6 +614,9 @@ impl Workspace {
                     .gap(len(space::SPACE_1))
                     .h(len(PANE_HEADER_HEIGHT))
                     .p(len(space::SPACE_1))
+                    // GPUI clips children to a rectangle, not to the pane's rounded corners, so the
+                    // header rounds its own: the pane's radius minus its one-pixel border.
+                    .rounded_t(len(radius::RADIUS_LG - 1.))
                     .bg(theme::color(color::SURFACE_RAISED))
                     .child(
                         div()
@@ -810,6 +813,7 @@ impl Workspace {
         let path = self.project.display().to_string();
         div().flex_1().min_h_0().child(
             h_resizable("workbench")
+                .with_handle_appearance(chrome::quiet_resize_handle())
                 .child(
                     resizable_panel()
                         .size(px(270.))
@@ -821,6 +825,7 @@ impl Workspace {
                     resizable_panel().child(
                         div().size_full().when(self.sidebar_open, |main| main.pl(half_gap)).child(
                             v_resizable("main")
+                                .with_handle_appearance(chrome::quiet_resize_handle())
                                 .child(
                                     resizable_panel()
                                         .size(px(260.))

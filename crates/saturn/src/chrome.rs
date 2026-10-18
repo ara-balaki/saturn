@@ -215,3 +215,40 @@ pub fn empty_grid(new_terminal: impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut
         )
         .into_any_element()
 }
+
+/// How the draggable gaps between panels look: nothing at rest (the gap of ground is the
+/// divider), a short purple pill while the pointer is on it or dragging.
+pub fn quiet_resize_handle() -> gpui_kit::base::ResizeHandleRenderer {
+    std::rc::Rc::new(|handle, _, _| {
+        use gpui_kit::base::ResizeHandleState;
+        // An empty element, not `None`: `None` brings back the library's own hairline.
+        if handle.state() == ResizeHandleState::Idle {
+            return Some(div().into_any_element());
+        }
+        let pill = theme::color(color::PURPLE_TEXT).opacity(if handle.state() == ResizeHandleState::Hovered {
+            0.5
+        } else {
+            0.9
+        });
+        // The handle's own area is a one-pixel line; the pill is centred along it and overhangs
+        // across it.
+        Some(match handle.axis() {
+            gpui_kit::Axis::Horizontal => div()
+                .flex_none()
+                .flex()
+                .items_center()
+                .w(px(1.))
+                .h_full()
+                .child(div().flex_none().ml(px(-1.)).w(px(3.)).h(px(36.)).rounded_full().bg(pill))
+                .into_any_element(),
+            gpui_kit::Axis::Vertical => div()
+                .flex_none()
+                .flex()
+                .justify_center()
+                .h(px(1.))
+                .w_full()
+                .child(div().flex_none().mt(px(-1.)).h(px(3.)).w(px(36.)).rounded_full().bg(pill))
+                .into_any_element(),
+        })
+    })
+}
