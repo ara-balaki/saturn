@@ -15,10 +15,13 @@ saturn-core.workspace = true
 saturn-design.workspace = true
 saturn-terminal.workspace = true
 gpui-kit.workspace = true
-anyhow.workspace = true
 gpui-pre = { version = "=0.3.9", features = ["test-support"], optional = true }
 gpui-pre-platform = { version = "=0.3.9", features = ["test-support"], optional = true }
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+
+[package.metadata.cargo-machete]
+# Only switched on by the `capture` feature, to turn on GPUI's window-to-image support.
+ignored = ["gpui-pre", "gpui-pre-platform", "image"]
 
 [lints]
 workspace = true

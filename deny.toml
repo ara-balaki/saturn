@@ -32,6 +32,9 @@ allow-wildcard-paths = true
 
 [advisories]
 yanked = "warn"
+# Vulnerabilities fail everywhere. "Unmaintained" notices count only for crates Saturn depends on
+# directly: the deep ones come through GPUI (font parsing, Linux D-Bus) and are upstream's to replace.
+unmaintained = "workspace"
 
 [sources]
 unknown-registry = "deny"

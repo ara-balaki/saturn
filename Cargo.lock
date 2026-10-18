@@ -5766,7 +5766,6 @@ dependencies = [
 name = "saturn"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "gpui-kit",
  "gpui-pre",
  "gpui-pre-platform",
