@@ -19,6 +19,8 @@ allow = [
   "Unicode-3.0",
   "MPL-2.0",
   "Unlicense",
+  # Permissive, for data: Mozilla's list of trusted certificate authorities (webpki-root-certs).
+  "CDLA-Permissive-2.0",
 ]
 
 [bans]

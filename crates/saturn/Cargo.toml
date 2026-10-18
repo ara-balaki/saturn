@@ -44,7 +44,7 @@ tree-sitter-vim = "0.4.0"
 tree-sitter-xml = "0.7.0"
 notify.workspace = true
 # HTTPS through macOS's own TLS and trust store.
-ureq = { version = "3", default-features = false, features = ["native-tls-no-default"] }
+ureq = { version = "3", default-features = false, features = ["native-tls"] }
 # The same gpui-component gpui-kit bundles, named only to switch on the editor's languages.
 gpui-component = { version = "=0.7.3", features = [
   "tree-sitter-astro",

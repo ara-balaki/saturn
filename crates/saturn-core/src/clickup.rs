@@ -71,6 +71,9 @@ impl From<TaskJson> for Ticket {
     }
 }
 
+/// How many tasks ClickUp returns per page.
+const PAGE_SIZE: usize = 100;
+
 /// A page of `GET /team/{team_id}/task`: its tickets, and whether more pages follow.
 pub fn parse_task_page(json: &str) -> Result<(Vec<Ticket>, bool), serde_json::Error> {
     #[derive(Deserialize)]
@@ -80,7 +83,8 @@ pub fn parse_task_page(json: &str) -> Result<(Vec<Ticket>, bool), serde_json::Er
         last_page: Option<bool>,
     }
     let page: Page = serde_json::from_str(json)?;
-    let more = page.last_page == Some(false);
+    // ClickUp says whether this was the last page; without that, a full page (100) may have more.
+    let more = page.last_page.map_or(page.tasks.len() >= PAGE_SIZE, |last| !last);
     Ok((page.tasks.into_iter().map(Ticket::from).collect(), more))
 }
 

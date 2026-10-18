@@ -86,3 +86,14 @@ pub fn my_tickets(token: &str) -> Result<Vec<Ticket>, String> {
     }
     Ok(tickets)
 }
+
+#[cfg(test)]
+mod tests {
+    /// Reaches the real ClickUp with a token it can't accept: the connection, the endpoint and the
+    /// error message, without an account. Needs the network, so it runs on request.
+    #[test]
+    #[ignore = "talks to api.clickup.com"]
+    fn a_wrong_token_is_turned_away_politely() {
+        assert_eq!(super::check("pk_0_not_a_real_token"), Err("ClickUp did not accept the token.".to_owned()));
+    }
+}
