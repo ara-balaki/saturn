@@ -1,4 +1,7 @@
 <!doctype html>
+<!-- Saturn's app icon. Rendered at 1024×1024 with a transparent background, then turned into
+     crates/saturn/assets/app/Saturn.icns with sips and iconutil. The tile follows Apple's icon grid
+     (824 px squircle in a 1024 px canvas). -->
 <html>
   <head>
     <meta charset="utf-8" />
@@ -49,11 +52,6 @@
             <stop offset="0.8" stop-color="#072869" />
             <stop offset="1" stop-color="#03081a" />
           </radialGradient>
-          <linearGradient id="ring" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0" stop-color="#ececec" stop-opacity=".25" />
-            <stop offset=".5" stop-color="#ececec" stop-opacity=".95" />
-            <stop offset="1" stop-color="#ececec" stop-opacity=".3" />
-          </linearGradient>
           <filter id="grain">
             <feTurbulence
               type="fractalNoise"
@@ -67,32 +65,28 @@
           <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
             <feGaussianBlur stdDeviation="28" />
           </filter>
-          <clipPath id="front"><rect x="0" y="412" width="824" height="412" /></clipPath>
+          <!-- The ring is one solid stroke. This mask hides only the part that passes behind the
+               planet: the planet's disc, upper half in the ring's tilted frame, with a small gap
+               so the ring reads as going around it. -->
+          <mask id="behind" maskUnits="userSpaceOnUse" x="0" y="0" width="824" height="824">
+            <rect width="824" height="824" fill="#fff" />
+            <g transform="rotate(-18 412 412)">
+              <path d="M 202 412 A 210 210 0 0 1 622 412 Z" fill="#000" />
+            </g>
+          </mask>
         </defs>
-        <g transform="rotate(-18 412 412)">
-          <!-- the back half of the ring, behind the planet -->
-          <ellipse
-            cx="412"
-            cy="412"
-            rx="330"
-            ry="86"
-            fill="none"
-            stroke="url(#ring)"
-            stroke-width="18"
-          />
-        </g>
         <circle cx="412" cy="412" r="196" fill="#1c69e3" opacity=".45" filter="url(#glow)" />
         <circle cx="412" cy="412" r="196" fill="url(#planet)" />
         <circle cx="412" cy="412" r="196" fill="#fff" filter="url(#grain)" />
-        <g transform="rotate(-18 412 412)" clip-path="url(#front)">
-          <!-- the front half of the ring, over the planet -->
+        <g mask="url(#behind)">
           <ellipse
             cx="412"
             cy="412"
             rx="330"
             ry="86"
+            transform="rotate(-18 412 412)"
             fill="none"
-            stroke="url(#ring)"
+            stroke="#e4e4e4"
             stroke-width="18"
           />
         </g>
