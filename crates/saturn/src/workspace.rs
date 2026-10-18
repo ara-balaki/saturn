@@ -14,6 +14,7 @@ use gpui_kit::{
 };
 use saturn_bridge::{Bridge, HookCall};
 use saturn_core::agent_state::{AgentState, tab_title};
+use saturn_core::git;
 use saturn_core::layout::{Cell, CellId, Direction, Layout, RowId, TabId};
 use saturn_core::session_name::rename_for_prompt;
 use saturn_design::{color, radius, shadow, space};
@@ -138,17 +139,26 @@ pub struct Workspace {
     session_names: HashMap<TabId, String>,
     /// The number on the Dock icon right now.
     badge: usize,
-    /// The project's file tree, in the sidebar.
-    files: Entity<FilesView>,
-    /// Opens what is picked in the tree; kept so the subscription lives as long as the tree.
-    files_events: Subscription,
+    /// The sidebar's tree and changes, per repository or worktree it has shown, so switching back
+    /// is instant and each keeps watching its folder.
+    roots: HashMap<PathBuf, RootViews>,
+    /// The folder the sidebar shows: the project, or the focused pane's worktree.
+    root: PathBuf,
+    /// Whether the sidebar follows the focused pane's worktree.
+    follow_pane: bool,
     /// Open files, in the top panel.
     editor: Entity<EditorView>,
     /// What the sidebar shows.
     sidebar_tab: SidebarTab,
-    /// The repository's changes, in the sidebar's Changes tab.
+}
+
+/// What the sidebar shows for one folder.
+struct RootViews {
+    files: Entity<FilesView>,
     changes: Entity<ChangesView>,
-    changes_events: Subscription,
+    /// The branch checked out there, for the sidebar's header.
+    branch: Option<String>,
+    _events: [Subscription; 2],
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -253,16 +263,12 @@ impl Workspace {
             })
             .detach();
         }
-        let files = cx.new(|cx| FilesView::new(&project, cx));
-        let files_events = Self::follow_files(&files, window, cx);
-        let changes = cx.new(|cx| ChangesView::new(&project, cx));
-        let changes_events = Self::follow_changes(&changes, cx);
+        let roots = HashMap::from([(project.clone(), Self::root_views(&project, window, cx))]);
         Self {
             sidebar_tab: SidebarTab::Files,
-            changes,
-            changes_events,
-            files,
-            files_events,
+            roots,
+            root: project.clone(),
+            follow_pane: true,
             editor: cx.new(|_| EditorView::default()),
             project,
             layout: Layout::default(),
@@ -288,12 +294,45 @@ impl Workspace {
         cx.notify();
     }
 
-    /// A file picked in the tree opens in the editor, which shows itself if it was hidden.
-    fn follow_files(files: &Entity<FilesView>, window: &mut Window, cx: &mut Context<Self>) -> Subscription {
-        cx.subscribe_in(files, window, |this, _, event: &FilesEvent, window, cx| match event {
-            FilesEvent::Open(path) => this.open_file(path, window, cx),
-            FilesEvent::GitChanged => this.changes.update(cx, ChangesView::reload),
-        })
+    /// A tree and a changes list for `root`. A file picked in the tree opens in the editor; a new
+    /// git state makes the changes list read again.
+    fn root_views(root: &Path, window: &mut Window, cx: &mut Context<Self>) -> RootViews {
+        let files = cx.new(|cx| FilesView::new(root, cx));
+        let changes = cx.new(|cx| ChangesView::new(root, cx));
+        let files_events = {
+            let changes = changes.clone();
+            cx.subscribe_in(&files, window, move |this, _, event: &FilesEvent, window, cx| match event {
+                FilesEvent::Open(path) => this.open_file(path, window, cx),
+                FilesEvent::GitChanged => changes.update(cx, ChangesView::reload),
+            })
+        };
+        let changes_events = Self::follow_changes(&changes, cx);
+        RootViews { files, changes, branch: git::branch(root), _events: [files_events, changes_events] }
+    }
+
+    /// The views of the folder the sidebar shows.
+    fn current_root(&self) -> &RootViews {
+        self.roots.get(&self.root).or_else(|| self.roots.get(&self.project)).expect("the project's views exist")
+    }
+
+    /// Points the sidebar at the focused pane's worktree when following, else at the project.
+    fn sync_root(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let pane_folder = self
+            .follow_pane
+            .then(|| self.layout.focused_tab().and_then(|tab| self.terminals.get(&tab)))
+            .flatten()
+            .map(|view| view.read(cx).cwd.clone());
+        let target =
+            pane_folder.map_or_else(|| self.project.clone(), |folder| git::toplevel(&folder).unwrap_or(folder));
+        if target == self.root {
+            return;
+        }
+        if !self.roots.contains_key(&target) {
+            let views = Self::root_views(&target, window, cx);
+            self.roots.insert(target.clone(), views);
+        }
+        self.root = target;
+        cx.notify();
     }
 
     /// Reviewing a change opens it in the editor panel; new changes refresh an open review.
@@ -313,7 +352,7 @@ impl Workspace {
     /// Shows the Changes tab and reviews its first file once the changes are read (spikes).
     pub fn review_first_change(&mut self, cx: &mut Context<Self>) {
         self.sidebar_tab = SidebarTab::Changes;
-        let changes = self.changes.clone();
+        let changes = self.current_root().changes.clone();
         cx.spawn(async move |_, cx| {
             cx.background_executor().timer(std::time::Duration::from_millis(1500)).await;
             changes.update(cx, |changes, cx| changes.open(0, cx));
@@ -475,6 +514,11 @@ impl Workspace {
                 cx.notify();
             }
             TerminalViewEvent::TitleChanged => cx.notify(),
+            TerminalViewEvent::CwdChanged => {
+                if self.layout.focused_tab() == Some(tab) {
+                    self.sync_root(window, cx);
+                }
+            }
         }
     }
 
@@ -488,6 +532,7 @@ impl Workspace {
 
     /// Focuses the terminal now in front and marks it seen.
     fn after_layout_change(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.sync_root(window, cx);
         if let Some(front) = self.layout.focused_tab() {
             self.unseen.remove(&front);
             if self.renaming.is_none()
@@ -601,11 +646,11 @@ impl Workspace {
             let Some(project) = paths.into_iter().next() else { return };
             settings::remember_project(&project);
             let _ = this.update_in(cx, |this, window, cx| {
-                this.files = cx.new(|cx| FilesView::new(&project, cx));
-                this.files_events = Self::follow_files(&this.files, window, cx);
-                this.changes = cx.new(|cx| ChangesView::new(&project, cx));
-                this.changes_events = Self::follow_changes(&this.changes, cx);
+                let views = Self::root_views(&project, window, cx);
+                this.roots = HashMap::from([(project.clone(), views)]);
+                this.root = project.clone();
                 this.project = project;
+                this.sync_root(window, cx);
                 if this.layout.is_empty() {
                     this.open_terminal(Placement::Tab, window, cx);
                 }
@@ -933,17 +978,30 @@ impl Workspace {
         } else {
             self.render_grid(cx)
         };
-        let path = self.project.display().to_string();
         let switch = self.render_sidebar_switch(cx);
+        let root = self.current_root();
+        let (files, changes, branch) = (root.files.clone(), root.changes.clone(), root.branch.clone());
+        let root_name =
+            self.root.file_name().map_or_else(|| "/".to_owned(), |name| name.to_string_lossy().into_owned());
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        let short_path = match home.as_deref().and_then(|home| self.root.strip_prefix(home).ok()) {
+            Some(rest) => format!("~/{}", rest.display()),
+            None => self.root.display().to_string(),
+        };
+        let detail = branch.map_or_else(|| short_path.clone(), |branch| format!("{branch} · {short_path}"));
+        let follow = chrome::icon_button("follow-pane", if self.follow_pane { "locate-fixed" } else { "locate" }, true)
+            .when(self.follow_pane, |button| button.bg(theme::color(color::CONTROL_PRESSED)))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.follow_pane = !this.follow_pane;
+                this.sync_root(window, cx);
+                cx.notify();
+            }));
         let sidebar = match self.sidebar_tab {
-            SidebarTab::Files => chrome::sidebar(&name, &path, switch, None, self.files.clone()),
-            SidebarTab::Changes => chrome::sidebar(
-                &name,
-                &path,
-                switch,
-                Some(changes_view::scope_strip(&self.changes, cx).into_any_element()),
-                self.changes.clone(),
-            ),
+            SidebarTab::Files => chrome::sidebar(&root_name, &detail, follow, switch, None, files),
+            SidebarTab::Changes => {
+                let strip = changes_view::scope_strip(&changes, cx).into_any_element();
+                chrome::sidebar(&root_name, &detail, follow, switch, Some(strip), changes)
+            }
         };
         div().flex_1().min_h_0().child(
             h_resizable("workbench")

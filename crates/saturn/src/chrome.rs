@@ -213,11 +213,12 @@ pub fn dot_grid() -> impl IntoElement {
     .left_0()
 }
 
-/// The sidebar: the project, the Files/Changes switch with whatever belongs to the chosen view, and
-/// that view in the well.
+/// The sidebar: the folder it shows (with an action at the end of its header), the Files/Changes
+/// switch with whatever belongs to the chosen view, and that view in the well.
 pub fn sidebar(
     project_name: &str,
     project_path: &str,
+    header_action: impl IntoElement,
     switch: impl IntoElement,
     strip: Option<AnyElement>,
     content: impl IntoElement,
@@ -232,6 +233,7 @@ pub fn sidebar(
                 .child(icon_button("project", "folder", false))
                 .child(
                     div()
+                        .flex_1()
                         .min_w_0()
                         .child(
                             div()
@@ -250,7 +252,8 @@ pub fn sidebar(
                                 .truncate()
                                 .child(project_path.to_owned()),
                         ),
-                ),
+                )
+                .child(header_action),
         )
         .child(switch)
         .children(strip)

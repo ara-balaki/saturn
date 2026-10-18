@@ -106,6 +106,11 @@ pub fn patch(repo: &Path, scope: Scope) -> String {
     patch
 }
 
+/// The checked-out branch, or `None` when detached or outside a repository.
+pub fn branch(repo: &Path) -> Option<String> {
+    run(repo, &["symbolic-ref", "--quiet", "--short", "HEAD"]).map(|name| name.trim().to_owned())
+}
+
 /// Where the current branch left the default branch (`origin/HEAD`, else `main` or `master`).
 pub fn merge_base(repo: &Path) -> Option<String> {
     let default_branch = run(repo, &["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"])
@@ -202,6 +207,16 @@ mod tests {
         assert!(patch.contains("+export const f = 2;"), "{patch}");
         assert!(patch.contains("+export const a = 10;"), "{patch}");
         assert!(patch.contains("+PORT=4000"), "{patch}");
+    }
+
+    #[test]
+    fn the_branch_is_the_checked_out_one() {
+        let dir = repo();
+        assert_eq!(branch(dir.path()).as_deref(), Some("abc-236"));
+        assert_eq!(
+            toplevel(&dir.path().join(".")).map(|top| top.ends_with(dir.path().file_name().expect("a name"))),
+            Some(true)
+        );
     }
 
     #[test]

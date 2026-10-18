@@ -26,6 +26,8 @@ pub enum TerminalViewEvent {
     TitleChanged,
     StateChanged,
     Bell,
+    /// The shell moved to another folder (OSC 7), such as an agent's worktree.
+    CwdChanged,
     /// The shell ended; the tab should close.
     Exited,
 }
@@ -138,7 +140,12 @@ impl TerminalView {
                     self.message = status.msg;
                     cx.emit(TerminalViewEvent::StateChanged);
                 }
-                TerminalEvent::Cwd(path) => self.cwd = path,
+                TerminalEvent::Cwd(path) => {
+                    if path != self.cwd {
+                        self.cwd = path;
+                        cx.emit(TerminalViewEvent::CwdChanged);
+                    }
+                }
                 TerminalEvent::PromptStart => {}
             }
         }
