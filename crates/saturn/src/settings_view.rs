@@ -33,7 +33,7 @@ fn setting_row(
                 .flex_1()
                 .min_w_0()
                 .gap(len(space::SPACE_1))
-                .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).child(title))
+                .child(div().text_size(px(13.)).font_weight(FontWeight::MEDIUM).child(title))
                 .child(div().text_size(px(12.)).text_color(theme::color(color::INK_MUTED)).child(detail)),
         )
         .child(div().flex_none().pt(len(space::SPACE_1)).child(Switch::new(id).checked(checked).on_click(on_change)))
@@ -49,7 +49,7 @@ fn appearance_row(workspace: &WeakEntity<Workspace>, current: AppearanceSetting)
         .justify_between()
         .gap(len(space::SPACE_6))
         .py(len(space::SPACE_3))
-        .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).child("Appearance"))
+        .child(div().text_size(px(13.)).font_weight(FontWeight::MEDIUM).child("Appearance"))
         .child(chrome::track().children(options.map(|(label, setting)| {
             let workspace = workspace.clone();
             chrome::track_item(label, setting == current).px(len(space::SPACE_4)).child(label).on_click(

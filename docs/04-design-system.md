@@ -40,4 +40,6 @@ Development tools need room for content, so controls are 28px tall, panels sit 6
 
 ## Fonts
 
-Urbanist for the interface and JetBrains Mono for terminals and code, bundled so Saturn never loads fonts from the network. GPUI draws a variable font only at its default weight, so `crates/saturn/assets/fonts` holds one static file per weight in use (Urbanist 300, 400, 600; JetBrains Mono 400, 700), instanced from the variable fonts with fontTools. Both are OFL 1.1 with no Reserved Font Name.
+Weights: 400 for running text, 500 for every control and name, 300 for big headlines with their point in 600 ("No terminals **yet**"). Nothing else is semibold.
+
+Urbanist for the interface and JetBrains Mono for terminals and code, bundled so Saturn never loads fonts from the network. GPUI draws a variable font only at its default weight, so `crates/saturn/assets/fonts` holds one static file per weight in use (Urbanist 300, 400, 500, 600; JetBrains Mono 400, 700), instanced from the variable fonts with fontTools. Both are OFL 1.1 with no Reserved Font Name.

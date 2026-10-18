@@ -27,9 +27,10 @@ actions!(saturn, [Quit]);
 /// One static file per weight the design system uses: GPUI draws a variable font only at its default
 /// weight. Instanced from the variable fonts with fontTools (OFL 1.1; neither declares a Reserved
 /// Font Name).
-const FONTS: [&[u8]; 5] = [
+const FONTS: [&[u8]; 6] = [
     include_bytes!("../assets/fonts/Urbanist-Light.ttf"),
     include_bytes!("../assets/fonts/Urbanist-Regular.ttf"),
+    include_bytes!("../assets/fonts/Urbanist-Medium.ttf"),
     include_bytes!("../assets/fonts/Urbanist-SemiBold.ttf"),
     include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf"),
     include_bytes!("../assets/fonts/JetBrainsMono-Bold.ttf"),

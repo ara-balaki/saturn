@@ -92,7 +92,7 @@ impl Render for DraggedTab {
             .border_1()
             .border_color(theme::color(color::BLUE))
             .text_size(px(13.))
-            .font_weight(FontWeight::SEMIBOLD)
+            .font_weight(FontWeight::MEDIUM)
             .text_color(theme::color(color::INK))
             .font_family(saturn_design::font::SANS)
             .child(self.name.clone())
@@ -565,7 +565,7 @@ impl Workspace {
             .when(!selected && !calling, |tab| tab.hover(|s| s.bg(theme::color(color::CONTROL))))
             .text_color(foreground)
             .text_size(px(13.))
-            .font_weight(FontWeight::SEMIBOLD)
+            .font_weight(FontWeight::MEDIUM)
             .child(status_dot(state))
             .map(|tab_element| match renaming {
                 Some(input) => tab_element.child(div().w(px(140.)).child(Input::new(&input).appearance(false))),

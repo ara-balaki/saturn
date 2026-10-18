@@ -88,7 +88,7 @@ pub fn track_item(id: impl Into<ElementId>, pressed: bool) -> gpui_kit::Stateful
         .min_w(len(CONTROL_HEIGHT))
         .rounded(len(radius::RADIUS_SM))
         .text_size(px(13.))
-        .font_weight(FontWeight::SEMIBOLD)
+        .font_weight(FontWeight::MEDIUM)
         .cursor_pointer()
         .map(|item| {
             if pressed {
@@ -149,7 +149,7 @@ pub fn button(
         .rounded(len(radius::RADIUS_SM))
         .cursor_pointer()
         .text_size(px(13.))
-        .font_weight(FontWeight::SEMIBOLD)
+        .font_weight(FontWeight::MEDIUM)
         .map(|button| {
             if primary {
                 button.text_color(theme::color(color::INK_ON_ACCENT)).bg(accent_fill()).shadow(vec![
@@ -240,7 +240,7 @@ pub fn sidebar(project_name: &str, project_path: &str) -> AnyElement {
                             div()
                                 .text_size(px(15.))
                                 .line_height(px(20.))
-                                .font_weight(FontWeight::SEMIBOLD)
+                                .font_weight(FontWeight::MEDIUM)
                                 .text_color(theme::color(color::INK))
                                 .truncate()
                                 .child(project_name.to_owned()),
@@ -282,7 +282,7 @@ pub fn editor() -> AnyElement {
                     .child(
                         div()
                             .text_size(px(15.))
-                            .font_weight(FontWeight::SEMIBOLD)
+                            .font_weight(FontWeight::MEDIUM)
                             .text_color(theme::color(color::INK))
                             .child("No file open"),
                     )
