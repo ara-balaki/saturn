@@ -1,5 +1,7 @@
 //! Saturn: a terminal grid for running many Claude Code agents side by side.
 
+mod assets;
+mod chrome;
 mod spike;
 mod theme;
 mod workspace;
@@ -13,9 +15,9 @@ use gpui_kit::{
 };
 
 use crate::workspace::{
-    CloseTab, FocusDown, FocusLeft, FocusPane1, FocusPane2, FocusPane3, FocusPane4, FocusPane5, FocusPane6, FocusPane7,
-    FocusPane8, FocusPane9, FocusRight, FocusUp, NewTab, NextAttention, NextTab, Paste, Placement, PreviousTab,
-    SplitDown, SplitRight, ToggleMaximize, Workspace,
+    CloseTab, Copy, FocusDown, FocusLeft, FocusPane1, FocusPane2, FocusPane3, FocusPane4, FocusPane5, FocusPane6,
+    FocusPane7, FocusPane8, FocusPane9, FocusRight, FocusUp, NewTab, NextAttention, NextTab, Paste, Placement,
+    PreviousTab, SplitDown, SplitRight, ToggleEditor, ToggleMaximize, ToggleSidebar, Workspace,
 };
 
 actions!(saturn, [Quit]);
@@ -39,6 +41,9 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-enter", ToggleMaximize, None),
         KeyBinding::new("cmd-shift-a", NextAttention, None),
         KeyBinding::new("cmd-v", Paste, None),
+        KeyBinding::new("cmd-c", Copy, None),
+        KeyBinding::new("cmd-b", ToggleSidebar, None),
+        KeyBinding::new("cmd-j", ToggleEditor, None),
         KeyBinding::new("cmd-1", FocusPane1, None),
         KeyBinding::new("cmd-2", FocusPane2, None),
         KeyBinding::new("cmd-3", FocusPane3, None),
@@ -65,7 +70,11 @@ fn set_menus(cx: &mut App) {
             MenuItem::action("Maximise Pane", ToggleMaximize),
             MenuItem::action("Next Agent Needing You", NextAttention),
         ]),
-        Menu::new("Edit").items([MenuItem::action("Paste", Paste)]),
+        Menu::new("View").items([
+            MenuItem::action("Toggle Sidebar", ToggleSidebar),
+            MenuItem::action("Toggle Editor", ToggleEditor),
+        ]),
+        Menu::new("Edit").items([MenuItem::action("Copy", Copy), MenuItem::action("Paste", Paste)]),
     ]);
 }
 
@@ -75,8 +84,9 @@ fn main() {
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("/"));
 
-    gpui_kit::application().with_assets(gpui_kit::assets::Assets).run(move |cx| {
+    gpui_kit::application().with_assets(assets::Assets).run(move |cx| {
         gpui_kit::init(cx);
+        gpui_kit::component::Theme::change(gpui_kit::component::ThemeMode::Dark, None, cx);
         cx.text_system()
             .add_fonts(FONTS.iter().map(|font| Cow::Borrowed(*font)).collect())
             .expect("the bundled fonts load");
@@ -93,23 +103,21 @@ fn main() {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(1600.), px(1000.)), cx))),
             ..WindowOptions::default()
         };
-        let window = cx
-            .open_window(options, |window, cx| {
-                cx.new(|cx| {
-                    let mut workspace = Workspace::new(project, cx);
-                    let panes = spike::panes();
-                    for index in 0..panes {
-                        workspace.open_terminal(spike::placement(index, panes), window, cx);
-                    }
-                    if panes == 0 {
-                        workspace.open_terminal(Placement::Tab, window, cx);
-                    }
-                    spike::start(&workspace, window, cx);
-                    workspace
-                })
+        gpui_kit::open_window(options, cx, |window, cx| {
+            cx.new(|cx| {
+                let mut workspace = Workspace::new(project, cx);
+                let panes = spike::panes();
+                for index in 0..panes {
+                    workspace.open_terminal(spike::placement(index, panes), window, cx);
+                }
+                if panes == 0 {
+                    workspace.open_terminal(Placement::Tab, window, cx);
+                }
+                spike::start(&workspace, window, cx);
+                workspace
             })
-            .expect("the window opens");
+        })
+        .expect("the window opens");
         cx.activate(true);
-        let _ = window;
     });
 }

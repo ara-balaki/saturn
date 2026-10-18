@@ -3,16 +3,18 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
+use gpui_kit::component::resizable::{h_resizable, resizable_panel, v_resizable};
 use gpui_kit::{
     AnyElement, AppContext as _, Context, Entity, FocusHandle, Focusable as _, FontWeight, Hsla,
-    InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Render, Styled as _, Window, actions, div,
-    px, relative,
+    InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Render, StatefulInteractiveElement as _,
+    Styled as _, Window, actions, div, prelude::FluentBuilder as _, px, relative,
 };
 use saturn_core::agent_state::{AgentState, tab_title};
 use saturn_core::layout::{Cell, CellId, Direction, Layout, TabId};
 use saturn_design::{color, radius, shadow, space};
 use saturn_terminal::view::{TerminalView, TerminalViewEvent};
 
+use crate::chrome::{self, TileKind};
 use crate::theme::{self, len};
 
 actions!(
@@ -31,6 +33,9 @@ actions!(
         ToggleMaximize,
         NextAttention,
         Paste,
+        Copy,
+        ToggleSidebar,
+        ToggleEditor,
         FocusPane1,
         FocusPane2,
         FocusPane3,
@@ -63,6 +68,8 @@ pub struct Workspace {
     unseen: HashSet<TabId>,
     next_tab: u64,
     focus: FocusHandle,
+    sidebar_open: bool,
+    editor_open: bool,
 }
 
 fn state_color(state: AgentState) -> Hsla {
@@ -88,6 +95,8 @@ impl Workspace {
             unseen: HashSet::new(),
             next_tab: 0,
             focus: cx.focus_handle(),
+            sidebar_open: true,
+            editor_open: true,
         }
     }
 
@@ -319,7 +328,7 @@ impl Workspace {
         grid.into_any_element()
     }
 
-    fn render_titlebar(&self, cx: &Context<Self>) -> impl IntoElement {
+    fn render_titlebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let states: Vec<AgentState> = self.terminals.values().map(|view| view.read(cx).state).collect();
         let count = |wanted: &[AgentState]| states.iter().filter(|state| wanted.contains(state)).count();
         let summary = [
@@ -327,15 +336,35 @@ impl Workspace {
             (count(&[AgentState::YourTurn, AgentState::Error]), AgentState::YourTurn, "your turn"),
             (count(&[AgentState::Working]), AgentState::Working, "working"),
         ];
+        let toggle = |id: &'static str, icon: &str, on: bool| {
+            chrome::icon_tile(id, icon, if on { TileKind::Plain } else { TileKind::Off }, 26.)
+        };
         div()
             .flex()
             .items_center()
-            .justify_end()
             .gap(len(space::SPACE_5))
             .h(len(TITLEBAR_HEIGHT))
             .pl(len(TRAFFIC_LIGHTS_WIDTH))
-            .pr(len(space::SPACE_3))
+            .pr(len(space::SPACE_1))
             .text_size(px(12.))
+            .child(
+                div()
+                    .flex()
+                    .gap(len(space::SPACE_2))
+                    .child(toggle("toggle-sidebar", "panel-left", self.sidebar_open).on_click(cx.listener(
+                        |this, _, _, cx| {
+                            this.sidebar_open = !this.sidebar_open;
+                            cx.notify();
+                        },
+                    )))
+                    .child(toggle("toggle-editor", "panel-top", self.editor_open).on_click(cx.listener(
+                        |this, _, _, cx| {
+                            this.editor_open = !this.editor_open;
+                            cx.notify();
+                        },
+                    ))),
+            )
+            .child(div().flex_1())
             .children(summary.into_iter().filter(|(n, _, _)| *n > 0).map(|(n, state, label)| {
                 div()
                     .flex()
@@ -349,6 +378,74 @@ impl Workspace {
                     .child(status_dot(state))
                     .child(format!("{n} {label}"))
             }))
+            .child(
+                div()
+                    .id("new-terminal")
+                    .flex()
+                    .items_center()
+                    .gap(len(space::SPACE_2))
+                    .h(px(30.))
+                    .px(len(space::SPACE_4))
+                    .rounded(len(radius::RADIUS_MD))
+                    .bg(theme::color(color::PURPLE))
+                    .hover(|s| s.bg(theme::color(color::PURPLE_DEEP)))
+                    .cursor_pointer()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child("New terminal")
+                    .child(div().text_color(theme::color(color::INK).opacity(0.65)).child("⌘T"))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.open_terminal(Placement::Tab, window, cx);
+                    })),
+            )
+    }
+
+    /// Sidebar | (editor / grid), with draggable dividers. The panels stay in the same place in
+    /// the tree when toggled, so terminals never restart.
+    fn render_workbench(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let half_gap = len(space::SPACE_2 / 2.);
+        let grid = if self.layout.is_empty() {
+            chrome::empty_grid(cx.listener(|this, _, window, cx| {
+                this.open_terminal(Placement::Tab, window, cx);
+            }))
+        } else {
+            self.render_grid(cx)
+        };
+        let name = self.project.file_name().map_or_else(|| "/".to_owned(), |name| name.to_string_lossy().into_owned());
+        let path = self.project.display().to_string();
+        div().flex_1().min_h_0().child(
+            h_resizable("workbench")
+                .child(
+                    resizable_panel()
+                        .size(px(270.))
+                        .size_range(px(200.)..px(480.))
+                        .visible(self.sidebar_open)
+                        .child(div().size_full().pr(half_gap).child(chrome::sidebar(&name, &path))),
+                )
+                .child(
+                    resizable_panel().child(
+                        div().size_full().when(self.sidebar_open, |main| main.pl(half_gap)).child(
+                            v_resizable("main")
+                                .child(
+                                    resizable_panel()
+                                        .size(px(260.))
+                                        .size_range(px(120.)..px(4000.))
+                                        .visible(self.editor_open)
+                                        .child(div().size_full().pb(half_gap).child(chrome::editor())),
+                                )
+                                .child(
+                                    resizable_panel().child(
+                                        div()
+                                            .size_full()
+                                            .flex()
+                                            .flex_col()
+                                            .when(self.editor_open, |grid| grid.pt(half_gap))
+                                            .child(grid),
+                                    ),
+                                ),
+                        ),
+                    ),
+                ),
+        )
     }
 
     fn next_attention(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -417,6 +514,19 @@ impl Render for Workspace {
                 this.update_layout(window, cx, Layout::toggle_maximize);
             }))
             .on_action(cx.listener(|this, _: &NextAttention, window, cx| this.next_attention(window, cx)))
+            .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| {
+                this.sidebar_open = !this.sidebar_open;
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &ToggleEditor, _, cx| {
+                this.editor_open = !this.editor_open;
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &Copy, _, cx| {
+                if let Some(view) = this.layout.focused_tab().and_then(|tab| this.terminals.get(&tab)).cloned() {
+                    view.update(cx, |view, cx| view.copy_selection(cx));
+                }
+            }))
             .on_action(cx.listener(|this, _: &Paste, _, cx| {
                 if let Some(view) = this.layout.focused_tab().and_then(|tab| this.terminals.get(&tab)).cloned() {
                     view.update(cx, saturn_terminal::view::TerminalView::paste_from_clipboard);
@@ -450,6 +560,6 @@ impl Render for Workspace {
                 cx.listener(|this, _: &FocusPane9, window, cx| this.update_layout(window, cx, |l| l.focus_nth(9))),
             )
             .child(self.render_titlebar(cx))
-            .child(self.render_grid(cx))
+            .child(self.render_workbench(cx))
     }
 }

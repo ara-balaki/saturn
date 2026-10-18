@@ -1,13 +1,17 @@
 //! A terminal as a GPUI view: owns the [`Terminal`], turns its output into events for the app,
 //! and handles keys, paste and scrolling.
 
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::time::Instant;
 
+use alacritty_terminal::index::Side;
 use alacritty_terminal::term::TermMode;
 use gpui_kit::{
-    App, Context, EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement, KeyDownEvent,
-    ParentElement as _, Render, ScrollDelta, ScrollWheelEvent, Styled as _, Window, div,
+    App, ClipboardItem, Context, EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement,
+    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render,
+    ScrollDelta, ScrollWheelEvent, Styled as _, Window, div,
 };
 use saturn_core::agent_state::AgentState;
 
@@ -26,6 +30,23 @@ pub enum TerminalViewEvent {
     Exited,
 }
 
+/// Where the grid was last drawn: enough to turn a mouse position into a cell.
+#[derive(Debug, Clone, Copy)]
+pub struct Geometry {
+    pub origin: Point<Pixels>,
+    pub cell_width: Pixels,
+    pub line_height: Pixels,
+}
+
+/// What a held mouse button is doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Drag {
+    None,
+    Selecting,
+    /// The program asked for mouse events (Claude's full-screen view does); they go to it.
+    Reporting,
+}
+
 pub struct TerminalView {
     terminal: Terminal,
     focus: FocusHandle,
@@ -36,6 +57,8 @@ pub struct TerminalView {
     pub message: Option<String>,
     pub cwd: PathBuf,
     scroll_remainder: f32,
+    geometry: Rc<Cell<Option<Geometry>>>,
+    drag: Drag,
 }
 
 impl EventEmitter<TerminalViewEvent> for TerminalView {}
@@ -83,6 +106,8 @@ impl TerminalView {
             message: None,
             cwd: cwd.to_owned(),
             scroll_remainder: 0.0,
+            geometry: Rc::default(),
+            drag: Drag::None,
         }
     }
 
@@ -166,6 +191,71 @@ impl TerminalView {
         }
     }
 
+    /// Copies the selected text to the clipboard. Returns false when nothing is selected.
+    pub fn copy_selection(&self, cx: &mut Context<Self>) -> bool {
+        let Some(text) = self.terminal.selected_text() else { return false };
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        true
+    }
+
+    /// The cell under a window position: row, column, and which half of the cell.
+    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "positions inside a small grid")]
+    fn cell_at(&self, position: Point<Pixels>) -> Option<(usize, usize, Side)> {
+        let geometry = self.geometry.get()?;
+        let x = f32::from(position.x - geometry.origin.x).max(0.0);
+        let y = f32::from(position.y - geometry.origin.y).max(0.0);
+        let cell_width = f32::from(geometry.cell_width);
+        let side = if x % cell_width > cell_width / 2.0 { Side::Right } else { Side::Left };
+        Some(((y / f32::from(geometry.line_height)) as usize, (x / cell_width) as usize, side))
+    }
+
+    /// Whether mouse events go to the program rather than make a selection. Holding Option (or
+    /// Shift) selects anyway, as in other terminals.
+    fn program_wants_mouse(&self, modifiers: gpui_kit::Modifiers) -> bool {
+        let mode = self.terminal.mode();
+        mode.intersects(TermMode::MOUSE_MODE)
+            && mode.contains(TermMode::SGR_MOUSE)
+            && !modifiers.alt
+            && !modifiers.shift
+    }
+
+    fn report_mouse(&mut self, row: usize, col: usize, pressed: bool) {
+        let kind = if pressed { 'M' } else { 'm' };
+        self.terminal.write(format!("\x1b[<0;{};{}{kind}", col + 1, row + 1).into_bytes());
+    }
+
+    fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.focus, cx);
+        let Some((row, col, side)) = self.cell_at(event.position) else { return };
+        if self.program_wants_mouse(event.modifiers) {
+            self.drag = Drag::Reporting;
+            self.report_mouse(row, col, true);
+        } else {
+            self.drag = Drag::Selecting;
+            self.terminal.start_selection(row, col, side, event.click_count);
+        }
+        cx.notify();
+    }
+
+    fn mouse_move(&mut self, event: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.drag != Drag::Selecting || event.pressed_button != Some(MouseButton::Left) {
+            return;
+        }
+        if let Some((row, col, side)) = self.cell_at(event.position) {
+            self.terminal.extend_selection(row, col, side);
+            cx.notify();
+        }
+    }
+
+    fn mouse_up(&mut self, event: &MouseUpEvent, _window: &mut Window, _cx: &mut Context<Self>) {
+        if self.drag == Drag::Reporting
+            && let Some((row, col, _)) = self.cell_at(event.position)
+        {
+            self.report_mouse(row, col, false);
+        }
+        self.drag = Drag::None;
+    }
+
     pub fn kill(&mut self) {
         self.terminal.kill();
     }
@@ -181,6 +271,7 @@ impl TerminalView {
             command: keystroke.modifiers.platform,
         };
         if let Some(bytes) = keys::encode(&press, self.terminal.mode().contains(TermMode::APP_CURSOR)) {
+            self.terminal.clear_selection();
             self.write(bytes);
             cx.stop_propagation();
         }
@@ -222,6 +313,9 @@ impl Render for TerminalView {
             .key_context("Terminal")
             .on_key_down(cx.listener(Self::key_down))
             .on_scroll_wheel(cx.listener(Self::scroll_wheel))
-            .child(TerminalElement::new(cx.entity(), focused))
+            .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
+            .on_mouse_move(cx.listener(Self::mouse_move))
+            .on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
+            .child(TerminalElement::new(cx.entity(), focused, self.geometry.clone()))
     }
 }

@@ -7,7 +7,9 @@ use std::time::Instant;
 
 use alacritty_terminal::event::{Event as EngineEvent, EventListener};
 use alacritty_terminal::grid::{Dimensions, Scroll};
-use alacritty_terminal::term::{Config, Term, TermMode};
+use alacritty_terminal::index::{Column, Point, Side};
+use alacritty_terminal::selection::{Selection, SelectionType};
+use alacritty_terminal::term::{Config, Term, TermMode, viewport_to_point};
 use alacritty_terminal::vte::ansi::Processor;
 use saturn_core::program_status::{PROBE_REPLY, ProgramStatus};
 
@@ -159,6 +161,39 @@ impl Terminal {
         self.term.scroll_display(Scroll::Delta(lines));
     }
 
+    /// The grid point for a cell on screen (row and column counted from the top-left of the view).
+    fn grid_point(&self, row: usize, col: usize) -> Point {
+        let row = row.min(self.term.screen_lines().saturating_sub(1));
+        let col = col.min(self.term.columns().saturating_sub(1));
+        viewport_to_point(self.term.grid().display_offset(), Point::new(row, Column(col)))
+    }
+
+    /// Starts selecting at a cell: by character, by word (double click) or by line (triple click).
+    pub fn start_selection(&mut self, row: usize, col: usize, side: Side, clicks: usize) {
+        let kind = match clicks {
+            2 => SelectionType::Semantic,
+            3.. => SelectionType::Lines,
+            _ => SelectionType::Simple,
+        };
+        self.term.selection = Some(Selection::new(kind, self.grid_point(row, col), side));
+    }
+
+    pub fn extend_selection(&mut self, row: usize, col: usize, side: Side) {
+        let point = self.grid_point(row, col);
+        if let Some(selection) = self.term.selection.as_mut() {
+            selection.update(point, side);
+        }
+    }
+
+    pub fn clear_selection(&mut self) {
+        self.term.selection = None;
+    }
+
+    /// The selected text, or `None` when nothing (or only empty space) is selected.
+    pub fn selected_text(&self) -> Option<String> {
+        self.term.selection_to_string().filter(|text| !text.trim().is_empty())
+    }
+
     pub fn foreground_pid(&self) -> Option<i32> {
         self.pty.foreground_pid()
     }
@@ -171,6 +206,20 @@ impl Terminal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selects_and_copies_screen_text() {
+        let size = GridSize { cols: 40, rows: 5 };
+        let (mut terminal, _output) = Terminal::spawn(Path::new("/tmp"), size, &[]).expect("a shell starts");
+        terminal.advance(b"\x1b[2J\x1b[Hfirst line\r\nsecond word here");
+        terminal.start_selection(1, 7, Side::Left, 2);
+        assert_eq!(terminal.selected_text().as_deref(), Some("word"));
+        terminal.start_selection(0, 0, Side::Left, 1);
+        terminal.extend_selection(1, 5, Side::Right);
+        assert_eq!(terminal.selected_text().as_deref(), Some("first line\nsecond"));
+        terminal.clear_selection();
+        assert_eq!(terminal.selected_text(), None);
+    }
 
     #[test]
     fn runs_a_shell_and_reads_its_output_and_signals() {

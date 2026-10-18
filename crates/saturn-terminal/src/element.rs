@@ -21,7 +21,7 @@ use saturn_design::font as fonts;
 
 use crate::palette;
 use crate::terminal::GridSize;
-use crate::view::TerminalView;
+use crate::view::{Geometry, TerminalView};
 
 pub const FONT_SIZE: f32 = 13.0;
 
@@ -53,11 +53,17 @@ pub fn hsla(color: Rgb, alpha: f32) -> Hsla {
 pub struct TerminalElement {
     view: Entity<TerminalView>,
     focused: bool,
+    /// Where the grid was drawn, so the view can turn mouse positions into cells.
+    geometry: std::rc::Rc<std::cell::Cell<Option<Geometry>>>,
 }
 
 impl TerminalElement {
-    pub fn new(view: Entity<TerminalView>, focused: bool) -> Self {
-        Self { view, focused }
+    pub fn new(
+        view: Entity<TerminalView>,
+        focused: bool,
+        geometry: std::rc::Rc<std::cell::Cell<Option<Geometry>>>,
+    ) -> Self {
+        Self { view, focused, geometry }
     }
 }
 
@@ -197,6 +203,7 @@ impl TerminalElement {
         let cols = (f32::from(bounds.size.width) / f32::from(cell_width)).floor().max(2.0) as u16;
         let rows = (f32::from(bounds.size.height) / f32::from(line_height)).floor().max(1.0) as u16;
         let wanted = GridSize { cols, rows };
+        self.geometry.set(Some(Geometry { origin: bounds.origin, cell_width, line_height }));
         if self.view.read(cx).terminal().size() != wanted {
             self.view.update(cx, |view, _| view.resize(wanted));
         }
@@ -214,7 +221,9 @@ impl TerminalElement {
             )
         };
 
-        let mut backgrounds: Vec<(usize, usize, usize, Rgb)> = Vec::new();
+        let selection = content.selection;
+        let selection_color = hsla(palette::SELECTION, 0.45);
+        let mut backgrounds: Vec<(usize, usize, usize, Hsla)> = Vec::new();
         let mut spans: Vec<Span> = Vec::new();
         let mut singles: Vec<(usize, usize, String, TextStyle)> = Vec::new();
 
@@ -232,10 +241,12 @@ impl TerminalElement {
                 std::mem::swap(&mut fg, &mut bg);
             }
 
-            if bg != palette::BACKGROUND {
+            let selected = selection.is_some_and(|range| range.contains(indexed.point));
+            if selected || bg != palette::BACKGROUND {
+                let color = if selected { selection_color } else { hsla(bg, 1.0) };
                 match backgrounds.last_mut() {
-                    Some(last) if last.0 == row && last.2 == col && last.3 == bg => last.2 = col + width,
-                    _ => backgrounds.push((row, col, col + width, bg)),
+                    Some(last) if last.0 == row && last.2 == col && last.3 == color => last.2 = col + width,
+                    _ => backgrounds.push((row, col, col + width, color)),
                 }
             }
 
@@ -268,7 +279,7 @@ impl TerminalElement {
 
         let backgrounds = backgrounds
             .into_iter()
-            .map(|(row, start, end, color)| (cell_bounds(row, start, end - start), hsla(color, 1.0)))
+            .map(|(row, start, end, color)| (cell_bounds(row, start, end - start), color))
             .collect();
         let mut lines: Vec<(Point<Pixels>, ShapedLine)> = spans
             .into_iter()
