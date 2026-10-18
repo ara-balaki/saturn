@@ -1,53 +1,139 @@
+<div align="center">
+
+<img src="docs/images/icon.png" width="128" alt="Saturn's icon" />
+
 # Saturn
 
-A native macOS app for running many Claude Code agents side by side: a grid of terminals with tabs,
-a light editor, and a clear signal when an agent needs you. Written in Rust with GPUI.
+**A native macOS workbench for running many Claude Code agents side by side.**
 
-- What it is and why: [docs/01-overview.md](docs/01-overview.md)
-- The stack: [docs/05-rust-stack.md](docs/05-rust-stack.md)
-- The design system: [docs/04-design-system.md](docs/04-design-system.md)
+A grid of terminals, a light editor, a diff review, and a clear signal when an agent needs you.
+Native Rust on GPUI: no browser, no Electron.
+
+</div>
+
+![Saturn with three agents, an open file and the project's file tree](docs/images/saturn-window.png)
+
+## Why
+
+One Claude Code session is a terminal tab. Five of them are a juggling act: which one finished,
+which one is waiting on a permission prompt, which one broke the build. Saturn puts them all on one
+screen and tells you where to look, with the files and diffs they touch one click away.
+
+It isn't an IDE and doesn't try to replace yours. It's the place the agents live.
+
+## What it does
+
+- **A grid of terminals.** Split right (⌘D) and down (⌘⇧D), tabs in every pane, drag the dividers,
+  maximise one pane (⌘⇧↩). A real terminal underneath (alacritty's engine), so TUIs, colours and
+  mouse work as they should.
+- **Agents that tell you how they're doing.** Each tab shows whether its agent is working, idle,
+  waiting for you, or failed. The title bar counts them, ⌘⇧A jumps to the next one that needs you,
+  and macOS notifies you when Saturn is in the background.
+- **Tabs named after the session.** A tab takes the name of the Claude session running in it, or
+  one you type.
+- **Files and a light editor.** A gitignore-aware file tree with git badges, and an editor with
+  syntax highlighting that saves with your project's own formatter (Prettier, Biome, oxfmt or
+  rustfmt, whichever the project uses). Files an agent changes reload by themselves; if you have
+  unsaved edits, Saturn asks first.
+- **Review what changed.** The Changes tab lists every changed file, with a diff for each, for your
+  uncommitted work or for the whole branch.
+- **Follows the agent you're looking at.** Focus a pane that works in another git worktree, and the
+  sidebar switches to that worktree.
+- **Opens where you left off.** Each project's grid comes back as it was, and Saturn offers to
+  resume the Claude sessions that were running: the resume command is typed for you, never run.
+- **Light and dark.** It follows macOS, or you pick one.
+- **Optional: tickets from ClickUp.** Connect a token and ⌘⇧T lists the tickets assigned to you.
+  Pick one, and Saturn opens a pane (in its own worktree if you like) and starts your agent on it.
+  If you don't connect anything, none of this shows up.
+
+## Install
+
+Saturn builds from source and needs macOS, [rustup](https://rustup.rs),
+[pnpm](https://pnpm.io) and [Claude Code](https://claude.com/claude-code).
+
+```sh
+git clone https://github.com/itsjonasarden/saturn.git
+cd saturn
+pnpm install
+pnpm install-app      # builds Saturn.app and puts it in /Applications
+```
+
+Then open Saturn from Spotlight and pick a folder. Run `claude` in any pane.
+
+The app is signed for your own Mac only, so it isn't notarised for sharing. Rust's version is pinned in
+`rust-toolchain.toml`, and rustup installs it on the first build.
+
+## Shortcuts
+
+| Keys        | Does                                   |
+| ----------- | -------------------------------------- |
+| ⌘T          | New tab in the focused pane            |
+| ⌘D / ⌘⇧D    | Split right / down                     |
+| ⌘W          | Close tab                              |
+| ⌘1 … ⌘9     | Focus pane 1 to 9                      |
+| ⌘⌥ + arrows | Move focus between panes               |
+| ⌘⇧[ / ⌘⇧]   | Previous / next tab                    |
+| ⌘⇧↩         | Maximise the focused pane              |
+| ⌘⇧A         | Jump to the next agent that needs you  |
+| ⌘B / ⌘J     | Toggle the sidebar / the editor        |
+| ⌘O          | Open a project                         |
+| ⌘S          | Save the open file                     |
+| ⌘,          | Settings                               |
+| ⌘⇧T         | New agent from a ticket (with ClickUp) |
+
+## How it talks to Claude Code
+
+Saturn doesn't change your Claude Code setup. Every shell it opens gets `SATURN_SOCKET`,
+`SATURN_PANE_ID` and `CLAUDE_CODE_PLUGIN_DIRS`, so a `claude` started inside Saturn loads the small
+plugin in [`plugin/`](plugin) for that session only. The plugin's hooks tell the pane what the agent
+is doing (working, waiting for a permission, done, failed) and do nothing outside Saturn. Run
+`claude` in any other terminal and it's exactly as before.
+
+## Settings
+
+Open them with ⌘, or the gear in the title bar. They're stored in
+`~/Library/Application Support/Saturn/settings.json`.
+
+- **Appearance**: System, Light or Dark.
+- **Name tabs after Claude's session**: tabs show the session's name, or the folder when it's off.
+  A name you type yourself always wins.
+- **Name sessions after tickets**: a slash command whose first word is a ticket, like
+  `/start abc-224`, renames the session to `ABC-224`, the same as typing `/rename ABC-224`. Tickets
+  mentioned in normal prompts never rename anything.
+- **Format on save**, with the formatter your project already uses.
+- **Notifications** when an agent needs you while Saturn is in the background.
+- **ClickUp** (optional): your API token, kept in the macOS Keychain, plus, for each project, the
+  command a ticket starts (`claude -n {ticket}` by default) and whether it gets its own worktree.
 
 ## Develop
 
-Rust is pinned in `rust-toolchain.toml` (rustup installs it on first build). Node is only used for
-commit checks and formatting Markdown/JSON.
-
 ```sh
-pnpm install          # commit hooks and formatters
 pnpm dev              # build and run Saturn (cargo run -p saturn)
 pnpm health           # format check, clippy, tests, unused deps, licences
-pnpm dist             # build Saturn.app (signed for this Mac) in target/release
-pnpm install-app      # the same, then put it in /Applications
+pnpm dist             # build Saturn.app in target/release
 ```
 
-Saturn.app reopens each project's grid where it was left, offers to resume the Claude sessions that
-were running (the command is typed, not run), and posts a macOS notification when an agent needs you
-while Saturn is in the background.
+Node is only used for commit hooks and for formatting Markdown and JSON. Commits follow
+[Conventional Commits](https://www.conventionalcommits.org).
 
-| Crate                    | What it holds                                                                 |
-| ------------------------ | ----------------------------------------------------------------------------- |
-| `crates/saturn`          | The app: window, title bar, grid, shortcuts                                   |
-| `crates/saturn-terminal` | Shells in ptys, alacritty's engine, Claude Code's signals, the terminal view  |
-| `crates/saturn-core`     | Logic without UI: grid layout, agent states, OSC 7501, files, git, formatters |
-| `crates/saturn-design`   | Design tokens compiled from `design/tokens.json`                              |
+| Crate                    | What it holds                                                                |
+| ------------------------ | ---------------------------------------------------------------------------- |
+| `crates/saturn`          | The app: window, title bar, grid, sidebar, editor, settings                  |
+| `crates/saturn-terminal` | Shells in ptys, alacritty's engine, Claude Code's signals, the terminal view |
+| `crates/saturn-core`     | Logic without UI: grid layout, agent states, files, git, formatters, tickets |
+| `crates/saturn-design`   | Design tokens compiled from [`design/tokens.json`](design/tokens.json)       |
+| `crates/saturn-bridge`   | Where the plugin's hooks reach Saturn: a small HTTP server on a Unix socket  |
 
-## Claude Code integration
-
-Every pane's shell gets `SATURN_SOCKET`, `SATURN_PANE_ID` and `CLAUDE_CODE_PLUGIN_DIRS`, so a Claude
-session started in Saturn loads the plugin in [`plugin/`](plugin) for that session only; nothing
-is installed into Claude Code's own settings. The plugin's hooks report to the Saturn window the
-session runs in, and do nothing anywhere else.
-
-Settings (⌘,), saved in `~/Library/Application Support/Saturn/settings.json`:
-
-- **Name tabs after Claude's session** (on by default): tabs show the session's name. Off: the
-  folder, or a name typed by hand.
-- **Name sessions after tickets** (on by default): `/start abc-224`, or any slash command whose
-  first word is a ticket, renames the session to `ABC-224`, as `/rename` would. A name you gave
-  yourself is never replaced.
+More reading: [the design system](docs/04-design-system.md) and [the Rust stack](docs/05-rust-stack.md).
 
 ### Spikes and screenshots
 
 `SATURN_PANES=12 SATURN_COMMAND="node scripts/tui-load.mjs 30 14" SATURN_PERF=1 cargo run -p saturn --release`
 opens a busy grid and prints frame timings. With `--features capture`, `SATURN_SCREENSHOT=out.png`
 saves what the window draws.
+
+## Licence
+
+[MIT](LICENSE). Saturn bundles [Urbanist](https://github.com/coreyhu/Urbanist) and
+[JetBrains Mono](https://www.jetbrains.com/lp/mono/) (SIL Open Font Licence) and a few
+[Lucide](https://lucide.dev) icons (ISC).
