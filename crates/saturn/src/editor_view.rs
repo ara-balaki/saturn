@@ -450,7 +450,7 @@ fn display_name(path: &Path) -> String {
 
 /// The tree-sitter grammar for a file: by its whole name first (`Dockerfile`, `.gitignore`), then
 /// by its extension. Files without a grammar of their own get the closest one that colours their
-/// comments and strings: shell for `.env` and ignore files, TOML for INI-style config.
+/// comments and strings: shell for `.env`, ignore files and Dockerfiles.
 fn language_for(path: &Path) -> &'static str {
     let name = path.file_name().map(|name| name.to_string_lossy().to_lowercase()).unwrap_or_default();
     if name.starts_with(".env") {
@@ -462,42 +462,75 @@ fn language_for(path: &Path) -> &'static str {
         "makefile" | "gnumakefile" => return "make",
         "gemfile" | "rakefile" | "podfile" | "brewfile" | "fastfile" | "appfile" | "matchfile" | "pluginfile"
         | "dangerfile" => return "ruby",
-        ".editorconfig" | ".npmrc" | ".gitconfig" | "cargo.lock" => return "toml",
+        ".editorconfig" | ".npmrc" | ".gitconfig" | ".gitmodules" => return "ini",
+        "cargo.lock" | "poetry.lock" | "uv.lock" => return "toml",
+        "cmakelists.txt" => return "cmake",
+        "build.gradle" | "settings.gradle" | "jenkinsfile" => return "java",
+        ".vimrc" | "_vimrc" => return "vim",
+        "config.fish" => return "fish",
         _ if name.starts_with("dockerfile.") => return "bash",
         _ => {}
     }
     let extension = path.extension().map(|ext| ext.to_string_lossy().to_lowercase()).unwrap_or_default();
     match extension.as_str() {
+        // Web
         "ts" | "mts" | "cts" => "typescript",
         "tsx" => "tsx",
         "js" | "mjs" | "cjs" | "jsx" => "javascript",
         "json" | "jsonc" | "json5" | "jsonl" | "webmanifest" => "json",
-        "rs" => "rust",
-        "toml" | "ini" | "cfg" | "conf" => "toml",
-        "yaml" | "yml" => "yaml",
-        "md" | "mdx" | "markdown" => "markdown",
-        "css" | "scss" | "less" => "css",
-        "html" | "htm" | "xml" | "svg" | "plist" | "vue" | "storyboard" | "xib" | "entitlements" | "xcprivacy" => {
-            "html"
-        }
+        "css" | "less" => "css",
+        "scss" => "scss",
+        "html" | "htm" | "vue" => "html",
         "svelte" => "svelte",
+        "astro" => "astro",
+        "ejs" => "ejs",
+        "erb" => "erb",
+        "graphql" | "gql" => "graphql",
+        "prisma" => "prisma",
+        // Data and config
+        "yaml" | "yml" => "yaml",
+        "toml" => "toml",
+        "ini" | "cfg" | "conf" | "properties" => "ini",
+        "xml" | "svg" | "plist" | "storyboard" | "xib" | "entitlements" | "xcprivacy" | "csproj" | "xaml" => "xml",
+        "sql" => "sql",
+        "md" | "mdx" | "markdown" => "markdown",
+        "diff" | "patch" => "diff",
+        "proto" => "proto",
+        // Shells and build files
         "sh" | "bash" | "zsh" | "env" | "dockerfile" => "bash",
+        "fish" => "fish",
+        "ps1" | "psm1" | "psd1" => "powershell",
+        "mk" => "make",
+        "cmake" => "cmake",
+        "nix" => "nix",
+        "vim" => "vim",
+        // Apple
+        "swift" => "swift",
+        "m" | "mm" => "objc",
+        // Other languages
+        "rs" => "rust",
         "py" | "pyi" => "python",
         "go" => "go",
-        "c" | "h" | "strings" => "c",
-        "cc" | "cpp" | "cxx" | "hpp" | "hh" | "hxx" | "m" | "mm" | "xcconfig" => "cpp",
-        "cs" => "csharp",
-        "java" => "java",
-        "kt" | "kts" => "kotlin",
-        "swift" => "swift",
         "rb" | "rake" | "gemspec" => "ruby",
         "php" => "php",
+        "java" | "gradle" | "groovy" => "java",
+        "kt" | "kts" => "kotlin",
+        "scala" | "sc" => "scala",
+        "dart" => "dart",
+        "c" | "h" | "strings" | "xcconfig" => "c",
+        "cc" | "cpp" | "cxx" | "hpp" | "hh" | "hxx" => "cpp",
+        "cs" => "csharp",
+        "fs" | "fsi" | "fsx" => "fsharp",
+        "ex" | "exs" | "heex" => "elixir",
+        "erl" | "hrl" => "erlang",
+        "gleam" => "gleam",
+        "hs" | "lhs" => "haskell",
+        "ml" | "mli" => "ocaml",
+        "elm" => "elm",
+        "r" => "r",
         "lua" => "lua",
         "zig" => "zig",
-        "proto" => "proto",
-        "graphql" | "gql" => "graphql",
-        "diff" | "patch" => "diff",
-        "mk" => "make",
+        "glsl" | "vert" | "frag" | "geom" | "comp" => "glsl",
         _ => "text",
     }
 }
@@ -520,8 +553,14 @@ mod tests {
         assert_eq!(language_for(Path::new("/p/.gitignore")), "bash");
         assert_eq!(language_for(Path::new("/p/Makefile")), "make");
         assert_eq!(language_for(Path::new("/p/Cargo.lock")), "toml");
+        assert_eq!(language_for(Path::new("/p/.editorconfig")), "ini");
         assert_eq!(language_for(Path::new("/p/ios/App/AppDelegate.swift")), "swift");
-        assert_eq!(language_for(Path::new("/p/ios/App/Info.plist")), "html");
+        assert_eq!(language_for(Path::new("/p/ios/App/Info.plist")), "xml");
+        assert_eq!(language_for(Path::new("/p/ios/App/Bridge.m")), "objc");
+        assert_eq!(language_for(Path::new("/p/app/lib/main.dart")), "dart");
+        assert_eq!(language_for(Path::new("/p/android/build.gradle")), "java");
+        assert_eq!(language_for(Path::new("/p/db/schema.prisma")), "prisma");
+        assert_eq!(language_for(Path::new("/p/db/seed.sql")), "sql");
         assert_eq!(language_for(Path::new("/p/ios/fastlane/Fastfile")), "ruby");
         assert_eq!(language_for(Path::new("/p/LICENSE")), "text");
     }
