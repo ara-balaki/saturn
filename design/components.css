@@ -892,12 +892,18 @@
     inset 0 0 0 1px var(--sat-separator),
     var(--shadow-float);
 }
+/* Under a dialog: a light dim, the window sharp behind it. */
 .sat-frost {
   position: absolute;
   inset: 0;
-  background: color-mix(in oklab, var(--ground) 25%, transparent);
-  -webkit-backdrop-filter: blur(18px);
-  backdrop-filter: blur(18px);
+  background: rgba(26, 16, 48, 0.12);
+}
+:root .sat-frost,
+[data-theme='dark'] .sat-frost {
+  background: rgba(0, 0, 0, 0.35);
+}
+[data-theme='light'] .sat-frost {
+  background: rgba(26, 16, 48, 0.12);
 }
 .sat-input {
   display: flex;
