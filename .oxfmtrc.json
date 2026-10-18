@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "singleQuote": true,
+  "semi": true,
+  "trailingComma": "all",
+  "printWidth": 100,
+  "tabWidth": 2,
+  "endOfLine": "lf",
+  "sortPackageJson": false,
+  "sortImports": {
+    "customGroups": [{ "groupName": "alias", "elementNamePattern": ["@shared/**"] }],
+    "groups": [
+      ["value-builtin", "type-builtin"],
+      ["value-external", "type-external"],
+      "alias",
+      ["value-parent", "value-sibling", "value-index", "type-parent", "type-sibling", "type-index"],
+      "unknown"
+    ]
+  },
+  "ignorePatterns": ["out", "dist", "node_modules", "pnpm-lock.yaml", "spikes/logs"]
+}
