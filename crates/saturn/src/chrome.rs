@@ -253,14 +253,14 @@ pub fn dot_grid() -> impl IntoElement {
     .left_0()
 }
 
-/// The sidebar: its header (the folder it shows), the Files/Changes switch, an optional strip of
-/// controls for the tab, and the tab's content. It's chrome, so it sits straight on the glass, as
+/// The sidebar: its header (the folder it shows), the Files/Changes switch, the tab's content, and
+/// an optional footer (the focused agent's card). It's chrome, so it sits straight on the glass, as
 /// Finder's sidebar does, with no card of its own.
 pub fn sidebar(
     header: impl IntoElement,
     switch: impl IntoElement,
-    strip: Option<AnyElement>,
     content: impl IntoElement,
+    footer: Option<AnyElement>,
 ) -> AnyElement {
     div()
         .flex()
@@ -272,8 +272,8 @@ pub fn sidebar(
         .p(len(space::SPACE_1))
         .child(header)
         .child(switch)
-        .children(strip)
         .child(div().relative().flex_1().min_h_0().overflow_hidden().child(content))
+        .children(footer)
         .into_any_element()
 }
 

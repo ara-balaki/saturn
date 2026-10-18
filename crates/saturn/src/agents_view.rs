@@ -1,19 +1,18 @@
-//! The Agents tab: a tile per agent. The agent in the focused pane gets the gradient card, the
-//! one coloured surface on a screen, tinted by its state; the others are compact cards whose icon
-//! tile lights up (the accent tile) while they work.
+//! The focused agent's card, at the bottom of the sidebar: the gradient card (the one coloured
+//! surface on a screen) tinted by the agent's state, with its step, context, activity and progress.
 
 use gpui_kit::{
-    AnyElement, ColorSpace, ElementId, FontWeight, Hsla, InteractiveElement as _, IntoElement, ParentElement as _,
-    Styled as _, div, linear_color_stop, linear_gradient, point, prelude::FluentBuilder as _, px, rgb,
+    ColorSpace, ElementId, FontWeight, Hsla, InteractiveElement as _, IntoElement, ParentElement as _, Styled as _,
+    div, linear_color_stop, linear_gradient, point, px, rgb,
 };
 use saturn_core::agent_activity::{Steps, short_tokens};
 use saturn_core::agent_state::AgentState;
-use saturn_design::{color, radius, space};
+use saturn_design::{radius, space};
 
 use crate::chrome;
-use crate::theme::{self, len};
+use crate::theme::len;
 
-/// What a tile shows about one agent.
+/// What the card shows about the agent.
 pub struct Agent {
     pub name: String,
     pub state: AgentState,
@@ -64,17 +63,8 @@ fn tint(state: AgentState) -> (u32, u32, u32) {
     }
 }
 
-fn state_color(state: AgentState) -> Hsla {
-    theme::color(match state {
-        AgentState::Working => color::STATUS_WORKING,
-        AgentState::NeedsYou | AgentState::Error => color::STATUS_NEEDS_YOU,
-        AgentState::YourTurn => color::STATUS_YOUR_TURN,
-        _ => color::STATUS_IDLE,
-    })
-}
-
 /// The gradient card for the agent in the focused pane.
-pub fn focused_tile(id: impl Into<ElementId>, agent: &Agent) -> gpui_kit::Stateful<gpui_kit::Div> {
+pub fn card(id: impl Into<ElementId>, agent: &Agent) -> gpui_kit::Stateful<gpui_kit::Div> {
     let (bright, deep, end) = tint(agent.state);
     let white = |alpha: f32| gpui_kit::hsla(0., 0., 1., alpha);
     div()
@@ -89,12 +79,13 @@ pub fn focused_tile(id: impl Into<ElementId>, agent: &Agent) -> gpui_kit::Statef
         .cursor_pointer()
         .bg(linear_gradient(155., linear_color_stop(rgb(deep), 0.), linear_color_stop(rgb(end), 1.))
             .color_space(ColorSpace::Oklab))
-        // The light pooling in from the lower left, as in the design system's gradient card.
+        // The light pooling in from the lower left, as in the design system's gradient card. Rounded
+        // like the card: GPUI clips children to a rectangle, not to rounded corners.
         .child(
-            div().absolute().top_0().left_0().size_full().bg(linear_gradient(
-                35.,
-                linear_color_stop(Hsla::from(rgb(bright)).opacity(0.85), 0.),
-                linear_color_stop(Hsla::from(rgb(bright)).opacity(0.), 0.6),
+            div().absolute().top_0().left_0().size_full().rounded(len(radius::RADIUS_LG)).bg(linear_gradient(
+                30.,
+                linear_color_stop(Hsla::from(rgb(bright)).opacity(0.7), 0.),
+                linear_color_stop(Hsla::from(rgb(bright)).opacity(0.), 0.85),
             )
             .color_space(ColorSpace::Oklab)),
         )
@@ -177,71 +168,4 @@ fn meter(fraction: f32, white: impl Fn(f32) -> Hsla) -> impl IntoElement {
                 .child(div().text_color(white(0.9)).child(format!("{percent}%")))
                 .child("100%"),
         )
-}
-
-/// A compact card for an agent in another pane.
-pub fn tile(id: impl Into<ElementId>, agent: &Agent) -> gpui_kit::Stateful<gpui_kit::Div> {
-    let working = agent.state == AgentState::Working;
-    let (bright, deep, _) = tint(AgentState::Working);
-    div()
-        .id(id)
-        .flex()
-        .items_center()
-        .gap(len(space::SPACE_3))
-        .p(len(space::SPACE_2))
-        .rounded(len(radius::RADIUS_MD))
-        .cursor_pointer()
-        .bg(theme::overlay(0.05))
-        .hover(|s| s.bg(theme::fill_control()))
-        // The accent tile while it works; otherwise a quiet tile with the state's colour.
-        .child(
-            div().flex().flex_none().items_center().justify_center().size(px(28.)).rounded(len(radius::RADIUS_SM)).map(
-                |icon| {
-                    if working {
-                        icon.bg(linear_gradient(
-                            135.,
-                            linear_color_stop(rgb(bright), 0.),
-                            linear_color_stop(rgb(deep), 1.),
-                        )
-                        .color_space(ColorSpace::Oklab))
-                            .child(chrome::icon("bot", 14., gpui_kit::white()))
-                    } else {
-                        icon.bg(theme::fill_control()).child(chrome::icon("bot", 14., state_color(agent.state)))
-                    }
-                },
-            ),
-        )
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .child(
-                    div()
-                        .text_size(px(13.))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme::color(color::INK))
-                        .truncate()
-                        .child(agent.name.clone()),
-                )
-                .child(
-                    div()
-                        .text_size(px(11.))
-                        .text_color(theme::color(color::INK_FAINT))
-                        .truncate()
-                        .child(agent.activity().unwrap_or_else(|| agent.label())),
-                ),
-        )
-        .children(agent.context.map(|tokens| {
-            div().flex_none().text_size(px(11.)).text_color(theme::color(color::INK_FAINT)).child(short_tokens(tokens))
-        }))
-}
-
-/// What the tab says with no agents yet.
-pub fn empty() -> AnyElement {
-    div()
-        .p(len(space::SPACE_3))
-        .text_size(px(13.))
-        .text_color(theme::color(color::INK_MUTED))
-        .child("No agents yet. Start Claude in a pane and it shows up here.")
-        .into_any_element()
 }
