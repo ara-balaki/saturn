@@ -154,8 +154,8 @@ impl FilesView {
             .cursor_pointer()
             .text_size(px(13.))
             .text_color(theme::color(name_color))
-            .when(selected, |row| row.bg(theme::color(color::CONTROL_PRESSED)))
-            .when(!selected, |row| row.hover(|s| s.bg(theme::color(color::CONTROL))))
+            .when(selected, |row| row.bg(theme::fill_pressed()))
+            .when(!selected, |row| row.hover(|s| s.bg(theme::fill_hover())))
             .child(div().w(px(12.)).flex_none().when(row.is_dir, |slot| {
                 slot.child(chrome::icon(
                     if row.expanded { "chevron-down" } else { "chevron-right" },

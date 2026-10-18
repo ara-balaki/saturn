@@ -99,7 +99,7 @@ impl Render for DraggedTab {
             .flex()
             .items_center()
             .rounded(len(radius::RADIUS_SM))
-            .bg(theme::color(color::CONTROL_PRESSED))
+            .bg(theme::fill_pressed())
             .border_1()
             .border_color(theme::color(color::BLUE))
             .text_size(px(13.))
@@ -272,7 +272,7 @@ fn pull_request_chip(cell: CellId, pr: &PullRequest) -> impl IntoElement {
         .text_size(px(12.))
         .font_weight(FontWeight::MEDIUM)
         .text_color(theme::color(color::INK_MUTED))
-        .hover(|s| s.bg(theme::color(color::CONTROL)))
+        .hover(|s| s.bg(theme::fill_hover()))
         .child(chrome::icon(icon, 14., theme::color(state_color)))
         .child(format!("#{}", pr.number))
         .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
@@ -1153,7 +1153,7 @@ impl Workspace {
         let calling = !selected && state == AgentState::NeedsYou && self.unseen.contains(&tab);
         let (background, foreground) = match (calling, selected) {
             (true, _) => (theme::color(color::AMBER), theme::color(color::INK_ON_SIGNAL)),
-            (false, true) => (theme::color(color::CONTROL_PRESSED), theme::color(color::INK)),
+            (false, true) => (theme::fill_pressed(), theme::color(color::INK)),
             (false, false) => (gpui_kit::transparent_black(), theme::color(color::INK_MUTED)),
         };
         let renaming = self.renaming.as_ref().filter(|(renaming, _)| *renaming == tab).map(|(_, input)| input.clone());
@@ -1166,7 +1166,7 @@ impl Workspace {
             .size(px(20.))
             .rounded(len(radius::RADIUS_XS))
             .when(!selected, |close| close.invisible().group_hover("tab", gpui_kit::Styled::visible))
-            .hover(|s| s.bg(theme::color(color::CONTROL_HOVER)))
+            .hover(|s| s.bg(theme::fill_control()))
             .child(chrome::icon("x", 11., foreground))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |this, _, window, cx| this.close_tab(tab, window, cx)));
@@ -1184,7 +1184,7 @@ impl Workspace {
             .max_w(px(220.))
             .rounded(len(radius::RADIUS_SM))
             .bg(background)
-            .when(!selected && !calling, |tab| tab.hover(|s| s.bg(theme::color(color::CONTROL))))
+            .when(!selected && !calling, |tab| tab.hover(|s| s.bg(theme::fill_hover())))
             .text_color(foreground)
             .text_size(px(13.))
             .font_weight(FontWeight::MEDIUM)
@@ -1218,7 +1218,8 @@ impl Workspace {
         let focused = self.layout.focused == Some(cell.id);
         let unseen_states: Vec<AgentState> =
             cell.tabs.iter().filter(|tab| self.unseen.contains(tab)).map(|tab| self.tab_state(*tab, cx)).collect();
-        let needs_you = unseen_states.contains(&AgentState::NeedsYou);
+        // Orange for anything waiting on you, a stopped turn included; green for a finished one.
+        let needs_you = unseen_states.iter().any(|state| matches!(state, AgentState::NeedsYou | AgentState::Error));
         let glow = if needs_you {
             Some(shadow::GLOW_NEEDS_YOU)
         } else if !unseen_states.is_empty() {
@@ -1279,7 +1280,7 @@ impl Workspace {
                             .text_size(px(12.))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(theme::color(color::INK_MUTED))
-                            .hover(|s| s.bg(theme::color(color::CONTROL)))
+                            .hover(|s| s.bg(theme::fill_hover()))
                             .child(ticket_picker::status_dot(ticket))
                             .child(ticket.status.clone())
                             .on_click(move |_, _, _| {
@@ -1392,8 +1393,8 @@ impl Workspace {
         let states: Vec<AgentState> = self.terminals.values().map(|view| view.read(cx).state).collect();
         let count = |wanted: &[AgentState]| states.iter().filter(|state| wanted.contains(state)).count();
         let summary = [
-            (count(&[AgentState::NeedsYou]), AgentState::NeedsYou, "need you"),
-            (count(&[AgentState::YourTurn, AgentState::Error]), AgentState::YourTurn, "your turn"),
+            (count(&[AgentState::NeedsYou, AgentState::Error]), AgentState::NeedsYou, "need you"),
+            (count(&[AgentState::YourTurn]), AgentState::YourTurn, "your turn"),
             (count(&[AgentState::Working]), AgentState::Working, "working"),
         ];
         // The title bar is drawn by Saturn, so the empty parts of it pass a double-click on to
@@ -1466,17 +1467,10 @@ impl Workspace {
             .child(empty("titlebar-middle").flex_1())
             .children(activity)
             .child(
-                // One primary button per screen: New agent when ClickUp is connected, else New
-                // terminal, unless the empty grid already shows its own.
-                chrome::button(
-                    "new-terminal",
-                    "New terminal",
-                    Some("⌘T"),
-                    !self.layout.is_empty() && !self.clickup.connected(),
-                )
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.open_terminal(Placement::Tab, window, cx);
-                })),
+                // New terminals come from each pane's ＋ (and ⌘T); the title bar adds repos. One
+                // primary button per screen: New agent when ClickUp is connected, else this.
+                chrome::button("add-repo", "Add repo", Some("⌘O"), !self.clickup.connected())
+                    .on_click(cx.listener(|_, _, window, cx| Self::open_project(window, cx))),
             )
             .children(self.clickup.connected().then(|| {
                 chrome::button("new-agent", "New agent", Some("⌘⇧T"), true)
@@ -1496,7 +1490,7 @@ impl Workspace {
         let branch = self.roots.get(&self.root).and_then(|views| views.branch.clone());
         let detail = branch.map_or_else(|| short.clone(), |branch| format!("{branch} · {short}"));
         let follow = chrome::icon_button("follow-pane", if self.follow_pane { "locate-fixed" } else { "locate" }, true)
-            .when(self.follow_pane, |button| button.bg(theme::color(color::CONTROL_PRESSED)))
+            .when(self.follow_pane, |button| button.bg(theme::fill_pressed()))
             .on_click(cx.listener(|this, _, window, cx| {
                 this.follow_pane = !this.follow_pane;
                 this.sync_root(window, cx);
@@ -1506,7 +1500,7 @@ impl Workspace {
     }
 
     /// The window's repos, in the title bar: the selected one raised, ✕ on hover to take one out
-    /// (its panes stay), then a button to add one.
+    /// (its panes stay). Adding one is the title bar's button on the right.
     fn render_repo_tabs(&self, cx: &mut Context<Self>) -> AnyElement {
         let removable = self.projects.len() > 1;
         let mut track = chrome::track();
@@ -1535,7 +1529,7 @@ impl Workspace {
                                 .rounded(len(radius::RADIUS_XS))
                                 .invisible()
                                 .group_hover(group, gpui_kit::Styled::visible)
-                                .hover(|s| s.bg(theme::color(color::CONTROL_HOVER)))
+                                .hover(|s| s.bg(theme::fill_control()))
                                 .child(chrome::icon("x", 12., theme::color(color::INK_FAINT)))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     cx.stop_propagation();
@@ -1546,16 +1540,7 @@ impl Workspace {
                     .on_click(cx.listener(move |this, _, window, cx| this.select_project(picked.clone(), window, cx))),
             );
         }
-        div()
-            .flex()
-            .items_center()
-            .gap(len(space::SPACE_2))
-            .child(track)
-            .child(
-                chrome::button("add-repo", "Add repo", Some("⌘O"), false)
-                    .on_click(cx.listener(|_, _, window, cx| Self::open_project(window, cx))),
-            )
-            .into_any_element()
+        track.into_any_element()
     }
 
     /// Sidebar | (editor / grid), with draggable dividers. The panels stay in the same place in
@@ -1641,7 +1626,6 @@ impl Workspace {
 }
 
 impl Render for Workspace {
-    #[expect(clippy::too_many_lines, reason = "the window's action table, one line per action")]
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.report_attention(window, cx);
         div()
@@ -1650,8 +1634,7 @@ impl Render for Workspace {
             .flex_col()
             .px(len(space::SPACE_2))
             .pb(len(space::SPACE_2))
-            // Slightly translucent: the window is blurred, so the desktop shows through the gaps.
-            .bg(theme::color(color::GROUND).opacity(theme::GLASS_GROUND))
+            // No fill: the title bar, sidebar and gaps are the window's glass (theme::overlay).
             .text_color(theme::color(color::INK))
             .font_family(saturn_design::font::SANS)
             .track_focus(&self.focus)

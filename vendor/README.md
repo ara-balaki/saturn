@@ -1,11 +1,12 @@
 # Vendored GPUI
 
-`gpui-pre` and `gpui-pre-apple` 0.3.9 from crates.io (Apache-2.0, see each crate's
-`LICENSE-APACHE`), with three patches: a **backdrop blur** primitive, so a panel can show what's
-under it frosted; drop shadows that stay outside their element; and translucent layers that stack
-instead of adding up, so a see-through window stays see-through. The root `Cargo.toml` points
-Saturn at these copies with `[patch.crates-io]`; the workspace excludes them, so Saturn's lints and
-formatter leave them alone. `gpui-pre`'s examples were left out.
+`gpui-pre`, `gpui-pre-apple` and `gpui-pre-macos` 0.3.9 from crates.io (Apache-2.0, see each
+crate's `LICENSE-APACHE`), with four patches: a **backdrop blur** primitive, so a panel can show
+what's under it frosted; drop shadows that stay outside their element; translucent layers that
+stack instead of adding up, so a see-through window stays see-through; and the window's macOS blur
+kept as the whole sidebar material (fill, clamp, tint, saturation) instead of a bare blur. The root
+`Cargo.toml` points Saturn at these copies with `[patch.crates-io]`; the workspace excludes them,
+so Saturn's lints and formatter leave them alone. `gpui-pre`'s examples were left out.
 
 The idea and the shape of the API come from the
 [`gpui_rn` fork](https://github.com/rngpui/zed-react-native-gpui) (Apache-2.0); the code here is
@@ -22,5 +23,8 @@ written against this version of GPUI. Every change is marked "Saturn's patch":
 - `gpui-pre-apple/src/shaders.metal`: `backdrop_blur_vertex` and `backdrop_blur_fragment`; and
   `shadow_fragment` clips a drop shadow to outside its element, as CSS does, so shadows don't
   tint translucent panels.
+
+- `gpui-pre-macos/src/window.rs`: `blurred_view_update_layer` no longer strips the material's
+  layers (`remove_layer_background` is left in place, unused).
 
 To move to a newer GPUI: copy the new crates here, then re-apply the changes above.

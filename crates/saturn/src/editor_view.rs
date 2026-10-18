@@ -281,7 +281,7 @@ impl EditorView {
                         .justify_center()
                         .size(px(20.))
                         .rounded(len(radius::RADIUS_XS))
-                        .hover(|s| s.bg(theme::color(color::CONTROL_HOVER)))
+                        .hover(|s| s.bg(theme::fill_control()))
                         .child(chrome::icon("x", 11., theme::color(color::INK_MUTED)))
                         .when(!self.showing_review, |slot| {
                             slot.invisible().group_hover("review-tab", gpui_kit::Styled::visible)
@@ -353,7 +353,7 @@ impl EditorView {
                     .justify_center()
                     .size(px(20.))
                     .rounded(len(radius::RADIUS_XS))
-                    .hover(|s| s.bg(theme::color(color::CONTROL_HOVER)))
+                    .hover(|s| s.bg(theme::fill_control()))
                     .map(|slot| {
                         // An unsaved file shows a dot where its close button is, until hovered.
                         if dirty {

@@ -9,34 +9,41 @@ Saturn follows the Quarn workflow-automation design (Behance, 2026) with blue in
 
 ## What colour means
 
-| Colour  | Means                                      | Where                                              |
-| ------- | ------------------------------------------ | -------------------------------------------------- |
-| Blue    | Alive: an agent working, focus, the action | Working dots, the focused pane, the primary button |
-| Amber   | **Needs you**: a permission prompt         | Pane glow, a hidden tab, the title-bar count       |
-| Neutral | **Your turn**: the turn finished           | A bright check and ring; done is calm              |
-| Red     | An error                                   | With the error's words                             |
+| Colour | Means                                                  | Where                                              |
+| ------ | ------------------------------------------------------ | -------------------------------------------------- |
+| Blue   | Alive: an agent working, focus, the action             | Working dots, the focused pane, the primary button |
+| Orange | **Needs you**: a question, a permission prompt, a stop | Pane ring, the tab's dot, the title-bar count      |
+| Green  | **Your turn**: the turn finished with nothing pending  | Pane ring, the tab's dot, the title-bar count      |
+| Red    | An error, in its own words                             | The tab's dot; the pane counts as needing you      |
 
-Amber is the only warm colour, so a pane that needs you is seen from across the room.
+Orange and green split "come back" in two: orange is waiting on you, green is done and safe to read.
 
-## One structure for every container
+## Glass and cards
 
-Every region is a **panel** (`surface-raised`, radius 10, 4px padding) holding a **strip** of controls and a **well** (`surface`, radius 6) with the content: a terminal, the editor's text, a list. Controls that belong together sit in a **track**, the title bar's included. The ground is plain; the dot grid only fills empty wells.
+Saturn layers its window the way macOS apps do (Finder, Xcode, Mail):
+
+- **Chrome is glass.** The title bar, the sidebar and the gaps between panes draw nothing, so the window's own macOS sidebar material shows: blur, saturation, a fill and a brightness clamp. Saturn keeps that material whole (a patch in `vendor/gpui-pre-macos`).
+- **Content is a card.** A terminal pane or the editor is an opaque **card** (`surface`, radius 10) holding a **strip** of controls and, under one hairline, its content, edge to edge. No well inside a card, so no double outline.
+- **Edges and fills are relative.** Black in light mode, white in dark, at a low alpha (`theme::overlay`): a 10% separator, 6–11% control fills, a card ring of 7–8%. A fixed grey would read as a sticker on glass; a relative one darkens or lightens whatever is under it. In light mode a card also has a soft shadow; in dark mode a highlight along its top edge.
+- **Tracks** hold controls that belong together on a faint fill with no border; the pressed item is raised (a white pill with a small shadow in light mode, a lighter pill in dark).
+
+The research behind this, with Apple's measured material values, is summarised in the commit that introduced it.
 
 ## Corners, from the window inward
 
 Inner radius = outer radius − inset. The scale starts at the one corner Saturn does not draw, the macOS window (about 16):
 
-| Outer                 | Inset | Inner                              |
-| --------------------- | ----- | ---------------------------------- |
-| the window, about 16  | 6     | panels, 10                         |
-| panel or track, 10    | 4     | controls (tabs, buttons, wells), 6 |
-| dialog or palette, 14 | 8     | controls, 6                        |
+| Outer                 | Inset | Inner                       |
+| --------------------- | ----- | --------------------------- |
+| the window, about 16  | 6     | cards, 10                   |
+| card or track, 10     | 4     | controls (tabs, buttons), 6 |
+| dialog or palette, 14 | 8     | controls, 6                 |
 
 A test in `crates/saturn-design` fails when one of these stops adding up, and the design system's previews are checked corner by corner with a script.
 
 ## Density
 
-Development tools need room for content, so controls are 28px tall, panels sit 6px apart and pad 4px.
+Development tools need room for content, so controls are 28px tall, cards sit 6px apart and pad 4px.
 
 ## Fonts
 

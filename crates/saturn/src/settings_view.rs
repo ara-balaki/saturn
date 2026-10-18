@@ -86,7 +86,7 @@ fn clickup_section(
         .pt(len(space::SPACE_5))
         .mt(len(space::SPACE_3))
         .border_t_1()
-        .border_color(theme::color(color::LINE))
+        .border_color(theme::separator())
         .child(div().text_size(px(13.)).font_weight(FontWeight::MEDIUM).child("ClickUp"));
     if state.connected() {
         let disconnect = {

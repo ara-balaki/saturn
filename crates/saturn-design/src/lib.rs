@@ -105,7 +105,10 @@ mod tests {
         // Amber text darkens in light mode; the amber fill stays, always with dark text on it.
         assert_ne!(color::AMBER_TEXT.light, color::AMBER.light);
         assert_eq!(color::AMBER.light, color::AMBER.dark);
-        assert_eq!(color::STATUS_NEEDS_YOU.light, color::AMBER_TEXT.light);
+        // Needs you is orange, darkened in light mode; your turn is the terminal's green.
+        assert_eq!(color::STATUS_NEEDS_YOU.light, color::ORANGE.light);
+        assert_ne!(color::ORANGE.light, color::ORANGE.dark);
+        assert_eq!(color::STATUS_YOUR_TURN.dark, color::TERM_GREEN.dark);
         assert_eq!(color::INK_ON_ACCENT.light, color::INK_ON_ACCENT.dark);
     }
 

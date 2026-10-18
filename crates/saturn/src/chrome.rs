@@ -1,6 +1,7 @@
-//! The window's chrome in the design system. One structure for every container: a panel
-//! (`surface-raised`, radius 10, 4px padding) holds a strip of controls and a well (`surface`,
-//! radius 6) with the content; controls that belong together sit in a track.
+//! The window's chrome in the design system, layered as macOS lays out its windows: the chrome (title
+//! bar, sidebar, the gaps) is clear over the window's sidebar material, and content sits on opaque
+//! cards. A card (radius 10) holds a strip of controls and, under a hairline, its content; controls
+//! that belong together sit in a track. Strokes and fills are relative (`theme::overlay`).
 
 use gpui_kit::{
     AnyElement, App, Bounds, ColorSpace, Corners, ElementId, FontWeight, InteractiveElement as _, IntoElement,
@@ -30,53 +31,67 @@ fn accent_fill() -> gpui_kit::Background {
     .color_space(ColorSpace::Oklab)
 }
 
-/// A panel: the container every region is built from.
+/// A card: an opaque content surface (a terminal pane, the editor) over the glass. Its edge is
+/// relative: in light mode a faint dark ring and a soft shadow lift it off the glass; in dark mode
+/// a faint light ring and a highlight along its top edge.
 pub fn panel() -> gpui_kit::Div {
+    let dark = saturn_design::appearance() == saturn_design::Appearance::Dark;
+    let edge = if dark {
+        vec![shadow(0., 1., 0., 0., gpui_kit::hsla(0., 0., 1., 0.05), true)]
+    } else {
+        vec![shadow(0., 1., 3., 0., gpui_kit::hsla(0., 0., 0., 0.1), false)]
+    };
     div()
         .relative()
         .flex()
         .flex_col()
-        .gap(len(space::SPACE_1))
         .size_full()
         .min_w_0()
         .min_h_0()
-        .p(len(space::SPACE_1))
+        .px(len(space::SPACE_1))
+        .pt(len(space::SPACE_1))
         .rounded(len(radius::RADIUS_MD))
-        .bg(theme::color(color::SURFACE_RAISED).opacity(theme::GLASS_PANEL))
+        .bg(theme::color(color::SURFACE))
         .border_1()
-        .border_color(theme::color(color::LINE))
+        .border_color(theme::overlay(if dark { 0.07 } else { 0.08 }))
+        .shadow(edge)
+        .overflow_hidden()
 }
 
-/// A panel's well, holding its content. 4px inside the panel: 10 - 4 = 6.
+/// A card's content, under its strip: edge to edge, below one hairline.
 pub fn well() -> gpui_kit::Div {
     div()
         .relative()
         .flex_1()
         .min_w_0()
         .min_h_0()
-        .rounded(len(radius::RADIUS_SM))
-        .bg(theme::color(color::SURFACE).opacity(theme::GLASS_WELL))
-        .border_1()
-        .border_color(theme::color(color::LINE))
+        .mt(len(space::SPACE_1))
+        .mx(len(-space::SPACE_1))
+        .border_t_1()
+        .border_color(theme::separator())
         .overflow_hidden()
 }
 
-/// A track: controls that belong together, in one `surface` strip.
+fn shadow(x: f32, y: f32, blur: f32, spread: f32, color: gpui_kit::Hsla, inset: bool) -> gpui_kit::BoxShadow {
+    gpui_kit::BoxShadow { color, offset: point(px(x), px(y)), blur_radius: px(blur), spread_radius: px(spread), inset }
+}
+
+/// A track: controls that belong together, on a faint relative fill, no border.
 pub fn track() -> gpui_kit::Div {
     div()
         .flex()
         .flex_none()
         .items_center()
-        .gap(len(space::SPACE_1))
+        .gap(px(2.))
         .p(len(space::SPACE_1))
         .rounded(len(radius::RADIUS_MD))
-        .bg(theme::color(color::SURFACE).opacity(theme::GLASS_PANEL))
-        .border_1()
-        .border_color(theme::color(color::LINE))
+        .bg(theme::overlay(if saturn_design::appearance() == saturn_design::Appearance::Dark { 0.07 } else { 0.05 }))
 }
 
-/// An item in a track. Pressed items are raised: selection is tone, not colour.
+/// An item in a track. A pressed item is raised: in light mode a white pill with a small
+/// shadow, in dark mode a lighter one. Selection is tone, not colour.
 pub fn track_item(id: impl Into<ElementId>, pressed: bool) -> gpui_kit::Stateful<gpui_kit::Div> {
+    let dark = saturn_design::appearance() == saturn_design::Appearance::Dark;
     div()
         .id(id)
         .flex()
@@ -91,17 +106,23 @@ pub fn track_item(id: impl Into<ElementId>, pressed: bool) -> gpui_kit::Stateful
         .font_weight(FontWeight::MEDIUM)
         .cursor_pointer()
         .map(|item| {
-            if pressed {
-                item.bg(theme::color(color::CONTROL_PRESSED)).text_color(theme::color(color::INK))
+            if pressed && dark {
+                item.bg(theme::overlay(0.14)).text_color(theme::color(color::INK))
+            } else if pressed {
+                item.bg(gpui_kit::white())
+                    .text_color(theme::color(color::INK))
+                    .border_1()
+                    .border_color(theme::overlay(0.06))
+                    .shadow(vec![shadow(0., 1., 2., 0., gpui_kit::hsla(0., 0., 0., 0.14), false)])
             } else {
-                item.text_color(theme::color(color::INK_MUTED)).hover(|s| s.bg(theme::color(color::CONTROL)))
+                item.text_color(theme::color(color::INK_MUTED)).hover(|s| s.bg(theme::fill_hover()))
             }
         })
 }
 
 /// A thin divider between groups in a track.
 pub fn track_separator() -> impl IntoElement {
-    div().flex_none().w(px(1.)).h(px(20.)).mx(len(space::SPACE_1)).bg(theme::color(color::LINE_STRONG))
+    div().flex_none().w(px(1.)).h(px(16.)).mx(len(space::SPACE_1)).bg(theme::overlay(0.14))
 }
 
 /// A square icon button, as tall as every control. Quiet ones have no fill until hovered.
@@ -117,13 +138,9 @@ pub fn icon_button(id: impl Into<ElementId>, name: &str, quiet: bool) -> gpui_ki
         .cursor_pointer()
         .map(|button| {
             if quiet {
-                button.hover(|s| s.bg(theme::color(color::CONTROL)))
+                button.hover(|s| s.bg(theme::fill_hover()))
             } else {
-                button
-                    .bg(theme::color(color::CONTROL))
-                    .border_1()
-                    .border_color(theme::color(color::LINE))
-                    .hover(|s| s.bg(theme::color(color::CONTROL_HOVER)))
+                button.bg(theme::fill_control()).hover(|s| s.bg(theme::fill_pressed()))
             }
         })
         .child(icon(name, 14., theme::color(if quiet { color::INK_MUTED } else { color::INK })))
@@ -164,10 +181,8 @@ pub fn button(
             } else {
                 button
                     .text_color(theme::color(color::INK))
-                    .bg(theme::color(color::CONTROL))
-                    .border_1()
-                    .border_color(theme::color(color::LINE))
-                    .hover(|s| s.bg(theme::color(color::CONTROL_HOVER)))
+                    .bg(theme::fill_control())
+                    .hover(|s| s.bg(theme::fill_pressed()))
             }
         })
         .child(label)
@@ -212,7 +227,7 @@ pub fn dot_grid() -> impl IntoElement {
         |_, _, _| (),
         |bounds: Bounds<Pixels>, (), window: &mut Window, _: &mut App| {
             const PITCH: f32 = 18.;
-            let dot = theme::color(color::LINE_STRONG);
+            let dot = theme::overlay(0.16);
             let width = f32::from(bounds.size.width);
             let height = f32::from(bounds.size.height);
             let mut y = PITCH / 2.;
@@ -233,15 +248,28 @@ pub fn dot_grid() -> impl IntoElement {
     .left_0()
 }
 
-/// The sidebar: its header (the window's repos), the Files/Changes switch, an optional strip of
-/// controls for the tab, and the tab's content in a well.
+/// The sidebar: its header (the folder it shows), the Files/Changes switch, an optional strip of
+/// controls for the tab, and the tab's content. It's chrome, so it sits straight on the glass, as
+/// Finder's sidebar does, with no card of its own.
 pub fn sidebar(
     header: impl IntoElement,
     switch: impl IntoElement,
     strip: Option<AnyElement>,
     content: impl IntoElement,
 ) -> AnyElement {
-    panel().child(header).child(switch).children(strip).child(well().child(content)).into_any_element()
+    div()
+        .flex()
+        .flex_col()
+        .gap(len(space::SPACE_1))
+        .size_full()
+        .min_w_0()
+        .min_h_0()
+        .p(len(space::SPACE_1))
+        .child(header)
+        .child(switch)
+        .children(strip)
+        .child(div().relative().flex_1().min_h_0().overflow_hidden().child(content))
+        .into_any_element()
 }
 
 /// The sidebar's header: the folder it shows, its branch and path below, and an action.

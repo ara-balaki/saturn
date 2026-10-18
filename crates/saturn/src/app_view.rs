@@ -91,7 +91,7 @@ impl AppView {
                 .py(len(space::SPACE_3))
                 .rounded(len(radius::RADIUS_SM))
                 .cursor_pointer()
-                .hover(|s| s.bg(theme::color(color::CONTROL)))
+                .hover(|s| s.bg(theme::fill_hover()))
                 .child(chrome::icon("folder", 16., theme::color(color::INK_MUTED)))
                 .child(
                     div()

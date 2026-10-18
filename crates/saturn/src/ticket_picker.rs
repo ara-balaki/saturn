@@ -79,7 +79,7 @@ fn row(workspace: &Entity<Workspace>, ticket: &Ticket) -> impl IntoElement {
         .py(len(space::SPACE_2))
         .rounded(len(radius::RADIUS_SM))
         .cursor_pointer()
-        .hover(|s| s.bg(theme::color(color::CONTROL)))
+        .hover(|s| s.bg(theme::fill_hover()))
         .child(status_dot(ticket))
         .child(
             div()

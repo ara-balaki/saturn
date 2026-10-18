@@ -32,28 +32,56 @@ pub fn layers(layers: &[Shadow]) -> Vec<BoxShadow> {
         .collect()
 }
 
-/// gpui-component's own controls (switches, dialogs, inputs, scrollbars) in Saturn's colours,
-// Glass: how much of the blurred desktop behind the window each layer covers. They stack (ground,
-// then a pane, then its well), so the gaps show the most desktop and text sits on the most cover:
-// about 30% in the gaps, 60% on a pane's strip, 75% behind terminal and editor text.
-pub const GLASS_GROUND: f32 = 0.3;
-pub const GLASS_PANEL: f32 = 0.43;
-pub const GLASS_WELL: f32 = 0.38;
+// Layering, after how macOS builds its windows: the chrome (title bar, sidebar, the gaps between
+// panes) is clear, so the window's own sidebar material shows: blur, saturation, a fill and a
+// brightness clamp, drawn by macOS. Content (terminals, the editor) sits on opaque cards. Strokes
+// and control fills on either are relative, black in light mode and white in dark at a low alpha,
+// so they read the same over any background, as AppKit's separator and fill colours do.
 
+/// Black in light mode, white in dark, at `alpha`: a fill or stroke relative to what's under it.
+pub fn overlay(alpha: f32) -> Hsla {
+    let base = if saturn_design::appearance() == saturn_design::Appearance::Dark { 1.0 } else { 0.0 };
+    gpui_kit::hsla(0., 0., base, alpha)
+}
+
+/// A hairline between things: AppKit's separator colour (10%).
+pub fn separator() -> Hsla {
+    overlay(0.1)
+}
+
+/// Fills for controls on glass or cards, from faint to strong (AppKit's system fills).
+pub fn fill_hover() -> Hsla {
+    overlay(0.06)
+}
+
+pub fn fill_control() -> Hsla {
+    overlay(0.08)
+}
+
+pub fn fill_pressed() -> Hsla {
+    overlay(0.11)
+}
+
+/// gpui-component's own controls (switches, dialogs, inputs, scrollbars) in Saturn's colours,
 /// fonts and radii instead of the library's grey defaults, for one appearance.
 #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "radii are small whole pixels")]
 fn component_theme(appearance: Appearance) -> gpui_kit::component::ThemeConfig {
     use saturn_design::{color as c, font, radius};
 
     let hex = |token: Token| hex(token, appearance);
+    // Relative colours as `#rrggbbaa`: black in light mode, white in dark (see `overlay`).
+    let relative = |alpha: f32| {
+        let base = if appearance == Appearance::Dark { "ffffff" } else { "000000" };
+        format!("#{base}{:02x}", (alpha * 255.).round() as u8)
+    };
     let colors = serde_json::json!({
         // The root view paints this under the whole window; clear, so the glass (the desktop's
         // blur through the ground and the panes) shows. Dialogs, which also default to it, set
         // their own surface (chrome::dialog_surface).
         "background": "#00000000",
         "foreground": hex(c::INK),
-        "border": hex(c::LINE),
-        "input.border": hex(c::LINE_STRONG),
+        "border": relative(0.1),
+        "input.border": relative(0.16),
         "ring": hex(c::BLUE),
         "muted.background": hex(c::CONTROL),
         "muted.foreground": hex(c::INK_MUTED),
@@ -63,9 +91,9 @@ fn component_theme(appearance: Appearance) -> gpui_kit::component::ThemeConfig {
         "primary.hover.background": hex(c::BLUE_VIVID),
         "primary.active.background": hex(c::BLUE_DEEP),
         "primary.foreground": hex(c::INK_ON_ACCENT),
-        "secondary.background": hex(c::CONTROL),
-        "secondary.hover.background": hex(c::CONTROL_HOVER),
-        "secondary.active.background": hex(c::CONTROL_PRESSED),
+        "secondary.background": relative(0.08),
+        "secondary.hover.background": relative(0.11),
+        "secondary.active.background": relative(0.14),
         "secondary.foreground": hex(c::INK),
         "popover.background": hex(c::SURFACE_RAISED),
         "popover.foreground": hex(c::INK),
@@ -76,7 +104,7 @@ fn component_theme(appearance: Appearance) -> gpui_kit::component::ThemeConfig {
         "switch.background": hex(c::CONTROL_PRESSED),
         "switch.thumb.background": hex(c::INK_ON_ACCENT),
         "scrollbar.background": "#00000000",
-        "scrollbar.thumb.background": hex(c::LINE_STRONG),
+        "scrollbar.thumb.background": relative(0.22),
         "scrollbar.thumb.hover.background": hex(c::INK_FAINT),
         // The diff view's added and removed lines.
         "success.background": hex(c::TERM_GREEN),

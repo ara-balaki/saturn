@@ -95,7 +95,8 @@ impl ChangesView {
             let (files, changes, branch, branch_files) = cx
                 .background_spawn(async move {
                     let files = DiffFile::parse(&git::patch(&repo, Scope::Uncommitted)).unwrap_or_default();
-                    let changes = git::changes(&repo).into_iter().map(|change| (change.path.clone(), change)).collect();
+                    let changes: HashMap<String, Change> =
+                        git::changes(&repo).into_iter().map(|change| (change.path.clone(), change)).collect();
                     let branch_files =
                         branch_too.then(|| DiffFile::parse(&git::patch(&repo, Scope::Branch)).unwrap_or_default());
                     (files, changes, git::branch(&repo), branch_files)
@@ -233,7 +234,7 @@ impl ChangesView {
                 div()
                     .px(len(space::SPACE_2))
                     .rounded(len(radius::RADIUS_XS))
-                    .bg(theme::color(color::CONTROL))
+                    .bg(theme::fill_hover())
                     .font_family(saturn_design::font::MONO)
                     .text_size(px(11.))
                     .child(files.len().to_string()),
@@ -282,8 +283,8 @@ impl ChangesView {
             .rounded(len(radius::RADIUS_SM))
             .cursor_pointer()
             .text_size(px(13.))
-            .when(selected, |row| row.bg(theme::color(color::CONTROL_PRESSED)))
-            .when(!selected, |row| row.hover(|s| s.bg(theme::color(color::CONTROL))))
+            .when(selected, |row| row.bg(theme::fill_pressed()))
+            .when(!selected, |row| row.hover(|s| s.bg(theme::fill_hover())))
             .child(chrome::icon(icon, 14., theme::color(icon_color)))
             .child(
                 div()
@@ -318,7 +319,7 @@ impl ChangesView {
             .p(len(space::SPACE_1))
             .pl(len(space::SPACE_3))
             .border_t_1()
-            .border_color(theme::color(color::LINE))
+            .border_color(theme::separator())
             .child(chrome::icon("git-branch", 14., theme::color(color::INK_FAINT)))
             .child(
                 div()
@@ -336,7 +337,8 @@ impl ChangesView {
     }
 }
 
-/// A stage checkbox: ticked when staged, a dash when partly.
+/// A stage checkbox in the macOS manner: 14px, a quiet relative outline when off; when on, the
+/// accent with a soft highlight along its top edge and a thin white tick (a dash when partly).
 fn checkbox(id: impl Into<ElementId>, staged: Staged) -> gpui_kit::Stateful<gpui_kit::Div> {
     let on = staged != Staged::No;
     div()
@@ -345,16 +347,27 @@ fn checkbox(id: impl Into<ElementId>, staged: Staged) -> gpui_kit::Stateful<gpui
         .flex_none()
         .items_center()
         .justify_center()
-        .size(px(16.))
-        .rounded(len(radius::RADIUS_XS))
-        .border_1()
-        .border_color(theme::color(if on { color::BLUE_VIVID } else { color::LINE_STRONG }))
-        .when(on, |box_| box_.bg(theme::color(color::BLUE_VIVID)))
-        .when(!on, |box_| box_.hover(|s| s.border_color(theme::color(color::INK_FAINT))))
+        .size(px(14.))
+        .rounded(px(4.))
         .cursor_pointer()
+        .when(on, |box_| {
+            box_.bg(theme::color(color::BLUE_VIVID)).shadow(vec![gpui_kit::BoxShadow {
+                color: gpui_kit::hsla(0., 0., 1., 0.22),
+                offset: gpui_kit::point(px(0.), px(1.)),
+                blur_radius: px(0.),
+                spread_radius: px(0.),
+                inset: true,
+            }])
+        })
+        .when(!on, |box_| {
+            box_.bg(theme::overlay(0.04))
+                .border_1()
+                .border_color(theme::overlay(0.24))
+                .hover(|s| s.border_color(theme::overlay(0.4)))
+        })
         .children(match staged {
-            Staged::Yes => Some(chrome::icon("check", 12., theme::color(color::INK_ON_ACCENT))),
-            Staged::Partly => Some(chrome::icon("minus", 12., theme::color(color::INK_ON_ACCENT))),
+            Staged::Yes => Some(chrome::icon("check", 10., gpui_kit::white())),
+            Staged::Partly => Some(chrome::icon("minus", 10., gpui_kit::white())),
             Staged::No => None,
         })
 }
