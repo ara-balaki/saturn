@@ -3,6 +3,7 @@
 //! here is unit-tested.
 
 pub mod agent_state;
+pub mod clickup;
 pub mod files;
 pub mod format;
 pub mod git;

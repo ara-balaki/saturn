@@ -68,7 +68,7 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
     }
     if std::env::var_os("SATURN_OPEN_SETTINGS").is_some() {
         // After the window (and the Root that hosts dialogs) exists.
-        cx.defer_in(window, |_, window, cx| crate::settings_view::open(cx.weak_entity(), window, cx));
+        cx.defer_in(window, Workspace::open_settings);
     }
     if std::env::var_os("SATURN_REVIEW").is_some() {
         cx.defer_in(window, |workspace, _, cx| workspace.review_first_change(cx));

@@ -14,6 +14,7 @@ use gpui_kit::{
 };
 use saturn_bridge::{Bridge, HookCall};
 use saturn_core::agent_state::{AgentState, tab_title};
+use saturn_core::clickup::Ticket;
 use saturn_core::git;
 use saturn_core::layout::{Cell, CellId, Direction, Layout, RowId, TabId};
 use saturn_core::session_name::rename_for_prompt;
@@ -22,12 +23,13 @@ use saturn_terminal::view::{TerminalView, TerminalViewEvent};
 
 use crate::changes_view::{self, ChangesEvent, ChangesView};
 use crate::chrome;
+use crate::clickup;
 use crate::editor_view::EditorView;
 use crate::files_view::{FilesEvent, FilesView};
 use crate::session::{self, SavedGrid, SavedTab};
 use crate::settings::{self, AppearanceSetting, Settings};
 use crate::theme::{self, len};
-use crate::{dock, notify, settings_view};
+use crate::{dock, notify, settings_view, ticket_picker};
 
 actions!(
     saturn,
@@ -51,6 +53,7 @@ actions!(
         OpenProject,
         OpenSettings,
         SaveFile,
+        OpenTicketPicker,
         FocusPane1,
         FocusPane2,
         FocusPane3,
@@ -153,6 +156,27 @@ pub struct Workspace {
     sidebar_tab: SidebarTab,
     /// The Claude session running in each tab, from its hooks, so a restart can offer to resume it.
     claude_sessions: HashMap<TabId, String>,
+    /// ClickUp, when a token is set; nothing about it shows otherwise.
+    clickup: ClickUpState,
+}
+
+/// The ClickUp connection as the window knows it.
+#[derive(Default)]
+pub struct ClickUpState {
+    token: Option<String>,
+    /// The workspace the token reaches, once checked.
+    pub account: Option<String>,
+    /// The last thing that went wrong, shown in Settings and the ticket picker.
+    pub problem: Option<String>,
+    /// Open tickets assigned to the token's owner, refreshed every minute.
+    pub tickets: Vec<Ticket>,
+    pub loading: bool,
+}
+
+impl ClickUpState {
+    pub fn connected(&self) -> bool {
+        self.token.is_some()
+    }
 }
 
 /// What the sidebar shows for one folder.
@@ -254,6 +278,24 @@ impl Workspace {
             }
         })
         .detach();
+        // A saved ClickUp token turns the ticket picker on; the Keychain is read off the main thread.
+        cx.spawn(async move |this, cx| {
+            let token = cx.background_spawn(async { clickup::token() }).await;
+            if let Some(token) = token {
+                let _ = this.update(cx, |this, cx| {
+                    this.clickup.token = Some(token);
+                    this.refresh_tickets(cx);
+                });
+            }
+            // Statuses change in ClickUp; a minute is fresh enough and far under its rate limit.
+            loop {
+                cx.background_executor().timer(std::time::Duration::from_secs(60)).await;
+                if this.update(cx, Workspace::refresh_tickets).is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
         // Pane sizes change by dragging, which saves nothing on its own; quitting saves them.
         cx.on_app_quit(|this, cx| {
             this.save_session(cx);
@@ -282,6 +324,7 @@ impl Workspace {
         Self {
             sidebar_tab: SidebarTab::Files,
             claude_sessions: HashMap::new(),
+            clickup: ClickUpState::default(),
             roots,
             root: project.clone(),
             follow_pane: true,
@@ -365,6 +408,129 @@ impl Workspace {
             ChangesEvent::Updated { files, scope } => {
                 this.editor.update(cx, |editor, cx| editor.refresh_review(files.clone(), *scope, cx));
             }
+        })
+    }
+
+    pub fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let command = self.settings.project(&self.project).ticket_command;
+        settings_view::open(cx.weak_entity(), command, window, cx);
+    }
+
+    /// The project the window was opened on.
+    pub fn project_path(&self) -> &Path {
+        &self.project
+    }
+
+    pub fn clickup(&self) -> &ClickUpState {
+        &self.clickup
+    }
+
+    /// Checks `token` with ClickUp and, if it works, keeps it in the Keychain.
+    pub fn connect_clickup(&mut self, token: String, cx: &mut Context<Self>) {
+        self.clickup.problem = None;
+        self.clickup.loading = true;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let checked = cx
+                .background_spawn({
+                    let token = token.clone();
+                    async move { clickup::check(&token).and_then(|account| clickup::save_token(&token).map(|()| account)) }
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.clickup.loading = false;
+                match checked {
+                    Ok(account) => {
+                        this.clickup.token = Some(token);
+                        this.clickup.account = Some(account);
+                        this.refresh_tickets(cx);
+                    }
+                    Err(problem) => this.clickup.problem = Some(problem),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    pub fn disconnect_clickup(&mut self, cx: &mut Context<Self>) {
+        clickup::forget_token();
+        self.clickup = ClickUpState::default();
+        cx.notify();
+    }
+
+    /// Reads the open tickets again, off the main thread.
+    pub fn refresh_tickets(&mut self, cx: &mut Context<Self>) {
+        let Some(token) = self.clickup.token.clone() else { return };
+        self.clickup.loading = self.clickup.tickets.is_empty();
+        cx.spawn(async move |this, cx| {
+            let tickets = cx.background_spawn(async move { clickup::my_tickets(&token) }).await;
+            let _ = this.update(cx, |this, cx| {
+                this.clickup.loading = false;
+                match tickets {
+                    Ok(tickets) => {
+                        this.clickup.tickets = tickets;
+                        this.clickup.problem = None;
+                    }
+                    Err(problem) => this.clickup.problem = Some(problem),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Starts an agent on `ticket` in a new pane: in its own worktree when the project asks
+    /// Saturn to make one, running the project's ticket command.
+    pub fn start_ticket(&mut self, ticket: &Ticket, window: &mut Window, cx: &mut Context<Self>) {
+        let project = self.settings.project(&self.project);
+        let cwd = if project.create_worktree {
+            match git::ticket_worktree(&self.project, ticket.key()) {
+                Ok(dir) => dir,
+                Err(problem) => {
+                    self.clickup.problem = Some(format!("No worktree for {}: {problem}", ticket.key()));
+                    self.project.clone()
+                }
+            }
+        } else {
+            self.project.clone()
+        };
+        let Some(tab) = self.spawn_terminal(&cwd, window, cx) else { return };
+        if self.layout.is_empty() {
+            self.layout.add_tab(tab, None);
+        } else {
+            self.layout.split_right(tab, None);
+        }
+        let command = format!("{}\r", project.command_for(ticket.key(), &ticket.title));
+        if let Some(view) = self.terminals.get(&tab).cloned() {
+            // Once the shell has drawn its prompt.
+            cx.spawn(async move |_, cx| {
+                cx.background_executor().timer(std::time::Duration::from_millis(600)).await;
+                let () = view.update(cx, |view, _| view.write(command.into_bytes()));
+            })
+            .detach();
+        }
+        self.after_layout_change(window, cx);
+    }
+
+    /// The ticket a tab works on: a ticket whose key is the tab's name, its Claude session's name
+    /// or its branch.
+    pub fn ticket_of(&self, tab: TabId, cx: &gpui_kit::App) -> Option<&Ticket> {
+        if self.clickup.tickets.is_empty() {
+            return None;
+        }
+        let view = self.terminals.get(&tab)?.read(cx);
+        let mut names: Vec<String> = Vec::new();
+        names.extend(self.names.get(&tab).cloned());
+        names.extend(self.session_names.get(&tab).cloned());
+        names.extend(view.title.clone());
+        names.extend(git::branch(&view.cwd));
+        self.clickup.tickets.iter().find(|ticket| {
+            let key = ticket.key().to_lowercase();
+            names.iter().any(|name| {
+                let name = name.to_lowercase();
+                name == key || name.starts_with(&format!("{key}-")) || name.starts_with(&format!("{key} "))
+            })
         })
     }
 
@@ -895,6 +1061,28 @@ impl Workspace {
                                 this.drop_tab(dragged.tab, cell_id, None, window, cx);
                             })),
                     )
+                    .children(self.ticket_of(cell.active, cx).map(|ticket| {
+                        let url = ticket.url.clone();
+                        div()
+                            .id(("ticket-chip", cell_id.key()))
+                            .flex()
+                            .flex_none()
+                            .items_center()
+                            .gap(len(space::SPACE_2))
+                            .h(len(TAB_HEIGHT))
+                            .px(len(space::SPACE_3))
+                            .rounded(len(radius::RADIUS_SM))
+                            .cursor_pointer()
+                            .text_size(px(12.))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme::color(color::INK_MUTED))
+                            .hover(|s| s.bg(theme::color(color::CONTROL)))
+                            .child(ticket_picker::status_dot(ticket))
+                            .child(ticket.status.clone())
+                            .on_click(move |_, _, _| {
+                                let _ = std::process::Command::new("open").arg(&url).spawn();
+                            })
+                    }))
                     .child(header_button("split-right", "columns-2", Placement::Right, cx))
                     .child(header_button("split-down", "rows-2", Placement::Down, cx))
                     .child(header_button("new-tab", "plus", Placement::Tab, cx)),
@@ -1068,13 +1256,22 @@ impl Workspace {
             .child(empty("titlebar-middle").flex_1())
             .children(activity)
             .child(
-                // The empty grid has its own primary button; one per screen.
-                chrome::button("new-terminal", "New terminal", Some("⌘T"), !self.layout.is_empty()).on_click(
-                    cx.listener(|this, _, window, cx| {
-                        this.open_terminal(Placement::Tab, window, cx);
-                    }),
-                ),
+                // One primary button per screen: New agent when ClickUp is connected, else New
+                // terminal, unless the empty grid already shows its own.
+                chrome::button(
+                    "new-terminal",
+                    "New terminal",
+                    Some("⌘T"),
+                    !self.layout.is_empty() && !self.clickup.connected(),
+                )
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.open_terminal(Placement::Tab, window, cx);
+                })),
             )
+            .children(self.clickup.connected().then(|| {
+                chrome::button("new-agent", "New agent", Some("⌘⇧T"), true)
+                    .on_click(cx.listener(|_, _, window, cx| ticket_picker::open(cx.weak_entity(), window, cx)))
+            }))
     }
 
     /// Sidebar | (editor / grid), with draggable dividers. The panels stay in the same place in
@@ -1240,8 +1437,11 @@ impl Render for Workspace {
                 cx.notify();
             }))
             .on_action(cx.listener(|_, _: &OpenProject, window, cx| Self::open_project(window, cx)))
-            .on_action(cx.listener(|_, _: &OpenSettings, window, cx| settings_view::open(cx.weak_entity(), window, cx)))
+            .on_action(cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(window, cx)))
             .on_action(cx.listener(|this, _: &SaveFile, _, cx| this.save_file(cx)))
+            .on_action(cx.listener(|_, _: &OpenTicketPicker, window, cx| {
+                ticket_picker::open(cx.weak_entity(), window, cx);
+            }))
             .on_action(cx.listener(|this, _: &Copy, _, cx| {
                 if let Some(view) = this.focused_view() {
                     view.update(cx, |view, cx| view.copy_selection(cx));

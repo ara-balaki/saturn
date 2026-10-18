@@ -20,6 +20,8 @@ saturn-bridge.workspace = true
 async-channel.workspace = true
 serde_json.workspace = true
 notify.workspace = true
+# HTTPS through macOS's own TLS and trust store.
+ureq = { version = "3", default-features = false, features = ["native-tls-no-default"] }
 # The same gpui-component gpui-kit bundles, named only to switch on the editor's languages.
 gpui-component = { version = "=0.7.3", features = [
   "tree-sitter-bash",
@@ -66,6 +68,7 @@ objc2-user-notifications = { version = "0.3", default-features = false, features
   "UNNotificationTrigger",
 ] }
 block2 = "0.6"
+security-framework = "3"
 
 [package.metadata.cargo-machete]
 # gpui-pre*/image: only switched on by the `capture` feature, to turn on GPUI's window-to-image

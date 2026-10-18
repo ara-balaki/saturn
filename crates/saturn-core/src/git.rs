@@ -124,6 +124,32 @@ pub fn merge_base(repo: &Path) -> Option<String> {
     run(repo, &["merge-base", "HEAD", &default_branch]).map(|sha| sha.trim().to_owned())
 }
 
+/// A worktree for `ticket` next to `repo` (`../<repo>-<ticket>`) on a branch named after the
+/// ticket, made from the current `HEAD`, or the one already there. Returns its folder.
+pub fn ticket_worktree(repo: &Path, ticket: &str) -> Result<PathBuf, String> {
+    let branch: String =
+        ticket.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' }).collect();
+    let top = toplevel(repo).ok_or_else(|| format!("{} is not a git repository", repo.display()))?;
+    let name = top.file_name().map_or_else(|| "repo".into(), |name| name.to_string_lossy().into_owned());
+    let dir = top.parent().unwrap_or(&top).join(format!("{name}-{branch}"));
+    if dir.join(".git").exists() {
+        return Ok(dir);
+    }
+    let dir_arg = dir.to_string_lossy().into_owned();
+    let branch_exists = run(&top, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")]).is_some();
+    let args: Vec<&str> = if branch_exists {
+        vec!["worktree", "add", &dir_arg, &branch]
+    } else {
+        vec!["worktree", "add", "-b", &branch, &dir_arg]
+    };
+    let output = git(&top).args(&args).output().map_err(|error| format!("git could not run: {error}"))?;
+    if output.status.success() {
+        Ok(dir)
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).lines().next().unwrap_or("git worktree add failed").to_owned())
+    }
+}
+
 fn git(repo: &Path) -> Command {
     let mut command = Command::new("git");
     command.arg("--no-optional-locks").current_dir(repo);
@@ -217,6 +243,16 @@ mod tests {
             toplevel(&dir.path().join(".")).map(|top| top.ends_with(dir.path().file_name().expect("a name"))),
             Some(true)
         );
+    }
+
+    #[test]
+    fn a_ticket_gets_a_sibling_worktree_once() {
+        let dir = repo();
+        let first = ticket_worktree(dir.path(), "ABC-240").expect("created");
+        assert!(first.ends_with(format!("{}-abc-240", dir.path().file_name().expect("a name").to_string_lossy())));
+        assert_eq!(branch(&first).as_deref(), Some("abc-240"));
+        assert_eq!(ticket_worktree(dir.path(), "ABC-240").expect("reused"), first);
+        let _ = std::fs::remove_dir_all(&first);
     }
 
     #[test]

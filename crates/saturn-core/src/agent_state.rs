@@ -106,7 +106,7 @@ mod tests {
 
     #[test]
     fn turns_a_shell_prompt_title_into_its_folder() {
-        assert_eq!(tab_title("jonasarden@Mac: ~/Documents/Code/Acme/acme-web").as_deref(), Some("acme-web"));
+        assert_eq!(tab_title("dev@Mac: ~/Code/acme-app").as_deref(), Some("acme-app"));
         assert_eq!(tab_title("jonasarden@Mac:~").as_deref(), Some("~"));
     }
 

@@ -4,6 +4,7 @@ mod app_view;
 mod assets;
 mod changes_view;
 mod chrome;
+mod clickup;
 mod dock;
 mod editor_view;
 mod files_view;
@@ -13,6 +14,7 @@ mod settings;
 mod settings_view;
 mod spike;
 mod theme;
+mod ticket_picker;
 mod workspace;
 
 use std::borrow::Cow;
@@ -26,7 +28,7 @@ use crate::app_view::AppView;
 use crate::workspace::{
     CloseTab, Copy, FocusDown, FocusLeft, FocusPane1, FocusPane2, FocusPane3, FocusPane4, FocusPane5, FocusPane6,
     FocusPane7, FocusPane8, FocusPane9, FocusRight, FocusUp, NewTab, NextAttention, NextTab, OpenProject, OpenSettings,
-    Paste, PreviousTab, SaveFile, SplitDown, SplitRight, ToggleEditor, ToggleMaximize, ToggleSidebar,
+    OpenTicketPicker, Paste, PreviousTab, SaveFile, SplitDown, SplitRight, ToggleEditor, ToggleMaximize, ToggleSidebar,
 };
 
 actions!(saturn, [Quit]);
@@ -67,6 +69,7 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-o", OpenProject, None),
         KeyBinding::new("cmd-,", OpenSettings, None),
         KeyBinding::new("cmd-s", SaveFile, None),
+        KeyBinding::new("cmd-shift-t", OpenTicketPicker, None),
         KeyBinding::new("cmd-j", ToggleEditor, None),
         KeyBinding::new("cmd-1", FocusPane1, None),
         KeyBinding::new("cmd-2", FocusPane2, None),
@@ -90,6 +93,7 @@ fn set_menus(cx: &mut App) {
         Menu::new("File").items([MenuItem::action("Open Project…", OpenProject), MenuItem::action("Save", SaveFile)]),
         Menu::new("Terminal").items([
             MenuItem::action("New Tab", NewTab),
+            MenuItem::action("New Agent from Ticket…", OpenTicketPicker),
             MenuItem::action("Split Right", SplitRight),
             MenuItem::action("Split Down", SplitDown),
             MenuItem::action("Close Tab", CloseTab),

@@ -23,6 +23,42 @@ pub struct Settings {
     /// A notification when an agent needs you or finishes while Saturn is in the background.
     pub notifications: bool,
     pub appearance: AppearanceSetting,
+    /// What starting an agent on a ticket does, per project folder.
+    pub projects: std::collections::HashMap<PathBuf, ProjectSettings>,
+}
+
+/// How a project starts an agent on a ClickUp ticket. Kept in Saturn's settings, never in the
+/// project's repository.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProjectSettings {
+    /// Run in the new pane, with `{ticket}` (ABC-236) and `{title}` filled in.
+    pub ticket_command: String,
+    /// Saturn makes a git worktree per ticket and opens the pane in it. Off when the command sets
+    /// up its own (a skill that creates worktrees, for example).
+    pub create_worktree: bool,
+}
+
+impl Default for ProjectSettings {
+    fn default() -> Self {
+        Self { ticket_command: "claude -n {ticket}".to_owned(), create_worktree: true }
+    }
+}
+
+impl ProjectSettings {
+    /// The command for `ticket`, quoted for the shell where filled in.
+    pub fn command_for(&self, ticket: &str, title: &str) -> String {
+        self.ticket_command.replace("{ticket}", &shell_quote(ticket)).replace("{title}", &shell_quote(title))
+    }
+}
+
+/// `text` as one shell word: as is when it is plain, else in single quotes.
+fn shell_quote(text: &str) -> String {
+    if !text.is_empty() && text.chars().all(|c| c.is_ascii_alphanumeric() || "-_./:@".contains(c)) {
+        text.to_owned()
+    } else {
+        format!("'{}'", text.replace('\'', "'\\''"))
+    }
 }
 
 /// Light or dark, or whichever macOS is in.
@@ -56,6 +92,7 @@ impl Default for Settings {
             format_on_save: true,
             notifications: true,
             appearance: AppearanceSetting::System,
+            projects: std::collections::HashMap::new(),
         }
     }
 }
@@ -78,6 +115,13 @@ pub fn load() -> Settings {
         .and_then(|path| std::fs::read_to_string(path).ok())
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default()
+}
+
+impl Settings {
+    /// How `project` starts agents on tickets.
+    pub fn project(&self, project: &Path) -> ProjectSettings {
+        self.projects.get(project).cloned().unwrap_or_default()
+    }
 }
 
 /// How many projects the welcome screen offers.
@@ -169,5 +213,16 @@ mod tests {
         let text = format!(r#"{{"last_project": {:?}}}"#, dir.path());
         let settings: Settings = serde_json::from_str(&text).expect("loads");
         assert_eq!(settings.recent(), [dir.path().to_owned()]);
+    }
+
+    #[test]
+    fn ticket_commands_are_filled_in_and_quoted() {
+        let project = ProjectSettings {
+            ticket_command: "claude -n {ticket} \"/start {ticket}\"".to_owned(),
+            create_worktree: false,
+        };
+        assert_eq!(project.command_for("ABC-236", "x"), "claude -n ABC-236 \"/start ABC-236\"");
+        let titled = ProjectSettings { ticket_command: "echo {title}".to_owned(), create_worktree: true };
+        assert_eq!(titled.command_for("ABC-1", "Don't break; rm -rf"), "echo 'Don'\\''t break; rm -rf'");
     }
 }

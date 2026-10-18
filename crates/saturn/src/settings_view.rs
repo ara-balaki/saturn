@@ -1,10 +1,11 @@
 //! The Settings dialog (⌘,).
 
 use gpui_kit::component::WindowExt as _;
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::{
-    App, FontWeight, IntoElement, ParentElement as _, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window,
-    div, px,
+    App, AppContext as _, Entity, FontWeight, IntoElement, ParentElement as _, StatefulInteractiveElement as _,
+    Styled as _, WeakEntity, Window, div, px,
 };
 use saturn_design::{color, space};
 
@@ -62,8 +63,117 @@ fn appearance_row(workspace: &WeakEntity<Workspace>, current: AppearanceSetting)
         })))
 }
 
-/// Opens the Settings dialog. Each switch saves at once.
-pub fn open(workspace: WeakEntity<Workspace>, window: &mut Window, cx: &mut App) {
+/// The ClickUp section: a token to connect with, or the connection and this project's ticket
+/// settings. Optional: without a token, Saturn shows nothing about ClickUp anywhere else.
+fn clickup_section(
+    workspace: &WeakEntity<Workspace>,
+    token: &Entity<InputState>,
+    command: &Entity<InputState>,
+    cx: &App,
+) -> impl IntoElement {
+    let Some(workspace_entity) = workspace.upgrade() else { return div() };
+    let workspace_view = workspace_entity.read(cx);
+    let state = workspace_view.clickup();
+    let project = workspace_view.project_path().to_owned();
+    let project_settings = workspace_view.settings().project(&project);
+    let project_name =
+        project.file_name().map_or_else(|| project.display().to_string(), |n| n.to_string_lossy().into_owned());
+    let muted = |text: String| div().text_size(px(12.)).text_color(theme::color(color::INK_MUTED)).child(text);
+    let mut section = div()
+        .flex()
+        .flex_col()
+        .gap(len(space::SPACE_3))
+        .pt(len(space::SPACE_5))
+        .mt(len(space::SPACE_3))
+        .border_t_1()
+        .border_color(theme::color(color::LINE))
+        .child(div().text_size(px(13.)).font_weight(FontWeight::MEDIUM).child("ClickUp"));
+    if state.connected() {
+        let disconnect = {
+            let workspace = workspace.clone();
+            chrome::button("clickup-disconnect", "Disconnect", None, false).on_click(move |_, _, cx| {
+                let _ = workspace.update(cx, Workspace::disconnect_clickup);
+            })
+        };
+        let account =
+            state.account.clone().map_or_else(|| "Connected.".to_owned(), |name| format!("Connected to {name}."));
+        section = section
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(len(space::SPACE_4))
+                    .child(muted(format!("{account} ⌘⇧T starts an agent on one of your tickets.")))
+                    .child(disconnect),
+            )
+            .child(div().text_size(px(13.)).font_weight(FontWeight::MEDIUM).child(format!("Starting a ticket in {project_name}")))
+            .child(Input::new(command))
+            .child(muted("Runs in the new pane. {ticket} becomes the ticket's id (ABC-236), {title} its title.".to_owned()))
+            .child(setting_row(
+                "ticket-worktree",
+                "A worktree per ticket",
+                "Saturn makes a git worktree next to the project, on a branch named after the ticket, and opens the pane there. Off when the command sets up its own.",
+                project_settings.create_worktree,
+                {
+                    let workspace = workspace.clone();
+                    let project = project.clone();
+                    move |on: &bool, _: &mut Window, cx: &mut App| {
+                        let (on, project) = (*on, project.clone());
+                        let _ = workspace.update(cx, |workspace, cx| {
+                            workspace.change_settings(|settings| settings.projects.entry(project).or_default().create_worktree = on, cx);
+                        });
+                    }
+                },
+            ));
+    } else {
+        let connect = {
+            let (workspace, token) = (workspace.clone(), token.clone());
+            chrome::button("clickup-connect", "Connect", None, true).on_click(move |_, _, cx| {
+                let value = token.read(cx).value().trim().to_owned();
+                if !value.is_empty() {
+                    let _ = workspace.update(cx, |workspace, cx| workspace.connect_clickup(value, cx));
+                }
+            })
+        };
+        section = section
+            .child(muted(
+                "Start agents from your tickets and see their status on each pane. Paste a personal API token (ClickUp → Settings → Apps); Saturn keeps it in the macOS Keychain.".to_owned(),
+            ))
+            .child(div().flex().items_center().gap(len(space::SPACE_2)).child(div().flex_1().child(Input::new(token))).child(connect));
+    }
+    if state.loading {
+        section = section.child(muted("Checking with ClickUp…".to_owned()));
+    }
+    if let Some(problem) = &state.problem {
+        section = section.child(div().text_size(px(12.)).text_color(theme::color(color::RED)).child(problem.clone()));
+    }
+    section
+}
+
+/// Opens the Settings dialog. `ticket_command` is the project's current one: the caller passes it,
+/// since the workspace that opens the dialog is in the middle of an update and can't be read.
+pub fn open(workspace: WeakEntity<Workspace>, ticket_command: String, window: &mut Window, cx: &mut App) {
+    let token = cx.new(|cx| InputState::new(window, cx).masked(true).placeholder("pk_…"));
+    let command = cx.new(|cx| InputState::new(window, cx).default_value(ticket_command));
+    // The command saves as it is typed.
+    cx.subscribe(&command, {
+        let workspace = workspace.clone();
+        move |input, event: &InputEvent, cx| {
+            if !matches!(event, InputEvent::Change) {
+                return;
+            }
+            let value = input.read(cx).value().to_string();
+            let _ = workspace.update(cx, |workspace, cx| {
+                let project = workspace.project_path().to_owned();
+                workspace.change_settings(
+                    |settings| settings.projects.entry(project).or_default().ticket_command = value,
+                    cx,
+                );
+            });
+        }
+    })
+    .detach();
     window.open_dialog(cx, move |dialog, _, cx| {
         let settings = workspace.upgrade().map(|w| w.read(cx).settings().clone()).unwrap_or_default();
         let change = |workspace: WeakEntity<Workspace>, apply: fn(&mut Settings, bool)| {
@@ -104,5 +214,6 @@ pub fn open(workspace: WeakEntity<Workspace>, window: &mut Window, cx: &mut App)
                 settings.notifications,
                 change(workspace.clone(), |settings, on| settings.notifications = on),
             ))
+            .child(clickup_section(&workspace, &token, &command, cx))
     });
 }
