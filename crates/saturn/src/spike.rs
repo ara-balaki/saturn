@@ -8,7 +8,8 @@
 //! - `SATURN_MORE_REPOS=a:b` adds more repos to the window, as ⌘O would; `SATURN_FAKE_AGENTS=1`
 //!   gives the panes made-up agents; `SATURN_HISTORY=1` opens the History tab, `SATURN_IMPACT=1` the Impact tab (focused on `SATURN_IMPACT_FOCUS`), `SATURN_SCHEMA=1`
 //!   the database diagram; `SATURN_LSP_PROBE=line:col` asks the open file's language server about
-//!   that place (0-based) and prints its answers.
+//!   that place (0-based) and prints its answers; `SATURN_PROBLEMS=1` lists the
+//!   servers' errors and warnings.
 //! - `SATURN_SCREENSHOT=path.png` saves what the window draws after `SATURN_SCREENSHOT_AFTER`
 //!   seconds (needs the `capture` feature); `SATURN_QUIT_AFTER` quits after that many seconds.
 
@@ -115,6 +116,14 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
             cx.background_executor().timer(Duration::from_secs(3)).await;
             let _ =
                 workspace.update_in(cx, |workspace, window, cx| workspace.probe_language(line, character, window, cx));
+        })
+        .detach();
+    }
+    if std::env::var_os("SATURN_PROBLEMS").is_some() {
+        // Once the opened file's server has reported.
+        cx.spawn(async move |workspace, cx| {
+            cx.background_executor().timer(Duration::from_secs(4)).await;
+            let _ = workspace.update(cx, Workspace::show_problems);
         })
         .detach();
     }

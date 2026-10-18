@@ -16,6 +16,7 @@ mod languages;
 mod lsp;
 mod menu_bar;
 mod notify;
+mod problems_view;
 mod references_view;
 mod schema_view;
 mod session;

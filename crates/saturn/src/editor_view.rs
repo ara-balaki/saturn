@@ -2,6 +2,7 @@
 //! highlighting from gpui-component's tree-sitter editor. A Changes tab, when open, reviews the
 //! repository's diff with gpui-component's diff view.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,6 +24,7 @@ use crate::chrome;
 use crate::history_view::{HistoryEvent, HistoryView};
 use crate::impact_view::ImpactView;
 use crate::lsp::{self, Provider, Servers, Status};
+use crate::problems_view::{self, ProblemsView};
 use crate::references_view::ReferencesView;
 use crate::schema_view::SchemaView;
 use crate::theme::{self, len};
@@ -81,6 +83,7 @@ enum Front {
     Schema,
     Impact,
     References,
+    Problems,
 }
 
 #[derive(Default)]
@@ -99,6 +102,10 @@ pub struct EditorView {
     impact: Option<Entity<ImpactView>>,
     /// Where a symbol is used, once asked.
     references: Option<Entity<ReferencesView>>,
+    /// Every problem the language servers report, by file.
+    problems: BTreeMap<PathBuf, Vec<lsp_types::Diagnostic>>,
+    /// The list of them, once opened.
+    problems_view: Option<Entity<ProblemsView>>,
     /// The language servers, started with the first file that has one.
     servers: Option<Servers>,
     /// Applies what the servers report while the panel lives.
@@ -331,6 +338,18 @@ impl EditorView {
         }
         match event {
             lsp::Event::Diagnostics { uri, diagnostics } => {
+                if let Some(path) = saturn_core::lsp::path(&uri) {
+                    if diagnostics.is_empty() {
+                        self.problems.remove(&path);
+                    } else {
+                        self.problems.insert(path, diagnostics.clone());
+                    }
+                    if let Some(view) = &self.problems_view {
+                        let problems = self.problems.clone();
+                        view.update(cx, |view, cx| view.set(problems, cx));
+                    }
+                    cx.notify();
+                }
                 // Matched ignoring case: on a case-insensitive disk a server may lowercase paths.
                 let Some(file) =
                     self.files.iter().find(|file| file.document().is_some_and(|d| d.uri.eq_ignore_ascii_case(&uri)))
@@ -396,6 +415,82 @@ impl EditorView {
             });
         })
         .detach();
+    }
+
+    /// Shows every error and warning the servers report.
+    pub fn show_problems(&mut self, cx: &mut Context<Self>) {
+        let problems = self.problems.clone();
+        if let Some(view) = &self.problems_view {
+            view.update(cx, |view, cx| view.set(problems, cx));
+        } else {
+            let editor = cx.weak_entity();
+            self.problems_view = Some(cx.new(|_| ProblemsView::new(problems, editor)));
+        }
+        self.front = Front::Problems;
+        cx.notify();
+    }
+
+    /// The count of errors and warnings, in the strip; clicking lists them.
+    fn render_problems_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let (errors, warnings) = problems_view::counts(&self.problems);
+        if errors + warnings == 0 {
+            return None;
+        }
+        let count = |severity, count: usize| {
+            let (icon, colour) = problems_view::mark(severity);
+            div()
+                .flex()
+                .items_center()
+                .gap(len(space::SPACE_1))
+                .child(chrome::icon(icon, 13., theme::color(colour)))
+                .child(count.to_string())
+        };
+        Some(
+            chrome::track_item("problems-button", false)
+                .px(len(space::SPACE_2))
+                .text_size(px(12.))
+                .children((errors > 0).then(|| count(lsp_types::DiagnosticSeverity::ERROR, errors)))
+                .children((warnings > 0).then(|| count(lsp_types::DiagnosticSeverity::WARNING, warnings)))
+                .tooltip(|window, cx| Tooltip::new("Errors and warnings").build(window, cx))
+                .on_click(cx.listener(|this, _, _, cx| this.show_problems(cx)))
+                .into_any_element(),
+        )
+    }
+
+    fn render_problems_tab(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.problems_view.as_ref()?;
+        let in_front = self.front == Front::Problems;
+        Some(
+            chrome::track_item("problems-tab", in_front)
+                .group("problems-tab")
+                .pl(len(space::SPACE_3))
+                .pr(len(space::SPACE_1))
+                .child(chrome::icon("circle-x", 13., theme::color(color::INK_MUTED)))
+                .child("Problems")
+                .child(
+                    div()
+                        .id("problems-close")
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .size(px(20.))
+                        .rounded(len(radius::RADIUS_XS))
+                        .hover(|s| s.bg(theme::fill_control()))
+                        .child(chrome::icon("x", 11., theme::color(color::INK_MUTED)))
+                        .when(!in_front, |slot| slot.invisible().group_hover("problems-tab", gpui_kit::Styled::visible))
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.problems_view = None;
+                            this.front = Front::File;
+                            cx.notify();
+                        })),
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.front = Front::Problems;
+                    cx.notify();
+                }))
+                .into_any_element(),
+        )
     }
 
     /// Shows where a symbol is used.
@@ -994,6 +1089,8 @@ impl Render for EditorView {
             self.impact.clone().map(gpui_kit::IntoElement::into_any_element)
         } else if self.front == Front::References {
             self.references.clone().map(gpui_kit::IntoElement::into_any_element)
+        } else if self.front == Front::Problems {
+            self.problems_view.clone().map(gpui_kit::IntoElement::into_any_element)
         } else {
             self.files
                 .get(self.active)
@@ -1038,11 +1135,13 @@ impl Render for EditorView {
                     .children(self.render_history_tab(cx))
                     .children(self.render_impact_tab(cx))
                     .children(self.render_references_tab(cx))
+                    .children(self.render_problems_tab(cx))
                     .children(self.render_review_tab(cx))
                     .children((0..self.files.len()).map(|index| self.render_tab(index, cx)))
                     .child(div().flex_1())
                     .children(self.render_disk_notice(cx))
                     .children(self.render_language_notice(cx))
+                    .children(self.render_problems_button(cx))
                     .children(self.render_impact_button(cx))
                     .children(self.render_review_controls(cx))
                     .child(

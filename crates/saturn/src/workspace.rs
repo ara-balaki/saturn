@@ -841,6 +841,11 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Lists the language servers' errors and warnings (spikes).
+    pub fn show_problems(&mut self, cx: &mut Context<Self>) {
+        self.editor.update(cx, EditorView::show_problems);
+    }
+
     /// Asks the open file's language server about `line`:`character` (spikes).
     pub fn probe_language(&mut self, line: u32, character: u32, window: &mut Window, cx: &mut Context<Self>) {
         self.editor.update(cx, |editor, cx| editor.probe_language(line, character, window, cx));
