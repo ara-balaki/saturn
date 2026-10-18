@@ -3836,10 +3836,15 @@ extern "C" fn blurred_view_update_layer(this: &Object, _: Sel) {
 const MATERIAL_FILL: f32 = 0.6;
 
 /// Saturn's patch: turns the material's fill layers (those with a background colour, other than
-/// the backdrop that blurs) down to `MATERIAL_FILL`.
+/// the backdrop that blurs) down to `MATERIAL_FILL`, and hides the layer that tints the glass
+/// with the desktop picture's colour, so the glass stays neutral whatever the wallpaper.
 unsafe fn soften_fill(layer: id) {
     unsafe {
         let class_name: id = msg_send![layer, className];
+        if class_name.isEqualToString("CAChameleonLayer") {
+            let _: () = msg_send![layer, setHidden: YES];
+            return;
+        }
         let backdrop = class_name.isEqualToString("CABackdropLayer");
         let colour: id = msg_send![layer, backgroundColor];
         if !backdrop && !colour.is_null() {

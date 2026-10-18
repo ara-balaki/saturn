@@ -26,6 +26,6 @@ written against this version of GPUI. Every change is marked "Saturn's patch":
 
 - `gpui-pre-macos/src/window.rs`: `blurred_view_update_layer` no longer strips the material's
   layers (`remove_layer_background` is left in place, unused); it turns the material's fill down
-  to `MATERIAL_FILL` (0.6), keeping its tint and saturation.
+  to `MATERIAL_FILL` (0.6) and hides the wallpaper tint, keeping the blur and saturation.
 
 To move to a newer GPUI: copy the new crates here, then re-apply the changes above.
