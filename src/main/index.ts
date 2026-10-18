@@ -101,7 +101,15 @@ void app.whenReady().then(() => {
   createWindow();
 });
 
-app.on('window-all-closed', () => {
-  ptys.killAll();
-  app.quit();
+app.on('window-all-closed', () => app.quit());
+
+// Quitting waits for every shell to exit first (see ptys.shutdown).
+let shellsStopped = false;
+app.on('before-quit', (event) => {
+  if (shellsStopped) return;
+  event.preventDefault();
+  void ptys.shutdown().then(() => {
+    shellsStopped = true;
+    app.quit();
+  });
 });

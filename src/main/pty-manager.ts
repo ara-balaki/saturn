@@ -117,9 +117,27 @@ export const createPtyManager = (sink: Sink) => {
 
   const kill = (id: string) => sessions.get(id)?.pty.kill();
 
-  const killAll = () => {
+  /**
+   * Stops every shell and resolves once all have exited. The app must not quit before that: a pty
+   * that reports its exit while Electron tears Node down aborts the whole process.
+   */
+  const shutdown = async (graceMs = 1500) => {
+    const exited = () => sessions.size === 0;
+    const waitFor = (ms: number) =>
+      new Promise<void>((resolve) => {
+        const started = Date.now();
+        const poll = setInterval(() => {
+          if (exited() || Date.now() - started > ms) {
+            clearInterval(poll);
+            resolve();
+          }
+        }, 20);
+      });
     for (const session of sessions.values()) session.pty.kill();
+    await waitFor(graceMs);
+    for (const session of sessions.values()) session.pty.kill('SIGKILL');
+    await waitFor(graceMs);
   };
 
-  return { create, write, resize, kill, ack, info, killAll };
+  return { create, write, resize, kill, ack, info, shutdown };
 };
