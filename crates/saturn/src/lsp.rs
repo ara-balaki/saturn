@@ -227,8 +227,30 @@ impl CompletionProvider for Provider {
             }
             None => json!({ "triggerKind": CompletionTriggerKind::INVOKED }),
         };
+        // The editor shows what it's given; servers send everything in scope and leave the
+        // filtering to the client.
+        let position = text.offset_to_position(offset);
+        let line = text.slice_line(position.line as usize).to_string();
+        let column = text.offset_to_point(offset).column;
+        let typed = core::word_before(&line, column).to_owned();
         let answer = self.ask::<CompletionResponse>("textDocument/completion", params, cx);
-        cx.background_spawn(async move { Ok(answer.await?.unwrap_or(CompletionResponse::Array(Vec::new()))) })
+        cx.background_spawn(async move {
+            let items = match answer.await? {
+                Some(CompletionResponse::Array(items)) => items,
+                Some(CompletionResponse::List(list)) => list.items,
+                None => Vec::new(),
+            };
+            let keys: Vec<(&str, &str)> = items
+                .iter()
+                .map(|item| {
+                    let text = item.filter_text.as_deref().unwrap_or(&item.label);
+                    (text, item.sort_text.as_deref().unwrap_or(&item.label))
+                })
+                .collect();
+            let order = core::rank(&typed, &keys, 100);
+            let mut items: Vec<Option<lsp_types::CompletionItem>> = items.into_iter().map(Some).collect();
+            Ok(CompletionResponse::Array(order.into_iter().filter_map(|index| items[index].take()).collect()))
+        })
     }
 
     fn is_completion_trigger(&self, _: usize, new_text: &str, _: &mut App) -> bool {

@@ -552,6 +552,72 @@ impl Drop for Document {
     }
 }
 
+/// The typed word that ends at byte `end` of `line`: the letters, digits, `_` and `$` before it.
+pub fn word_before(line: &str, end: usize) -> &str {
+    let before = &line[..end.min(line.len())];
+    let start = before
+        .char_indices()
+        .rev()
+        .take_while(|(_, c)| c.is_alphanumeric() || *c == '_' || *c == '$')
+        .last()
+        .map_or(before.len(), |(at, _)| at);
+    &before[start..]
+}
+
+/// Which completions match `typed`, best first, at most `limit`: each candidate is its text to
+/// match and the server's own sort key. A prefix in the same case beats one in any case, which
+/// beats the typed letters starting words (`gEBI`, `get_by`), which beats them merely in order.
+/// Ties keep the server's order.
+pub fn rank(typed: &str, candidates: &[(&str, &str)], limit: usize) -> Vec<usize> {
+    let typed_lower = typed.to_lowercase();
+    let mut scored: Vec<(u8, usize, &str, usize)> = candidates
+        .iter()
+        .enumerate()
+        .filter_map(|(index, (text, sort))| {
+            let tier = if typed.is_empty() || text.starts_with(typed) {
+                0
+            } else if text.to_lowercase().starts_with(&typed_lower) {
+                1
+            } else if starts_words(text, &typed_lower) {
+                2
+            } else if in_order(&text.to_lowercase(), &typed_lower) {
+                3
+            } else {
+                return None;
+            };
+            Some((tier, text.len(), *sort, index))
+        })
+        .collect();
+    scored.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.2.cmp(b.2)).then(a.1.cmp(&b.1)).then(a.3.cmp(&b.3)));
+    scored.into_iter().take(limit).map(|(.., index)| index).collect()
+}
+
+/// Whether each typed letter starts a word of `text`, in order (camelCase humps, `_` and `-`
+/// parts), the first letter at the start.
+fn starts_words(text: &str, typed: &str) -> bool {
+    let chars: Vec<char> = text.chars().collect();
+    let starts: Vec<char> = chars
+        .iter()
+        .enumerate()
+        .filter(|(at, c)| {
+            *at == 0 || (c.is_uppercase() && !chars[at - 1].is_uppercase()) || matches!(chars[at - 1], '_' | '-' | '$')
+        })
+        .map(|(_, c)| c.to_ascii_lowercase())
+        .collect();
+    let mut typed_chars = typed.chars();
+    let Some(first) = typed_chars.next() else { return true };
+    if starts.first() != Some(&first) {
+        return false;
+    }
+    let mut rest = starts[1..].iter();
+    typed_chars.all(|c| rest.any(|start| *start == c))
+}
+
+fn in_order(text: &str, typed: &str) -> bool {
+    let mut chars = text.chars();
+    typed.chars().all(|c| chars.any(|t| t == c))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -581,6 +647,27 @@ mod tests {
             server.request("textDocument/hover", Value::Null).await
         });
         assert_eq!(answer, Err("Nothing stopped".to_owned()));
+    }
+
+    #[test]
+    fn ranks_prefixes_then_word_starts_then_letters_in_order() {
+        let candidates = [
+            ("SVGAnimatedString", "15"),
+            ("getElementById", "15"),
+            ("format", "11"),
+            ("Format", "15"),
+            ("formatMoney", "11"),
+            ("reformat", "15"),
+        ];
+        let names = |typed: &str| -> Vec<&str> {
+            rank(typed, &candidates, 10).into_iter().map(|index| candidates[index].0).collect()
+        };
+        assert_eq!(names("form"), ["format", "formatMoney", "Format", "reformat"]);
+        assert_eq!(names("gEBI"), ["getElementById"]);
+        assert_eq!(names("fm"), ["formatMoney", "format", "Format", "reformat"]);
+        assert_eq!(rank("", &candidates, 2).len(), 2);
+        assert_eq!(word_before("  const x = form", 16), "form");
+        assert_eq!(word_before("obj.", 4), "");
     }
 
     #[test]
