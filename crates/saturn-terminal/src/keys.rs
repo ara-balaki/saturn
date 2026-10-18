@@ -1,0 +1,175 @@
+//! Turns a key press into the bytes a terminal program expects (xterm conventions).
+//!
+//! Option types characters, as everywhere else on a Mac, rather than acting as Meta: on many
+//! keyboard layouts (Czech among them) `@`, `{`, `}`, `[` and `]` need it. The Mac terminal habits
+//! still work: Option+←/→ jumps a word, Option+Backspace deletes one, ⌘←/→ go to line start/end.
+
+/// A key press, independent of the UI framework.
+#[expect(clippy::struct_excessive_bools, reason = "one flag per modifier key, as the keyboard has them")]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct KeyPress<'a> {
+    /// The key's name: `a`, `enter`, `left`, `f5`…
+    pub key: &'a str,
+    /// The text the key types, if any (`ß` for Option+s on a US layout).
+    pub text: Option<&'a str>,
+    pub control: bool,
+    pub alt: bool,
+    pub shift: bool,
+    pub command: bool,
+}
+
+/// xterm's modifier parameter: 1 + shift + 2·alt + 4·control.
+fn modifier_param(key: &KeyPress) -> u8 {
+    1 + u8::from(key.shift) + 2 * u8::from(key.alt) + 4 * u8::from(key.control)
+}
+
+/// Cursor and navigation keys: `ESC [ final` (or `ESC O final` in application cursor mode), with
+/// modifiers as `ESC [ 1 ; m final`.
+fn cursor_key(key: &KeyPress, final_byte: char, app_cursor: bool) -> Vec<u8> {
+    let modifiers = modifier_param(key);
+    if modifiers > 1 {
+        format!("\x1b[1;{modifiers}{final_byte}").into_bytes()
+    } else if app_cursor {
+        format!("\x1bO{final_byte}").into_bytes()
+    } else {
+        format!("\x1b[{final_byte}").into_bytes()
+    }
+}
+
+/// `ESC [ code ~` keys, with modifiers as `ESC [ code ; m ~`.
+fn tilde_key(key: &KeyPress, code: u8) -> Vec<u8> {
+    let modifiers = modifier_param(key);
+    if modifiers > 1 { format!("\x1b[{code};{modifiers}~").into_bytes() } else { format!("\x1b[{code}~").into_bytes() }
+}
+
+/// The bytes for a key press, or `None` when the terminal should not see it (⌘ shortcuts belong to
+/// the app).
+pub fn encode(key: &KeyPress, app_cursor: bool) -> Option<Vec<u8>> {
+    if key.command {
+        return match key.key {
+            "left" => Some(b"\x01".to_vec()),
+            "right" => Some(b"\x05".to_vec()),
+            "backspace" => Some(b"\x15".to_vec()),
+            _ => None,
+        };
+    }
+
+    let bytes = match key.key {
+        "enter" if key.shift || key.alt => b"\x1b\r".to_vec(),
+        "enter" => b"\r".to_vec(),
+        "backspace" if key.alt => b"\x1b\x7f".to_vec(),
+        "backspace" if key.control => b"\x08".to_vec(),
+        "backspace" => b"\x7f".to_vec(),
+        "tab" if key.shift => b"\x1b[Z".to_vec(),
+        "tab" => b"\t".to_vec(),
+        "escape" => b"\x1b".to_vec(),
+        "left" if key.alt && !key.shift && !key.control => b"\x1bb".to_vec(),
+        "right" if key.alt && !key.shift && !key.control => b"\x1bf".to_vec(),
+        "up" => cursor_key(key, 'A', app_cursor),
+        "down" => cursor_key(key, 'B', app_cursor),
+        "right" => cursor_key(key, 'C', app_cursor),
+        "left" => cursor_key(key, 'D', app_cursor),
+        "home" => cursor_key(key, 'H', app_cursor),
+        "end" => cursor_key(key, 'F', app_cursor),
+        "insert" => tilde_key(key, 2),
+        "delete" => tilde_key(key, 3),
+        "pageup" => tilde_key(key, 5),
+        "pagedown" => tilde_key(key, 6),
+        "f1" => b"\x1bOP".to_vec(),
+        "f2" => b"\x1bOQ".to_vec(),
+        "f3" => b"\x1bOR".to_vec(),
+        "f4" => b"\x1bOS".to_vec(),
+        "f5" => tilde_key(key, 15),
+        "f6" => tilde_key(key, 17),
+        "f7" => tilde_key(key, 18),
+        "f8" => tilde_key(key, 19),
+        "f9" => tilde_key(key, 20),
+        "f10" => tilde_key(key, 21),
+        "f11" => tilde_key(key, 23),
+        "f12" => tilde_key(key, 24),
+        "space" if key.control => vec![0],
+        name if key.control => {
+            // Ctrl+letter is the letter's control code; a few punctuation keys have their own.
+            let byte = match name.as_bytes() {
+                [letter] if letter.is_ascii_alphabetic() => letter.to_ascii_lowercase() - b'a' + 1,
+                b"[" => 0x1b,
+                b"\\" => 0x1c,
+                b"]" => 0x1d,
+                b"6" => 0x1e,
+                b"-" => 0x1f,
+                b"@" | b"2" => 0,
+                _ => return key.text.map(|text| text.as_bytes().to_vec()),
+            };
+            vec![byte]
+        }
+        _ => return key.text.filter(|text| !text.is_empty()).map(|text| text.as_bytes().to_vec()),
+    };
+    Some(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn press(key: &str) -> KeyPress<'_> {
+        KeyPress { key, text: Some(key).filter(|k| k.chars().count() == 1), ..KeyPress::default() }
+    }
+
+    fn bytes(key: &KeyPress) -> Vec<u8> {
+        encode(key, false).expect("the terminal gets this key")
+    }
+
+    #[test]
+    fn types_text() {
+        assert_eq!(bytes(&press("a")), b"a");
+        assert_eq!(bytes(&KeyPress { key: "e", text: Some("é"), ..KeyPress::default() }), "é".as_bytes());
+    }
+
+    #[test]
+    fn option_types_the_characters_a_layout_puts_on_it() {
+        let at = KeyPress { key: "v", text: Some("@"), alt: true, ..KeyPress::default() };
+        assert_eq!(bytes(&at), b"@");
+    }
+
+    #[test]
+    fn shift_enter_is_a_newline_for_claude() {
+        assert_eq!(bytes(&KeyPress { shift: true, ..press("enter") }), b"\x1b\r");
+        assert_eq!(bytes(&press("enter")), b"\r");
+    }
+
+    #[test]
+    fn control_letters_are_control_codes() {
+        assert_eq!(bytes(&KeyPress { control: true, ..press("c") }), [3]);
+        assert_eq!(bytes(&KeyPress { control: true, ..press("a") }), [1]);
+        assert_eq!(bytes(&KeyPress { control: true, ..press("[") }), [0x1b]);
+    }
+
+    #[test]
+    fn arrows_follow_application_cursor_mode() {
+        assert_eq!(bytes(&press("up")), b"\x1b[A");
+        assert_eq!(encode(&press("up"), true).expect("arrow"), b"\x1bOA");
+        assert_eq!(bytes(&KeyPress { shift: true, ..press("right") }), b"\x1b[1;2C");
+    }
+
+    #[test]
+    fn mac_word_and_line_jumps() {
+        assert_eq!(bytes(&KeyPress { alt: true, ..press("left") }), b"\x1bb");
+        assert_eq!(bytes(&KeyPress { alt: true, ..press("backspace") }), b"\x1b\x7f");
+        assert_eq!(bytes(&KeyPress { command: true, ..press("left") }), b"\x01");
+        assert_eq!(bytes(&KeyPress { command: true, ..press("backspace") }), b"\x15");
+    }
+
+    #[test]
+    fn command_shortcuts_stay_with_the_app() {
+        assert_eq!(encode(&KeyPress { command: true, ..press("t") }, false), None);
+    }
+
+    #[test]
+    fn navigation_and_function_keys() {
+        assert_eq!(bytes(&press("pageup")), b"\x1b[5~");
+        assert_eq!(bytes(&press("delete")), b"\x1b[3~");
+        assert_eq!(bytes(&press("f1")), b"\x1bOP");
+        assert_eq!(bytes(&press("f5")), b"\x1b[15~");
+        assert_eq!(bytes(&KeyPress { shift: true, ..press("tab") }), b"\x1b[Z");
+    }
+}

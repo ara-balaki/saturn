@@ -1,0 +1,51 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+saturn-core = { path = "crates/saturn-core" }
+saturn-design = { path = "crates/saturn-design" }
+saturn-terminal = { path = "crates/saturn-terminal" }
+
+# GPUI moves weekly; versions are pinned exactly and upgraded on purpose (docs/05-rust-stack.md).
+gpui-kit = "=0.7.3"
+alacritty_terminal = "=0.26.0"
+portable-pty = "=0.9.0"
+
+anyhow = "1"
+async-channel = "2"
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+unwrap_used = "warn"
+
+# Unoptimised GPUI and layout make every frame slow; optimise dependencies even in dev builds while
+# keeping Saturn's own crates fast to rebuild.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
