@@ -5908,6 +5908,9 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tree-sitter-javascript",
+ "tree-sitter-swift",
+ "tree-sitter-typescript",
  "ureq",
 ]
 

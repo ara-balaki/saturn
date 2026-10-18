@@ -8,6 +8,7 @@ mod clickup;
 mod dock;
 mod editor_view;
 mod files_view;
+mod languages;
 mod notify;
 mod session;
 mod settings;
@@ -122,6 +123,7 @@ fn main() {
 
     gpui_kit::application().with_assets(assets::Assets).run(move |cx| {
         gpui_kit::init(cx);
+        languages::register();
         theme::apply(settings::load().appearance, cx);
         if settings::load().notifications && !spike::is_automated() {
             notify::request_permission();

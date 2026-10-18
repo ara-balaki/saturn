@@ -460,7 +460,8 @@ fn language_for(path: &Path) -> &'static str {
         "dockerfile" | "containerfile" | ".gitignore" | ".gitattributes" | ".dockerignore" | ".prettierignore"
         | ".npmignore" | ".zshrc" | ".bashrc" | ".zprofile" | ".bash_profile" | ".profile" => return "bash",
         "makefile" | "gnumakefile" => return "make",
-        "gemfile" | "rakefile" | "podfile" | "brewfile" => return "ruby",
+        "gemfile" | "rakefile" | "podfile" | "brewfile" | "fastfile" | "appfile" | "matchfile" | "pluginfile"
+        | "dangerfile" => return "ruby",
         ".editorconfig" | ".npmrc" | ".gitconfig" | "cargo.lock" => return "toml",
         _ if name.starts_with("dockerfile.") => return "bash",
         _ => {}
@@ -476,13 +477,15 @@ fn language_for(path: &Path) -> &'static str {
         "yaml" | "yml" => "yaml",
         "md" | "mdx" | "markdown" => "markdown",
         "css" | "scss" | "less" => "css",
-        "html" | "htm" | "xml" | "svg" | "plist" | "vue" => "html",
+        "html" | "htm" | "xml" | "svg" | "plist" | "vue" | "storyboard" | "xib" | "entitlements" | "xcprivacy" => {
+            "html"
+        }
         "svelte" => "svelte",
         "sh" | "bash" | "zsh" | "env" | "dockerfile" => "bash",
         "py" | "pyi" => "python",
         "go" => "go",
-        "c" | "h" => "c",
-        "cc" | "cpp" | "cxx" | "hpp" | "hh" | "hxx" | "m" | "mm" => "cpp",
+        "c" | "h" | "strings" => "c",
+        "cc" | "cpp" | "cxx" | "hpp" | "hh" | "hxx" | "m" | "mm" | "xcconfig" => "cpp",
         "cs" => "csharp",
         "java" => "java",
         "kt" | "kts" => "kotlin",
@@ -517,6 +520,9 @@ mod tests {
         assert_eq!(language_for(Path::new("/p/.gitignore")), "bash");
         assert_eq!(language_for(Path::new("/p/Makefile")), "make");
         assert_eq!(language_for(Path::new("/p/Cargo.lock")), "toml");
+        assert_eq!(language_for(Path::new("/p/ios/App/AppDelegate.swift")), "swift");
+        assert_eq!(language_for(Path::new("/p/ios/App/Info.plist")), "html");
+        assert_eq!(language_for(Path::new("/p/ios/fastlane/Fastfile")), "ruby");
         assert_eq!(language_for(Path::new("/p/LICENSE")), "text");
     }
 }
