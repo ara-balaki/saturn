@@ -28,20 +28,25 @@ It isn't an IDE and doesn't try to replace yours. It's the place the agents live
   mouse work as they should.
 - **Agents that tell you how they're doing.** Each tab shows whether its agent is working, idle,
   waiting for you, or failed. The title bar counts them, ⌘⇧A jumps to the next one that needs you,
-  and macOS notifies you when Saturn is in the background.
+  and macOS notifies you when Saturn is in the background. A small Saturn in the menu bar shows how
+  many are waiting, even while Saturn is hidden.
+- **Several repos in one window.** ⌘O adds a repo to the sidebar; agents from different repos sit
+  side by side in one grid, and new tabs open in the repo you've selected.
 - **Tabs named after the session.** A tab takes the name of the Claude session running in it, or
   one you type.
 - **Files and a light editor.** A gitignore-aware file tree with git badges, and an editor with
-  syntax highlighting that saves with your project's own formatter (Prettier, Biome, oxfmt or
+  syntax highlighting for about 60 languages that saves with your project's own formatter (Prettier, Biome, oxfmt or
   rustfmt, whichever the project uses). Files an agent changes reload by themselves; if you have
   unsaved edits, Saturn asks first.
 - **Review what changed.** The Changes tab lists every changed file, with a diff for each, for your
-  uncommitted work or for the whole branch.
+  uncommitted work or for the whole branch. A pane whose branch has a pull request shows its number
+  and state, from the `gh` CLI.
 - **Follows the agent you're looking at.** Focus a pane that works in another git worktree, and the
   sidebar switches to that worktree.
-- **Opens where you left off.** Each project's grid comes back as it was, and Saturn offers to
+- **Opens where you left off.** The window's repos and grid come back as they were, and Saturn offers to
   resume the Claude sessions that were running: the resume command is typed for you, never run.
-- **Light and dark.** It follows macOS, or you pick one.
+- **Glass, light and dark.** Panes are frosted glass over your desktop. It follows macOS's
+  appearance, or you pick one.
 - **Optional: tickets from ClickUp.** Connect a token and ⌘⇧T lists the tickets assigned to you.
   Pick one, and Saturn opens a pane (in its own worktree if you like) and starts your agent on it.
   If you don't connect anything, none of this shows up.
@@ -76,7 +81,7 @@ The app is signed for your own Mac only, so it isn't notarised for sharing. Rust
 | ⌘⇧↩         | Maximise the focused pane              |
 | ⌘⇧A         | Jump to the next agent that needs you  |
 | ⌘B / ⌘J     | Toggle the sidebar / the editor        |
-| ⌘O          | Open a project                         |
+| ⌘O          | Add a repo                             |
 | ⌘S          | Save the open file                     |
 | ⌘,          | Settings                               |
 | ⌘⇧T         | New agent from a ticket (with ClickUp) |
@@ -102,6 +107,7 @@ Open them with ⌘, or the gear in the title bar. They're stored in
   mentioned in normal prompts never rename anything.
 - **Format on save**, with the formatter your project already uses.
 - **Notifications** when an agent needs you while Saturn is in the background.
+- **Menu bar icon** with how many agents wait for you; clicking it takes you to the next one.
 - **ClickUp** (optional): your API token, kept in the macOS Keychain, plus, for each project, the
   command a ticket starts (`claude -n {ticket}` by default) and whether it gets its own worktree.
 
