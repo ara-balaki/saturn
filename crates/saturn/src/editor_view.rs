@@ -15,8 +15,11 @@ use saturn_core::format;
 use saturn_core::git::{self, Scope};
 use saturn_design::{color, radius, space};
 
+use gpui_kit::component::tooltip::Tooltip;
+
 use crate::chrome;
 use crate::history_view::{HistoryEvent, HistoryView};
+use crate::schema_view::SchemaView;
 use crate::theme::{self, len};
 
 /// Files larger than this open read-only elsewhere; the editor keeps the whole text in memory.
@@ -57,6 +60,7 @@ enum Front {
     File,
     Review,
     History,
+    Schema,
 }
 
 #[derive(Default)]
@@ -69,6 +73,10 @@ pub struct EditorView {
     history: Option<Entity<HistoryView>>,
     /// Keeps History's clicks reaching this panel while it's open.
     history_events: Option<Subscription>,
+    /// The database diagram, once opened.
+    schema: Option<Entity<SchemaView>>,
+    /// Whether the panel takes the grid's room too, for a diagram or the history.
+    maximized: bool,
     /// Why the last file could not be opened or saved, shown in the strip until the next action.
     problem: Option<String>,
 }
@@ -216,6 +224,26 @@ impl EditorView {
         cx.notify();
     }
 
+    pub fn maximized(&self) -> bool {
+        self.maximized
+    }
+
+    /// Makes the panel take the grid's room (for spikes and screenshots).
+    pub fn maximize(&mut self, cx: &mut Context<Self>) {
+        self.maximized = true;
+        cx.notify();
+    }
+
+    /// Opens the Database tab for `repo`, reading its schema afresh.
+    pub fn show_schema(&mut self, repo: &Path, cx: &mut Context<Self>) {
+        match &self.schema {
+            Some(schema) if schema.read(cx).repo() == repo => schema.update(cx, SchemaView::reload),
+            _ => self.schema = Some(cx.new(|cx| SchemaView::new(repo, cx))),
+        }
+        self.front = Front::Schema;
+        cx.notify();
+    }
+
     /// Opens the History tab for `repo`, reading it afresh.
     pub fn show_history(&mut self, repo: &Path, cx: &mut Context<Self>) {
         match &self.history {
@@ -359,6 +387,42 @@ impl EditorView {
         )
     }
 
+    fn render_schema_tab(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.schema.as_ref()?;
+        let in_front = self.front == Front::Schema;
+        Some(
+            chrome::track_item("schema-tab", in_front)
+                .group("schema-tab")
+                .pl(len(space::SPACE_3))
+                .pr(len(space::SPACE_1))
+                .child(chrome::icon("database", 13., theme::color(color::INK_MUTED)))
+                .child("Database")
+                .child(
+                    div()
+                        .id("schema-close")
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .size(px(20.))
+                        .rounded(len(radius::RADIUS_XS))
+                        .hover(|s| s.bg(theme::fill_control()))
+                        .child(chrome::icon("x", 11., theme::color(color::INK_MUTED)))
+                        .when(!in_front, |slot| slot.invisible().group_hover("schema-tab", gpui_kit::Styled::visible))
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.schema = None;
+                            this.front = if this.review.is_some() { Front::Review } else { Front::File };
+                            cx.notify();
+                        })),
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.front = Front::Schema;
+                    cx.notify();
+                }))
+                .into_any_element(),
+        )
+    }
+
     fn render_history_tab(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.history.as_ref()?;
         let in_front = self.front == Front::History;
@@ -483,6 +547,8 @@ impl Render for EditorView {
             self.review.as_ref().map(|review| Diff::new(&review.state).size_full().into_any_element())
         } else if self.front == Front::History {
             self.history.clone().map(gpui_kit::IntoElement::into_any_element)
+        } else if self.front == Front::Schema {
+            self.schema.clone().map(gpui_kit::IntoElement::into_any_element)
         } else {
             self.files
                 .get(self.active)
@@ -523,12 +589,25 @@ impl Render for EditorView {
                     .items_center()
                     .gap(px(2.))
                     .h(len(chrome::CONTROL_HEIGHT))
+                    .children(self.render_schema_tab(cx))
                     .children(self.render_history_tab(cx))
                     .children(self.render_review_tab(cx))
                     .children((0..self.files.len()).map(|index| self.render_tab(index, cx)))
                     .child(div().flex_1())
                     .children(self.render_disk_notice(cx))
                     .children(self.render_review_controls(cx))
+                    .child(
+                        chrome::icon_button(
+                            "maximize-panel",
+                            if self.maximized { "minimize-2" } else { "maximize-2" },
+                            true,
+                        )
+                        .tooltip(|window, cx| Tooltip::new("Make the panel bigger or smaller").build(window, cx))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.maximized = !this.maximized;
+                            cx.notify();
+                        })),
+                    )
                     .children(self.problem.clone().map(|problem| {
                         div()
                             .px(len(space::SPACE_3))

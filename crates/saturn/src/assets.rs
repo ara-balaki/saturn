@@ -25,6 +25,14 @@ const ICONS: &[(&str, &[u8])] = &[
     ("icons/git-merge.svg", include_bytes!("../assets/icons/git-merge.svg")),
     ("icons/bot.svg", include_bytes!("../assets/icons/bot.svg")),
     ("icons/chart-no-axes-column.svg", include_bytes!("../assets/icons/chart-no-axes-column.svg")),
+    ("icons/database.svg", include_bytes!("../assets/icons/database.svg")),
+    ("icons/key-round.svg", include_bytes!("../assets/icons/key-round.svg")),
+    ("icons/link-2.svg", include_bytes!("../assets/icons/link-2.svg")),
+    ("icons/zoom-in.svg", include_bytes!("../assets/icons/zoom-in.svg")),
+    ("icons/zoom-out.svg", include_bytes!("../assets/icons/zoom-out.svg")),
+    ("icons/scan.svg", include_bytes!("../assets/icons/scan.svg")),
+    ("icons/maximize-2.svg", include_bytes!("../assets/icons/maximize-2.svg")),
+    ("icons/minimize-2.svg", include_bytes!("../assets/icons/minimize-2.svg")),
 ];
 
 pub struct Assets;

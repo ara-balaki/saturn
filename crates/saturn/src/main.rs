@@ -14,6 +14,7 @@ mod history_view;
 mod languages;
 mod menu_bar;
 mod notify;
+mod schema_view;
 mod session;
 mod settings;
 mod settings_view;

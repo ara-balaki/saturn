@@ -217,6 +217,8 @@ struct RootViews {
     changes: Entity<ChangesView>,
     /// The branch checked out there, for the sidebar's header.
     branch: Option<String>,
+    /// Whether it describes a database (Prisma or SQL migrations), for the diagram's button.
+    has_schema: bool,
     _events: [Subscription; 2],
 }
 
@@ -404,6 +406,9 @@ impl Workspace {
             .detach();
         }
         let roots = HashMap::from([(project.clone(), Self::root_views(&project, window, cx))]);
+        // The editor panel can take the grid's room; the workbench follows its changes.
+        let editor = cx.new(|_| EditorView::default());
+        cx.observe(&editor, |_, _, cx| cx.notify()).detach();
         Self {
             sidebar_tab: SidebarTab::Files,
             claude_sessions: HashMap::new(),
@@ -415,7 +420,7 @@ impl Workspace {
             roots,
             root: project.clone(),
             follow_pane: true,
-            editor: cx.new(|_| EditorView::default()),
+            editor,
             projects: vec![project.clone()],
             project,
             layout: Layout::default(),
@@ -458,7 +463,30 @@ impl Workspace {
             })
         };
         let changes_events = Self::follow_changes(&changes, cx);
-        RootViews { files, changes, branch: git::branch(root), _events: [files_events, changes_events] }
+        // Whether there's a schema to draw is a walk of the folder: off the main thread.
+        let folder = root.to_owned();
+        cx.spawn(async move |this, cx| {
+            let found = cx
+                .background_spawn({
+                    let folder = folder.clone();
+                    async move { !saturn_core::schema::find_sources(&folder).is_empty() }
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if let Some(views) = this.roots.get_mut(&folder) {
+                    views.has_schema = found;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        RootViews {
+            files,
+            changes,
+            branch: git::branch(root),
+            has_schema: false,
+            _events: [files_events, changes_events],
+        }
     }
 
     /// The views of the folder the sidebar shows.
@@ -737,6 +765,19 @@ impl Workspace {
     }
 
     /// Shows the Changes tab and reviews its first file once the changes are read (spikes).
+    /// Opens the database diagram for the folder the sidebar shows.
+    pub fn show_schema(&mut self, cx: &mut Context<Self>) {
+        let root = self.root.clone();
+        self.editor.update(cx, |editor, cx| {
+            editor.show_schema(&root, cx);
+            if std::env::var_os("SATURN_SCHEMA").is_some() {
+                editor.maximize(cx);
+            }
+        });
+        self.editor_open = true;
+        cx.notify();
+    }
+
     /// Opens the History tab for the folder the sidebar shows (for spikes and screenshots).
     pub fn show_history(&mut self, cx: &mut Context<Self>) {
         let root = self.root.clone();
@@ -1607,7 +1648,14 @@ impl Workspace {
                 this.sync_root(window, cx);
                 cx.notify();
             }));
-        chrome::sidebar_header(&name, &detail, follow).into_any_element()
+        // The database diagram, when this folder describes a database.
+        let schema = self.roots.get(&self.root).is_some_and(|views| views.has_schema).then(|| {
+            chrome::icon_button("show-schema", "database", true)
+                .tooltip(|window, cx| Tooltip::new("Database diagram").build(window, cx))
+                .on_click(cx.listener(|this, _, _, cx| this.show_schema(cx)))
+        });
+        chrome::sidebar_header(&name, &detail, div().flex().items_center().children(schema).child(follow))
+            .into_any_element()
     }
 
     /// The window's repos, in the title bar: the selected one raised, ✕ on hover to take one out
@@ -1668,6 +1716,7 @@ impl Workspace {
     /// Sidebar | (editor / grid), with draggable dividers. The panels stay in the same place in
     /// the tree when toggled, so terminals never restart.
     fn render_workbench(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let editor_maximized = self.editor.read(cx).maximized();
         let half_gap = len(space::SPACE_2 / 2.);
         let name = self.project.file_name().map_or_else(|| "/".to_owned(), |name| name.to_string_lossy().into_owned());
         let grid = if self.layout.is_empty() {
@@ -1712,7 +1761,7 @@ impl Workspace {
                                         .child(div().size_full().pb(half_gap).child(self.editor.clone())),
                                 )
                                 .child(
-                                    resizable_panel().child(
+                                    resizable_panel().visible(!(self.editor_open && editor_maximized)).child(
                                         div()
                                             .size_full()
                                             .flex()
