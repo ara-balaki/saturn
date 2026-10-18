@@ -18,11 +18,14 @@ pub struct Shadow {
     pub y: f32,
     pub blur: f32,
     pub spread: f32,
+    /// Drawn inside the element, like the top highlight of `gloss` and `lift`.
+    pub inset: bool,
     pub color: Color,
 }
 
-// Generated colour values are hex as written in tokens.json.
-#[allow(clippy::unreadable_literal)]
+// Generated colour values are hex as written in tokens.json, and the docs are the tokens' usage
+// notes, which name components (IconTile) as the design system writes them.
+#[allow(clippy::unreadable_literal, clippy::doc_markdown)]
 mod generated {
     use super::{Color, Shadow};
     include!(concat!(env!("OUT_DIR"), "/tokens.rs"));
@@ -39,10 +42,27 @@ mod tests {
         assert_eq!(color::STATUS_NEEDS_YOU, color::YELLOW);
     }
 
+    /// Every row of the nesting table in the design system's README: inner = outer − padding.
     #[test]
     fn nested_radii_follow_the_padding_rule() {
-        assert!((radius::RADIUS_LG - space::SPACE_1 - radius::RADIUS_MD).abs() < f32::EPSILON);
-        assert!((radius::RADIUS_MD - space::SPACE_1 - radius::RADIUS_SM).abs() < f32::EPSILON);
+        let nestings = [
+            (radius::RADIUS_XL, space::SPACE_2, radius::RADIUS_LG),
+            (radius::RADIUS_LG, space::SPACE_1, radius::RADIUS_MD),
+            (radius::RADIUS_MD, space::SPACE_1, radius::RADIUS_SM),
+            (radius::RADIUS_2XL, 14.0, radius::RADIUS_LG),
+            (radius::RADIUS_2XL, 18.0, radius::RADIUS_MD),
+        ];
+        for (outer, padding, inner) in nestings {
+            assert!((outer - padding - inner).abs() < f32::EPSILON, "{outer} − {padding} ≠ {inner}");
+        }
+    }
+
+    #[test]
+    fn gloss_lights_the_top_edge_from_inside() {
+        let top = shadow::GLOSS[0];
+        assert!(top.inset);
+        assert!((top.y - 1.0).abs() < f32::EPSILON);
+        assert!(!shadow::GLOW_FOCUS[0].inset);
     }
 
     #[test]

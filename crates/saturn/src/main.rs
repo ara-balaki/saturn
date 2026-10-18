@@ -24,8 +24,16 @@ use crate::workspace::{
 
 actions!(saturn, [Quit]);
 
-const FONTS: [&[u8]; 2] =
-    [include_bytes!("../assets/fonts/PlusJakartaSans.ttf"), include_bytes!("../assets/fonts/JetBrainsMono.ttf")];
+/// One static file per weight the design system uses: GPUI draws a variable font only at its default
+/// weight. Instanced from the variable fonts with fontTools (OFL 1.1; neither declares a Reserved
+/// Font Name).
+const FONTS: [&[u8]; 5] = [
+    include_bytes!("../assets/fonts/PlusJakartaSans-Light.ttf"),
+    include_bytes!("../assets/fonts/PlusJakartaSans-Regular.ttf"),
+    include_bytes!("../assets/fonts/PlusJakartaSans-SemiBold.ttf"),
+    include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf"),
+    include_bytes!("../assets/fonts/JetBrainsMono-Bold.ttf"),
+];
 
 fn bind_keys(cx: &mut App) {
     cx.bind_keys([
@@ -92,7 +100,7 @@ fn main() {
 
     gpui_kit::application().with_assets(assets::Assets).run(move |cx| {
         gpui_kit::init(cx);
-        gpui_kit::component::Theme::change(gpui_kit::component::ThemeMode::Dark, None, cx);
+        theme::install_component_theme(cx);
         cx.text_system()
             .add_fonts(FONTS.iter().map(|font| Cow::Borrowed(*font)).collect())
             .expect("the bundled fonts load");
@@ -112,12 +120,15 @@ fn main() {
         gpui_kit::open_window(options, cx, |window, cx| {
             cx.new(|cx| {
                 let mut workspace = Workspace::new(project, window, cx);
-                let panes = spike::panes();
-                for index in 0..panes {
-                    workspace.open_terminal(spike::placement(index, panes), window, cx);
-                }
-                if panes == 0 {
-                    workspace.open_terminal(Placement::Tab, window, cx);
+                match spike::panes() {
+                    Some(panes) => {
+                        for index in 0..panes {
+                            workspace.open_terminal(spike::placement(index, panes), window, cx);
+                        }
+                    }
+                    None => {
+                        workspace.open_terminal(Placement::Tab, window, cx);
+                    }
                 }
                 spike::start(&workspace, window, cx);
                 workspace

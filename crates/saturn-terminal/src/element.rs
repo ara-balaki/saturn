@@ -222,7 +222,7 @@ impl TerminalElement {
         };
 
         let selection = content.selection;
-        let selection_color = hsla(palette::SELECTION, 0.45);
+        let selection_color = hsla(palette::SELECTION, 0.55);
         let mut backgrounds: Vec<(usize, usize, usize, Hsla)> = Vec::new();
         let mut spans: Vec<Span> = Vec::new();
         let mut singles: Vec<(usize, usize, String, TextStyle)> = Vec::new();

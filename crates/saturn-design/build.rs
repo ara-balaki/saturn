@@ -39,14 +39,18 @@ fn px(value: &str) -> f32 {
     value.trim().trim_end_matches("px").parse().expect("a px length")
 }
 
-/// One CSS box-shadow layer: `x y blur [spread] colour`.
+/// One CSS box-shadow layer: `[inset] x y blur [spread] colour`.
 fn parse_shadow_layer(layer: &str) -> String {
+    let (inset, layer) = match layer.strip_prefix("inset ") {
+        Some(rest) => (true, rest.trim_start()),
+        None => (false, layer),
+    };
     let colour_at = layer.find(['#', 'r']).expect("shadow colour");
     let lengths: Vec<f32> = layer[..colour_at].split_whitespace().map(px).collect();
     let (rgb, alpha) = parse_color(&layer[colour_at..]);
     let spread = lengths.get(3).copied().unwrap_or(0.0);
     format!(
-        "Shadow {{ x: {:?}, y: {:?}, blur: {:?}, spread: {:?}, color: Color {{ rgb: 0x{rgb:06x}, alpha: {alpha:?} }} }}",
+        "Shadow {{ x: {:?}, y: {:?}, blur: {:?}, spread: {:?}, inset: {inset}, color: Color {{ rgb: 0x{rgb:06x}, alpha: {alpha:?} }} }}",
         lengths[0], lengths[1], lengths[2], spread
     )
 }

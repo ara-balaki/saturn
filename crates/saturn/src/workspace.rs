@@ -2,14 +2,15 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::resizable::{h_resizable, resizable_panel, v_resizable};
 use gpui_kit::{
-    AnyElement, AppContext as _, ClickEvent, Context, CursorStyle, DragMoveEvent, Entity, FocusHandle, Focusable as _,
-    FontWeight, Hsla, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, PathPromptOptions,
-    PromptLevel, Render, StatefulInteractiveElement as _, Styled as _, Window, actions, div,
-    prelude::FluentBuilder as _, px, relative,
+    Animation, AnimationExt as _, AnyElement, AppContext as _, ClickEvent, Context, CursorStyle, DragMoveEvent, Entity,
+    FocusHandle, Focusable as _, FontWeight, Hsla, InteractiveElement as _, IntoElement, MouseButton,
+    ParentElement as _, PathPromptOptions, PromptLevel, Render, StatefulInteractiveElement as _, Styled as _, Window,
+    actions, bounce, div, ease_in_out, prelude::FluentBuilder as _, px, relative,
 };
 use saturn_bridge::{Bridge, HookCall};
 use saturn_core::agent_state::{AgentState, tab_title};
@@ -65,8 +66,8 @@ pub enum Placement {
 
 const TITLEBAR_HEIGHT: f32 = 44.0;
 const TRAFFIC_LIGHTS_WIDTH: f32 = 76.0;
-const PANE_HEADER_HEIGHT: f32 = 34.0;
-const TAB_HEIGHT: f32 = 26.0;
+const PANE_HEADER_HEIGHT: f32 = 40.0;
+const TAB_HEIGHT: f32 = 28.0;
 /// No pane is dragged smaller than this share of its row or of the grid.
 const MIN_SHARE: f32 = 0.08;
 /// Programs a tab can close without asking, because nothing is lost.
@@ -86,7 +87,7 @@ impl Render for DraggedTab {
             .h(len(TAB_HEIGHT))
             .flex()
             .items_center()
-            .rounded(len(radius::RADIUS_MD))
+            .rounded(len(radius::RADIUS_LG))
             .bg(theme::color(color::CONTROL))
             .border_1()
             .border_color(theme::color(color::PURPLE))
@@ -167,6 +168,16 @@ fn state_color(state: AgentState) -> Hsla {
 
 fn status_dot(state: AgentState) -> impl IntoElement {
     div().size(px(8.)).flex_none().rounded_full().bg(state_color(state))
+}
+
+/// `glow-needs-you` as it breathes: `t` from 0 (the token itself) to 1 (wider and brighter).
+fn breathing_glow(t: f32) -> Vec<saturn_design::Shadow> {
+    let mut glow = shadow::GLOW_NEEDS_YOU.to_vec();
+    if let Some(halo) = glow.get_mut(1) {
+        halo.blur += 10. * t;
+        halo.color.alpha += 0.14 * t;
+    }
+    glow
 }
 
 /// Moves the divider after `index` to `at` (0–1 across the container), keeping both neighbours
@@ -509,7 +520,7 @@ impl Workspace {
         let calling = !selected && state == AgentState::NeedsYou && self.unseen.contains(&tab);
         let (background, foreground) = match (calling, selected) {
             (true, _) => (theme::color(color::YELLOW), theme::color(color::INK_INVERSE)),
-            (false, true) => (theme::color(color::CONTROL), theme::color(color::INK)),
+            (false, true) => (theme::color(color::CONTROL_PRESSED), theme::color(color::INK)),
             (false, false) => (gpui_kit::transparent_black(), theme::color(color::INK_MUTED)),
         };
         let renaming = self.renaming.as_ref().filter(|(renaming, _)| *renaming == tab).map(|(_, input)| input.clone());
@@ -519,8 +530,8 @@ impl Workspace {
             .flex()
             .items_center()
             .justify_center()
-            .size(px(16.))
-            .rounded(len(radius::RADIUS_SM))
+            .size(px(18.))
+            .rounded_full()
             .when(!selected, |close| close.invisible().group_hover("tab", gpui_kit::Styled::visible))
             .hover(|s| s.bg(theme::color(color::CONTROL_HOVER)))
             .child(chrome::icon("x", 11., foreground))
@@ -538,8 +549,9 @@ impl Workspace {
             .pl(len(space::SPACE_3))
             .pr(len(space::SPACE_1))
             .max_w(px(220.))
-            .rounded(len(radius::RADIUS_MD))
+            .rounded(len(radius::RADIUS_LG))
             .bg(background)
+            .when(selected && !calling, |tab| tab.shadow(theme::shadows(shadow::LIFT)))
             .text_color(foreground)
             .text_size(px(12.))
             .font_weight(FontWeight::SEMIBOLD)
@@ -573,7 +585,8 @@ impl Workspace {
         let focused = self.layout.focused == Some(cell.id);
         let unseen_states: Vec<AgentState> =
             cell.tabs.iter().filter(|tab| self.unseen.contains(tab)).map(|tab| self.tab_state(*tab, cx)).collect();
-        let glow = if unseen_states.contains(&AgentState::NeedsYou) {
+        let needs_you = unseen_states.contains(&AgentState::NeedsYou);
+        let glow = if needs_you {
             Some(shadow::GLOW_NEEDS_YOU)
         } else if !unseen_states.is_empty() {
             Some(shadow::GLOW_YOUR_TURN)
@@ -585,7 +598,7 @@ impl Workspace {
         let terminal = self.terminals.get(&cell.active).cloned();
         let cell_id: CellId = cell.id;
         let header_button = |id: &'static str, icon: &str, placement: Placement, cx: &mut Context<Self>| {
-            chrome::icon_tile((id, cell_id.key()), icon, TileKind::Off, TAB_HEIGHT)
+            chrome::icon_tile((id, cell_id.key()), icon, TileKind::Round, TAB_HEIGHT)
                 .on_click(cx.listener(move |this, _, window, cx| this.open_in_cell(cell_id, placement, window, cx)))
         };
 
@@ -595,7 +608,7 @@ impl Workspace {
             .size_full()
             .min_w_0()
             .min_h_0()
-            .rounded(len(radius::RADIUS_LG))
+            .rounded(len(radius::RADIUS_XL))
             .bg(theme::color(color::SURFACE))
             .border_1()
             .border_color(theme::color(color::LINE))
@@ -613,18 +626,19 @@ impl Workspace {
                     .items_center()
                     .gap(len(space::SPACE_1))
                     .h(len(PANE_HEADER_HEIGHT))
-                    .p(len(space::SPACE_1))
+                    .p(len(space::SPACE_2))
                     // GPUI clips children to a rectangle, not to the pane's rounded corners, so the
                     // header rounds its own: the pane's radius minus its one-pixel border.
-                    .rounded_t(len(radius::RADIUS_LG - 1.))
+                    .rounded_t(len(radius::RADIUS_XL - 1.))
                     .bg(theme::color(color::SURFACE_RAISED))
+                    .shadow(theme::shadows(shadow::LIFT))
                     .child(
                         div()
                             .id(("tab-strip", cell_id.key()))
                             .flex()
                             .flex_1()
                             .min_w_0()
-                            .gap(len(space::SPACE_1))
+                            .gap(px(2.))
                             .overflow_x_scroll()
                             .children((0..cell.tabs.len()).map(|index| self.render_tab(cell, index, cx)))
                             .on_drop(cx.listener(move |this, dragged: &DraggedTab, window, cx| {
@@ -652,6 +666,16 @@ impl Workspace {
         if let Some(glow) = glow {
             pane = pane.border_color(gpui_kit::transparent_black()).shadow(theme::shadows(glow));
         }
+        if needs_you {
+            // Needs you breathes, slowly, so it is seen from the corner of the eye without flashing.
+            return pane
+                .with_animation(
+                    ("breathe", cell_id.key()),
+                    Animation::new(Duration::from_millis(2400)).repeat().with_easing(bounce(ease_in_out)),
+                    |pane, t| pane.shadow(theme::shadows(&breathing_glow(t))),
+                )
+                .into_any_element();
+        }
         pane.into_any_element()
     }
 
@@ -664,8 +688,8 @@ impl Workspace {
         div()
             .id(id)
             .flex_none()
-            .when(vertical, |d| d.w(len(space::SPACE_2)).h_full().cursor(CursorStyle::ResizeLeftRight))
-            .when(!vertical, |d| d.h(len(space::SPACE_2)).w_full().cursor(CursorStyle::ResizeUpDown))
+            .when(vertical, |d| d.w(len(space::SPACE_3)).h_full().cursor(CursorStyle::ResizeLeftRight))
+            .when(!vertical, |d| d.h(len(space::SPACE_3)).w_full().cursor(CursorStyle::ResizeUpDown))
             .on_drag(divider, |_, _, _, cx| cx.new(|_| DividerPreview))
             .into_any_element()
     }
@@ -733,7 +757,7 @@ impl Workspace {
             (count(&[AgentState::Working]), AgentState::Working, "working"),
         ];
         let toggle = |id: &'static str, icon: &str, on: bool| {
-            chrome::icon_tile(id, icon, if on { TileKind::Plain } else { TileKind::Off }, 26.)
+            chrome::icon_tile(id, icon, if on { TileKind::Plain } else { TileKind::Off }, 28.)
         };
         div()
             .flex()
@@ -773,43 +797,36 @@ impl Workspace {
                     } else {
                         state_color(state)
                     })
+                    .font_weight(FontWeight::SEMIBOLD)
                     .child(status_dot(state))
                     .child(format!("{n} {label}"))
                     .on_click(cx.listener(|this, _, window, cx| this.next_attention(window, cx)))
             }))
             .child(
-                div()
-                    .id("new-terminal")
-                    .flex()
-                    .items_center()
-                    .gap(len(space::SPACE_2))
-                    .h(px(30.))
-                    .px(len(space::SPACE_4))
-                    .rounded(len(radius::RADIUS_MD))
-                    .bg(theme::color(color::PURPLE))
-                    .hover(|s| s.bg(theme::color(color::PURPLE_DEEP)))
-                    .cursor_pointer()
-                    .font_weight(FontWeight::MEDIUM)
-                    .child("New terminal")
-                    .child(div().text_color(theme::color(color::INK).opacity(0.65)).child("⌘T"))
-                    .on_click(cx.listener(|this, _, window, cx| {
+                // The empty grid has its own primary button; one per screen.
+                chrome::button("new-terminal", "New terminal", Some("⌘T"), !self.layout.is_empty()).on_click(
+                    cx.listener(|this, _, window, cx| {
                         this.open_terminal(Placement::Tab, window, cx);
-                    })),
+                    }),
+                ),
             )
     }
 
     /// Sidebar | (editor / grid), with draggable dividers. The panels stay in the same place in
     /// the tree when toggled, so terminals never restart.
     fn render_workbench(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let half_gap = len(space::SPACE_2 / 2.);
+        let half_gap = len(space::SPACE_3 / 2.);
+        let name = self.project.file_name().map_or_else(|| "/".to_owned(), |name| name.to_string_lossy().into_owned());
         let grid = if self.layout.is_empty() {
-            chrome::empty_grid(cx.listener(|this, _, window, cx| {
-                this.open_terminal(Placement::Tab, window, cx);
-            }))
+            chrome::empty_grid(
+                &name,
+                cx.listener(|this, _, window, cx| {
+                    this.open_terminal(Placement::Tab, window, cx);
+                }),
+            )
         } else {
             self.render_grid(cx)
         };
-        let name = self.project.file_name().map_or_else(|| "/".to_owned(), |name| name.to_string_lossy().into_owned());
         let path = self.project.display().to_string();
         div().flex_1().min_h_0().child(
             h_resizable("workbench")
@@ -880,8 +897,8 @@ impl Render for Workspace {
             .size_full()
             .flex()
             .flex_col()
-            .px(len(space::SPACE_2))
-            .pb(len(space::SPACE_2))
+            .px(len(space::SPACE_3))
+            .pb(len(space::SPACE_3))
             .bg(theme::color(color::GROUND))
             .text_color(theme::color(color::INK))
             .font_family(saturn_design::font::SANS)

@@ -1,6 +1,7 @@
 //! A harness for performance spikes and screenshots, driven by environment variables:
 //!
-//! - `SATURN_PANES=N` opens N panes, `SATURN_COMMAND` types a command into each.
+//! - `SATURN_PANES=N` opens N panes instead of one shell (0: the empty grid), `SATURN_COMMAND`
+//!   types a command into each.
 //! - `SATURN_PERF=1` prints how long terminal frames take, every second.
 //! - `SATURN_OPEN_SETTINGS=1` opens the Settings dialog on start.
 //! - `SATURN_SCREENSHOT=path.png` saves what the window draws after `SATURN_SCREENSHOT_AFTER`
@@ -22,8 +23,9 @@ pub fn is_automated() -> bool {
     std::env::var_os("SATURN_SCREENSHOT").is_some() || std::env::var_os("SATURN_QUIT_AFTER").is_some()
 }
 
-pub fn panes() -> usize {
-    var("SATURN_PANES").unwrap_or(0)
+/// How many panes to open on start, when a spike asks for a number.
+pub fn panes() -> Option<usize> {
+    var("SATURN_PANES")
 }
 
 /// Lays N panes out like the Electron spike: one row up to 3, two up to 8, three beyond.
@@ -43,7 +45,7 @@ pub fn placement(index: usize, panes: usize) -> Placement {
 
 pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
     if let Ok(command) = std::env::var("SATURN_COMMAND") {
-        let tabs: Vec<TabId> = (1..=panes() as u64).map(TabId).collect();
+        let tabs: Vec<TabId> = (1..=panes().unwrap_or(0) as u64).map(TabId).collect();
         let views: Vec<_> = tabs.iter().filter_map(|tab| workspace.terminal(*tab).cloned()).collect();
         cx.spawn(async move |_, cx| {
             cx.background_executor().timer(Duration::from_millis(1500)).await;
