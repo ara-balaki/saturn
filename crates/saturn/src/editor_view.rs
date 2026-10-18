@@ -448,26 +448,53 @@ fn display_name(path: &Path) -> String {
     path.file_name().map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned())
 }
 
-/// The tree-sitter grammar for a file, by its name. `.env` files read well as shell.
+/// The tree-sitter grammar for a file: by its whole name first (`Dockerfile`, `.gitignore`), then
+/// by its extension. Files without a grammar of their own get the closest one that colours their
+/// comments and strings: shell for `.env` and ignore files, TOML for INI-style config.
 fn language_for(path: &Path) -> &'static str {
     let name = path.file_name().map(|name| name.to_string_lossy().to_lowercase()).unwrap_or_default();
-    if name.starts_with(".env") || path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("env")) {
+    if name.starts_with(".env") {
         return "bash";
     }
-    match path.extension().and_then(|ext| ext.to_str()).unwrap_or_default() {
+    match name.as_str() {
+        "dockerfile" | "containerfile" | ".gitignore" | ".gitattributes" | ".dockerignore" | ".prettierignore"
+        | ".npmignore" | ".zshrc" | ".bashrc" | ".zprofile" | ".bash_profile" | ".profile" => return "bash",
+        "makefile" | "gnumakefile" => return "make",
+        "gemfile" | "rakefile" | "podfile" | "brewfile" => return "ruby",
+        ".editorconfig" | ".npmrc" | ".gitconfig" | "cargo.lock" => return "toml",
+        _ if name.starts_with("dockerfile.") => return "bash",
+        _ => {}
+    }
+    let extension = path.extension().map(|ext| ext.to_string_lossy().to_lowercase()).unwrap_or_default();
+    match extension.as_str() {
         "ts" | "mts" | "cts" => "typescript",
         "tsx" => "tsx",
         "js" | "mjs" | "cjs" | "jsx" => "javascript",
-        "json" | "jsonc" => "json",
+        "json" | "jsonc" | "json5" | "jsonl" | "webmanifest" => "json",
         "rs" => "rust",
-        "toml" => "toml",
+        "toml" | "ini" | "cfg" | "conf" => "toml",
         "yaml" | "yml" => "yaml",
-        "md" | "mdx" => "markdown",
-        "css" | "scss" => "css",
-        "html" | "htm" => "html",
-        "sh" | "bash" | "zsh" => "bash",
-        "py" => "python",
+        "md" | "mdx" | "markdown" => "markdown",
+        "css" | "scss" | "less" => "css",
+        "html" | "htm" | "xml" | "svg" | "plist" | "vue" => "html",
+        "svelte" => "svelte",
+        "sh" | "bash" | "zsh" | "env" | "dockerfile" => "bash",
+        "py" | "pyi" => "python",
         "go" => "go",
+        "c" | "h" => "c",
+        "cc" | "cpp" | "cxx" | "hpp" | "hh" | "hxx" | "m" | "mm" => "cpp",
+        "cs" => "csharp",
+        "java" => "java",
+        "kt" | "kts" => "kotlin",
+        "swift" => "swift",
+        "rb" | "rake" | "gemspec" => "ruby",
+        "php" => "php",
+        "lua" => "lua",
+        "zig" => "zig",
+        "proto" => "proto",
+        "graphql" | "gql" => "graphql",
+        "diff" | "patch" => "diff",
+        "mk" => "make",
         _ => "text",
     }
 }
@@ -483,6 +510,13 @@ mod tests {
         assert_eq!(language_for(Path::new("/p/apps/api/orders.ts")), "typescript");
         assert_eq!(language_for(Path::new("/p/App.tsx")), "tsx");
         assert_eq!(language_for(Path::new("/p/Cargo.toml")), "toml");
+        assert_eq!(language_for(Path::new("/p/README.MD")), "markdown");
+        assert_eq!(language_for(Path::new("/p/.github/workflows/ci.yml")), "yaml");
+        assert_eq!(language_for(Path::new("/p/Dockerfile")), "bash");
+        assert_eq!(language_for(Path::new("/p/Dockerfile.dev")), "bash");
+        assert_eq!(language_for(Path::new("/p/.gitignore")), "bash");
+        assert_eq!(language_for(Path::new("/p/Makefile")), "make");
+        assert_eq!(language_for(Path::new("/p/Cargo.lock")), "toml");
         assert_eq!(language_for(Path::new("/p/LICENSE")), "text");
     }
 }

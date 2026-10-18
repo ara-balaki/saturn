@@ -38,14 +38,7 @@ pub fn layers(layers: &[Shadow]) -> Vec<BoxShadow> {
 fn component_theme(appearance: Appearance) -> gpui_kit::component::ThemeConfig {
     use saturn_design::{color as c, font, radius};
 
-    // `#rrggbb`, as the theme config takes colours as strings.
-    let hex = |token: Token| {
-        let color = match appearance {
-            Appearance::Dark => token.dark,
-            Appearance::Light => token.light,
-        };
-        format!("#{:06x}", color.rgb)
-    };
+    let hex = |token: Token| hex(token, appearance);
     let colors = serde_json::json!({
         "background": hex(c::SURFACE),
         "foreground": hex(c::INK),
@@ -80,9 +73,6 @@ fn component_theme(appearance: Appearance) -> gpui_kit::component::ThemeConfig {
         "danger.background": hex(c::RED),
         "danger.foreground": hex(c::INK_ON_ACCENT),
     });
-    // The editor's colours, with the same restraint as the chrome: blue for keywords, green for
-    // strings, amber for literals, faint comments, and grey for everything else.
-    let style = |token: Token| serde_json::json!({ "color": hex(token) });
     let highlight = serde_json::json!({
         "editor.background": hex(c::SURFACE),
         "editor.foreground": hex(c::INK_BODY),
@@ -91,33 +81,7 @@ fn component_theme(appearance: Appearance) -> gpui_kit::component::ThemeConfig {
         "editor.active_line_number": hex(c::INK_MUTED),
         "editor.invisible": hex(c::LINE_STRONG),
         "editor.gutter.background": hex(c::SURFACE),
-        "syntax": {
-            "keyword": style(c::BLUE),
-            "tag": style(c::BLUE),
-            "link_uri": style(c::BLUE),
-            "string": style(c::TERM_GREEN),
-            "string.special": style(c::TERM_GREEN),
-            "string.escape": style(c::AMBER_TEXT),
-            "string.regex": style(c::AMBER_TEXT),
-            "number": style(c::AMBER_TEXT),
-            "boolean": style(c::AMBER_TEXT),
-            "constant": style(c::AMBER_TEXT),
-            "comment": style(c::INK_FAINT),
-            "comment_doc": style(c::INK_FAINT),
-            "function": style(c::INK),
-            "type": style(c::INK),
-            "constructor": style(c::INK),
-            "enum": style(c::INK),
-            "variant": style(c::INK),
-            "title": style(c::INK),
-            "property": style(c::INK_BODY),
-            "variable": style(c::INK_BODY),
-            "attribute": style(c::INK_MUTED),
-            "operator": style(c::INK_MUTED),
-            "punctuation": style(c::INK_MUTED),
-            "punctuation.bracket": style(c::INK_MUTED),
-            "punctuation.delimiter": style(c::INK_MUTED),
-        },
+        "syntax": syntax(appearance),
     });
     serde_json::from_value(serde_json::json!({
         "name": "Saturn",
@@ -133,6 +97,66 @@ fn component_theme(appearance: Appearance) -> gpui_kit::component::ThemeConfig {
         "highlight": highlight,
     }))
     .expect("Saturn's theme config is valid")
+}
+
+/// `#rrggbb` for `appearance`, as the theme config takes colours as strings.
+fn hex(token: Token, appearance: Appearance) -> String {
+    let color = match appearance {
+        Appearance::Dark => token.dark,
+        Appearance::Light => token.light,
+    };
+    format!("#{:06x}", color.rgb)
+}
+
+/// The editor's colours: the terminal's palette, used the way most editors use it (One Dark's
+/// roles), so code reads the same here as in the panes next to it. Keys and headings get colour
+/// too, since in YAML, JSON and Markdown that is most of the file. Bold only where the text
+/// itself is a heading or strong; JetBrains Mono ships no italic here.
+fn syntax(appearance: Appearance) -> serde_json::Value {
+    use saturn_design::color as c;
+
+    let style = |token: Token| serde_json::json!({ "color": hex(token, appearance) });
+    let bold = |token: Token| serde_json::json!({ "color": hex(token, appearance), "font_weight": 700 });
+    serde_json::json!({
+        "keyword": style(c::TERM_MAGENTA),
+        "preproc": style(c::TERM_MAGENTA),
+        "function": style(c::TERM_BLUE),
+        "constructor": style(c::TERM_BLUE),
+        "type": style(c::TERM_CYAN),
+        "enum": style(c::TERM_CYAN),
+        "variant": style(c::TERM_CYAN),
+        "label": style(c::TERM_CYAN),
+        "property": style(c::TERM_RED),
+        "tag": style(c::TERM_RED),
+        "variable": style(c::INK_BODY),
+        "variable.special": style(c::TERM_RED),
+        "attribute": style(c::AMBER_TEXT),
+        "string": style(c::TERM_GREEN),
+        "string.special": style(c::TERM_RED),
+        "string.special.symbol": style(c::TERM_CYAN),
+        "string.escape": style(c::TERM_CYAN),
+        "string.regex": style(c::TERM_CYAN),
+        "number": style(c::AMBER_TEXT),
+        "boolean": style(c::AMBER_TEXT),
+        "constant": style(c::AMBER_TEXT),
+        "comment": style(c::INK_FAINT),
+        "comment_doc": style(c::INK_FAINT),
+        "operator": style(c::TERM_CYAN),
+        "punctuation": style(c::INK_MUTED),
+        "punctuation.bracket": style(c::INK_MUTED),
+        "punctuation.delimiter": style(c::INK_MUTED),
+        "punctuation.special": style(c::INK_FAINT),
+        "punctuation.list_marker": style(c::AMBER_TEXT),
+        "embedded": style(c::INK_BODY),
+        // Markdown.
+        "title": bold(c::TERM_BLUE),
+        "emphasis": style(c::TERM_MAGENTA),
+        "emphasis.strong": bold(c::INK),
+        "link_text": style(c::TERM_BLUE),
+        "link_uri": style(c::TERM_CYAN),
+        "text.literal": style(c::TERM_GREEN),
+        "text.code.span": style(c::TERM_GREEN),
+    })
 }
 
 /// Draws the whole app as `setting` says: Saturn's tokens, the library's controls, and the window
