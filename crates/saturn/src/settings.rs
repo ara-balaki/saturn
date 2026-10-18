@@ -13,6 +13,8 @@ pub struct Settings {
     pub name_tabs_after_sessions: bool,
     /// A slash command whose first word is a ticket (`/start abc-224`) names the session after it.
     pub rename_sessions_from_commands: bool,
+    /// Saving a file runs the project's own formatter on it, when the project has one.
+    pub format_on_save: bool,
     pub appearance: AppearanceSetting,
 }
 
@@ -43,6 +45,7 @@ impl Default for Settings {
             last_project: None,
             name_tabs_after_sessions: true,
             rename_sessions_from_commands: true,
+            format_on_save: true,
             appearance: AppearanceSetting::System,
         }
     }

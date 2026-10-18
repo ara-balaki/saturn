@@ -90,5 +90,12 @@ pub fn open(workspace: WeakEntity<Workspace>, window: &mut Window, cx: &mut App)
                 settings.rename_sessions_from_commands,
                 change(workspace.clone(), |settings, on| settings.rename_sessions_from_commands = on),
             ))
+            .child(setting_row(
+                "format-on-save",
+                "Format on save",
+                "Saving a file runs the project's own formatter on it (oxfmt, Prettier, Biome or rustfmt), only when the project has a config for one and has it installed.",
+                settings.format_on_save,
+                change(workspace.clone(), |settings, on| settings.format_on_save = on),
+            ))
     });
 }

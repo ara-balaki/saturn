@@ -352,6 +352,12 @@ impl Workspace {
         })
     }
 
+    /// Saves the file in front, formatting it if the setting is on.
+    pub fn save_file(&mut self, cx: &mut Context<Self>) {
+        let (root, format) = (self.root.clone(), self.settings.format_on_save);
+        self.editor.update(cx, |editor, cx| editor.save(&root, format, cx));
+    }
+
     /// Shows the Changes tab and reviews its first file once the changes are read (spikes).
     pub fn review_first_change(&mut self, cx: &mut Context<Self>) {
         self.sidebar_tab = SidebarTab::Changes;
@@ -1130,7 +1136,7 @@ impl Render for Workspace {
             }))
             .on_action(cx.listener(|_, _: &OpenProject, window, cx| Self::open_project(window, cx)))
             .on_action(cx.listener(|_, _: &OpenSettings, window, cx| settings_view::open(cx.weak_entity(), window, cx)))
-            .on_action(cx.listener(|this, _: &SaveFile, _, cx| this.editor.update(cx, EditorView::save)))
+            .on_action(cx.listener(|this, _: &SaveFile, _, cx| this.save_file(cx)))
             .on_action(cx.listener(|this, _: &Copy, _, cx| {
                 if let Some(view) = this.focused_view() {
                     view.update(cx, |view, cx| view.copy_selection(cx));

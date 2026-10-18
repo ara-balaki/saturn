@@ -4,6 +4,7 @@
 
 pub mod agent_state;
 pub mod files;
+pub mod format;
 pub mod git;
 pub mod layout;
 pub mod program_status;

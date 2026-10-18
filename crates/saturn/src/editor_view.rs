@@ -11,6 +11,7 @@ use gpui_kit::{
     ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, Subscription, Window, div,
     prelude::FluentBuilder as _, px,
 };
+use saturn_core::format;
 use saturn_core::git::Scope;
 use saturn_design::{color, radius, space};
 
@@ -191,8 +192,9 @@ impl EditorView {
         }
     }
 
-    /// Writes the active file to disk.
-    pub fn save(&mut self, cx: &mut Context<Self>) {
+    /// Writes the active file to disk and, if `format` is on, runs the project's formatter on it.
+    /// The formatted text comes back through the file watcher, like any change on disk.
+    pub fn save(&mut self, root: &Path, format: bool, cx: &mut Context<Self>) {
         if self.showing_review {
             return;
         }
@@ -203,10 +205,45 @@ impl EditorView {
                 file.saved = text;
                 file.changed_on_disk = false;
                 self.problem = None;
+                if let Some(formatter) = format.then(|| format::formatter_for(&file.path, root)).flatten() {
+                    Self::run_formatter(formatter, cx);
+                }
             }
             Err(error) => self.problem = Some(format!("Could not save {}: {error}", file.name())),
         }
         cx.notify();
+    }
+
+    /// Runs a formatter off the main thread; a failure shows in the strip with its first line.
+    fn run_formatter(formatter: format::Formatter, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let name = formatter.name;
+            let outcome = cx
+                .background_spawn(async move {
+                    std::process::Command::new(&formatter.program)
+                        .args(&formatter.args)
+                        .current_dir(&formatter.dir)
+                        .output()
+                })
+                .await;
+            let problem = match outcome {
+                Ok(output) if output.status.success() => None,
+                Ok(output) => {
+                    let errors = String::from_utf8_lossy(&output.stderr);
+                    let first =
+                        errors.lines().find(|line| !line.trim().is_empty()).unwrap_or("it exited with an error");
+                    Some(format!("{name}: {}", first.trim()))
+                }
+                Err(error) => Some(format!("{name} could not run: {error}")),
+            };
+            if problem.is_some() {
+                let _ = this.update(cx, |this, cx| {
+                    this.problem = problem;
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
     }
 
     fn close(&mut self, index: usize, cx: &mut Context<Self>) {
