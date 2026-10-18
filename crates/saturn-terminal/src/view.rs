@@ -57,6 +57,8 @@ pub struct TerminalView {
     pub state: AgentState,
     /// Claude's current activity or question (OSC 7501 `msg`).
     pub message: Option<String>,
+    /// How far Claude says it is, 0–100 (OSC 7501 `progress`), when it says.
+    pub progress: Option<u8>,
     pub cwd: PathBuf,
     /// Claude reports its state itself (OSC 7501); hook-based state is then ignored.
     has_program_status: bool,
@@ -108,6 +110,7 @@ impl TerminalView {
             title: None,
             state: AgentState::Shell,
             message: None,
+            progress: None,
             cwd: cwd.to_owned(),
             has_program_status: false,
             scroll_remainder: 0.0,
@@ -138,6 +141,7 @@ impl TerminalView {
                     self.has_program_status = true;
                     self.state = AgentState::from_program_status(&status);
                     self.message = status.msg;
+                    self.progress = status.progress;
                     cx.emit(TerminalViewEvent::StateChanged);
                 }
                 TerminalEvent::Cwd(path) => {

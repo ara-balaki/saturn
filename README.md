@@ -30,6 +30,9 @@ It isn't an IDE and doesn't try to replace yours. It's the place the agents live
   waiting for you, or failed. The title bar counts them, ⌘⇧A jumps to the next one that needs you,
   and macOS notifies you when Saturn is in the background. A small Saturn in the menu bar shows how
   many are waiting, even while Saturn is hidden.
+- **An overview of every agent.** The sidebar's Agents tab has a tile per agent: its step, how much
+  context it holds, what it's doing, and its progress. The one you're looking at gets the
+  colourful card. Click a tile to jump to its pane.
 - **Several repos in one window.** ⌘O adds a repo to the sidebar; agents from different repos sit
   side by side in one grid, and new tabs open in the repo you've selected.
 - **Tabs named after the session.** A tab takes the name of the Claude session running in it, or

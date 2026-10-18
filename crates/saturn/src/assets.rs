@@ -23,6 +23,8 @@ const ICONS: &[(&str, &[u8])] = &[
     ("icons/git-pull-request-draft.svg", include_bytes!("../assets/icons/git-pull-request-draft.svg")),
     ("icons/git-pull-request-closed.svg", include_bytes!("../assets/icons/git-pull-request-closed.svg")),
     ("icons/git-merge.svg", include_bytes!("../assets/icons/git-merge.svg")),
+    ("icons/bot.svg", include_bytes!("../assets/icons/bot.svg")),
+    ("icons/chart-no-axes-column.svg", include_bytes!("../assets/icons/chart-no-axes-column.svg")),
 ];
 
 pub struct Assets;
