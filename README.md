@@ -24,48 +24,54 @@ It isn't an IDE and doesn't try to replace yours. It's the place the agents live
 ## What it does
 
 - **A grid of terminals.** Split right (⌘D) and down (⌘⇧D), or drag a tab onto a pane's edge to
-  split it there; tabs in every pane, drag the dividers,
-  maximise one pane (⌘⇧↩). A real terminal underneath (alacritty's engine), so TUIs, colours and
-  mouse work as they should.
-- **Agents that tell you how they're doing.** Each tab shows whether its agent is working, idle,
-  waiting for you, or failed. The title bar counts them, ⌘⇧A jumps to the next one that needs you,
-  and macOS notifies you when Saturn is in the background. A small Saturn in the menu bar shows how
-  many are waiting, even while Saturn is hidden.
+  split it there. Tabs in every pane, dividers you drag, one pane maximised with ⌘⇧↩. A real
+  terminal underneath (alacritty's engine), so TUIs, colours and the mouse work as they should.
+- **Agents that tell you how they're doing.** Each tab shows whether its agent is working, waiting
+  for you, done, or failed, and an agent that needs you rings its pane in orange. The title bar
+  counts them, ⌘⇧A jumps to the next one that needs you, macOS notifies you while Saturn is in the
+  background, and a small Saturn in the menu bar shows how many are waiting even while it's hidden.
 - **The focused agent at a glance.** The bottom of the sidebar shows the agent in the pane you're
-  in: its step, how much context it holds, what it's doing, and its progress.
-- **Several repos in one window.** ⌘O adds a repo to the sidebar; agents from different repos sit
-  side by side in one grid, and new tabs open in the repo you've selected.
-- **Tabs named after the session.** A tab takes the name of the Claude session running in it, or
-  one you type.
+  in: its step, how much context it holds, and its progress.
+- **Several repos in one window.** Repos sit as tabs in the title bar (⌘O adds one); agents from
+  different repos share one grid, and new tabs open in the repo you've selected.
 - **Files and a light editor.** A gitignore-aware file tree with git badges, and an editor with
-  syntax highlighting for about 60 languages that saves with your project's own formatter (Prettier, Biome, oxfmt or
-  rustfmt, whichever the project uses). Files an agent changes reload by themselves; if you have
+  syntax highlighting for about 60 languages that saves with your project's own formatter
+  (Prettier, Biome, oxfmt or rustfmt). Files an agent changes reload by themselves; if you have
   unsaved edits, Saturn asks first.
-- **Language servers.** TypeScript and JavaScript, Rust, Python and Go files get completions,
-  hover, go to definition (⌘-click), quick fixes, Find references and Rename across files (⌘.),
-  errors underlined as you type and listed in Problems, from the server your project already uses. For TypeScript, Saturn installs one with a
-  click when there's none (the project's own TypeScript when it has one, else TypeScript 7).
-- **Review what changed.** The Changes tab lists every changed file, with a diff for each, for your
-  uncommitted work or for the whole branch. History shows every branch as a graph, with tags,
-  authors and dates; click a commit to see its diff.
-- **See what a change reaches.** Impact follows imports in JavaScript and TypeScript (relative
-  paths, `tsconfig` aliases, a monorepo's own packages), Rust (modules and the workspace's crates)
-  and Python to every file that depends on what changed,
-  nearest first, grouped by folder. Click a file to see what it uses and what uses it.
-- **A diagram of the database.** When a project has a Prisma schema or SQL migrations, the
-  database button draws every table with its columns and keys, and a line for each foreign key,
-  grouped by schema file (or by name prefix). Pinch to zoom, scroll or drag to pan, search by
-  name, click a table to see what it's connected to, double-click to zoom to it. A pane whose branch has a pull request shows its number
-  and state, from the `gh` CLI.
+- **Language servers.** TypeScript and JavaScript, Rust, Python and Go get completions, hover, go
+  to definition (⌘-click), quick fixes, Find references and Rename across files (⌘.), and errors
+  underlined as you type and listed in Problems, from the server your project already uses. For
+  TypeScript, Saturn installs one with a click when there's none.
+- **Review what changed.** The Changes tab lists every changed file with checkboxes to stage them,
+  for your uncommitted work or the whole branch, with a diff for each. History draws every branch
+  as a graph, with tags, authors and dates; click a commit to see its diff.
+- **See what a change reaches.** Impact follows imports (JavaScript and TypeScript with `tsconfig`
+  aliases and a monorepo's own packages, Rust modules and crates, Python packages) to every file
+  that depends on what changed, nearest first, grouped by folder. Click a file to see what it uses
+  and what uses it.
+- **A diagram of the database.** From a Prisma schema or SQL migrations: every table with its
+  columns and keys, a line for each foreign key, grouped by schema file. Pinch to zoom, search,
+  click a table to see what it's connected to.
+- **Pull requests on the panes.** A pane whose branch has a pull request shows its number and
+  state, from the `gh` CLI.
 - **Follows the agent you're looking at.** Focus a pane that works in another git worktree, and the
   sidebar switches to that worktree.
-- **Opens where you left off.** The window's repos and grid come back as they were, and Saturn offers to
-  resume the Claude sessions that were running: the resume command is typed for you, never run.
-- **Glass, light and dark.** Panes are frosted glass over your desktop. It follows macOS's
-  appearance, or you pick one.
+- **Opens where you left off.** The window's repos and grid come back as they were, and Saturn
+  offers to resume the Claude sessions that were running: the resume command is typed for you,
+  never run.
+- **Glass, light and dark.** The title bar and sidebar are macOS's frosted glass over your desktop;
+  panes are cards on it. It follows macOS's appearance, or you pick one. Every button says what it
+  does, and its shortcut, when you hover it.
 - **Optional: tickets from ClickUp.** Connect a token and ⌘⇧T lists the tickets assigned to you.
   Pick one, and Saturn opens a pane (in its own worktree if you like) and starts your agent on it.
   If you don't connect anything, none of this shows up.
+
+## A closer look
+
+|                                                                                                                                   |                                                                                                                                         |
+| --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| ![History: every branch as a graph](docs/images/history.png) **History**: every branch as a graph; click a commit for its diff.   | ![Impact: what the uncommitted changes reach](docs/images/impact.png) **Impact**: what your changes reach, nearest first.               |
+| ![The database diagram, grouped by schema file](docs/images/database.png) **Database**: the schema as a diagram, grouped by file. | ![A type error underlined in the editor](docs/images/language-servers.png) **Language servers**: errors as you type, and the rest on ⌘. |
 
 ## Install
 
@@ -99,6 +105,8 @@ The app is signed for your own Mac only, so it isn't notarised for sharing. Rust
 | ⌘B / ⌘J     | Toggle the sidebar / the editor        |
 | ⌘O          | Add a repo                             |
 | ⌘S          | Save the open file                     |
+| ⌘-click     | Go to definition                       |
+| ⌘.          | Quick fixes, Find references, Rename   |
 | ⌘,          | Settings                               |
 | ⌘⇧T         | New agent from a ticket (with ClickUp) |
 
@@ -140,9 +148,9 @@ Node is only used for commit hooks and for formatting Markdown and JSON. Commits
 
 | Crate                    | What it holds                                                                |
 | ------------------------ | ---------------------------------------------------------------------------- |
-| `crates/saturn`          | The app: window, title bar, grid, sidebar, editor, settings                  |
+| `crates/saturn`          | The app: window, title bar, grid, sidebar, editor, views, settings           |
 | `crates/saturn-terminal` | Shells in ptys, alacritty's engine, Claude Code's signals, the terminal view |
-| `crates/saturn-core`     | Logic without UI: grid layout, agent states, files, git, formatters, tickets |
+| `crates/saturn-core`     | Logic without UI: layout, agents, git, imports, schemas, the LSP client      |
 | `crates/saturn-design`   | Design tokens compiled from [`design/tokens.json`](design/tokens.json)       |
 | `crates/saturn-bridge`   | Where the plugin's hooks reach Saturn: a small HTTP server on a Unix socket  |
 

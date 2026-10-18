@@ -621,7 +621,7 @@ impl Workspace {
 
     /// Shows `project` in the sidebar and makes it where new tabs open. Choosing a repo by hand
     /// stops the sidebar following panes, so the choice sticks.
-    fn select_project(&mut self, project: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn select_project(&mut self, project: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         self.follow_pane = false;
         self.project = project;
         if !self.roots.contains_key(&self.project) {
@@ -841,6 +841,11 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Makes the editor panel take the grid's room (spikes).
+    pub fn maximize_editor(&mut self, cx: &mut Context<Self>) {
+        self.editor.update(cx, EditorView::maximize);
+    }
+
     /// Lists the language servers' errors and warnings (spikes).
     pub fn show_problems(&mut self, cx: &mut Context<Self>) {
         self.editor.update(cx, EditorView::show_problems);
@@ -866,7 +871,10 @@ impl Workspace {
     /// Opens the History tab for the folder the sidebar shows (for spikes and screenshots).
     pub fn show_history(&mut self, cx: &mut Context<Self>) {
         let root = self.root.clone();
-        self.editor.update(cx, |editor, cx| editor.show_history(&root, cx));
+        self.editor.update(cx, |editor, cx| {
+            editor.show_history(&root, cx);
+            editor.maximize(cx);
+        });
         self.editor_open = true;
         cx.notify();
     }

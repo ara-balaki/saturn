@@ -106,6 +106,9 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
         for path in std::env::split_paths(&paths) {
             cx.defer_in(window, move |workspace, window, cx| workspace.add_project(path, window, cx));
         }
+        // The first repo stays selected, as if the others were added earlier.
+        let first = workspace.project_path().to_owned();
+        cx.defer_in(window, move |workspace, window, cx| workspace.select_project(first, window, cx));
     }
     if let Some((line, character)) =
         std::env::var("SATURN_LSP_PROBE").ok().and_then(|at| at.split_once(':').map(|(l, c)| (l.parse(), c.parse())))
@@ -118,6 +121,9 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
                 workspace.update_in(cx, |workspace, window, cx| workspace.probe_language(line, character, window, cx));
         })
         .detach();
+    }
+    if std::env::var_os("SATURN_MAXIMIZE_EDITOR").is_some() {
+        cx.defer_in(window, |workspace, _, cx| workspace.maximize_editor(cx));
     }
     if std::env::var_os("SATURN_PROBLEMS").is_some() {
         // Once the opened file's server has reported.
@@ -151,6 +157,9 @@ fn capture<T: 'static>(window: &mut Window, cx: &mut Context<T>) {
     let handle = window.window_handle();
     cx.spawn(async move |_, cx| {
         cx.background_executor().timer(Duration::from_secs(after)).await;
+        // macOS stops sending frames to a window it considers hidden, so draw one now: what
+        // arrived late (a shell's output, a server's answer) is then in the picture.
+        let _ = handle.update(cx, |_, window, cx| window.draw(cx).clear(cx));
         let _ = handle.update(cx, |_, window, _| match window.render_to_image() {
             Ok(image) => match image.save(&path) {
                 Ok(()) => eprintln!("screenshot: {path}"),
