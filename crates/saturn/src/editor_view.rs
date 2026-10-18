@@ -380,6 +380,12 @@ impl EditorView {
                 else {
                     return;
                 };
+                // Least severe first, so where an error and a hint cover the same words, the
+                // error's underline is the one drawn on top.
+                let mut diagnostics = diagnostics;
+                diagnostics.sort_by_key(|diagnostic| {
+                    std::cmp::Reverse(diagnostic.severity.unwrap_or(lsp_types::DiagnosticSeverity::ERROR))
+                });
                 file.state.update(cx, |state, cx| {
                     let text = state.text().clone();
                     if let Some(set) = state.diagnostics_mut() {
