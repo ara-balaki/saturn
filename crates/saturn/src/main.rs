@@ -8,6 +8,7 @@ mod clickup;
 mod dock;
 mod editor_view;
 mod files_view;
+mod github;
 mod languages;
 mod notify;
 mod session;

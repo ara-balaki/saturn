@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::resizable::{h_resizable, resizable_panel, v_resizable};
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, AppContext as _, ClickEvent, Context, CursorStyle, DragMoveEvent, Entity,
     FocusHandle, Focusable as _, FontWeight, Hsla, InteractiveElement as _, IntoElement, MouseButton,
@@ -17,6 +18,7 @@ use saturn_core::agent_state::{AgentState, tab_title};
 use saturn_core::clickup::Ticket;
 use saturn_core::git;
 use saturn_core::layout::{Cell, CellId, Direction, Layout, RowId, TabId};
+use saturn_core::pull_request::{PrState, PullRequest};
 use saturn_core::session_name::rename_for_prompt;
 use saturn_design::{color, radius, shadow, space};
 use saturn_terminal::view::{TerminalView, TerminalViewEvent};
@@ -29,7 +31,7 @@ use crate::files_view::{FilesEvent, FilesView};
 use crate::session::{self, SavedGrid, SavedTab};
 use crate::settings::{self, AppearanceSetting, Settings};
 use crate::theme::{self, len};
-use crate::{dock, notify, settings_view, ticket_picker};
+use crate::{dock, github, notify, settings_view, ticket_picker};
 
 actions!(
     saturn,
@@ -158,6 +160,28 @@ pub struct Workspace {
     claude_sessions: HashMap<TabId, String>,
     /// ClickUp, when a token is set; nothing about it shows otherwise.
     clickup: ClickUpState,
+    /// The repository and branch each tab is in, read in the background.
+    checkouts: HashMap<TabId, Checkout>,
+    /// The pull request of each branch a tab is on, from `gh`.
+    pull_requests: HashMap<Checkout, PullRequest>,
+    /// Whether the two above are being read, so refreshes don't pile up.
+    checkout_refresh: Refresh,
+}
+
+/// A background refresh: not running, running, or running with another asked for meanwhile (a new
+/// tab, a folder change), to run once it's done.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Refresh {
+    Idle,
+    Running,
+    RunningStale,
+}
+
+/// A branch checked out in a repository (or worktree), named by its top folder.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct Checkout {
+    root: PathBuf,
+    branch: String,
 }
 
 /// The ClickUp connection as the window knows it.
@@ -218,6 +242,38 @@ fn start_bridge() -> Option<(Bridge, async_channel::Receiver<HookCall>)> {
             None
         }
     }
+}
+
+/// A pane's pull request: its number in the colour of its state, opening it on GitHub.
+fn pull_request_chip(cell: CellId, pr: &PullRequest) -> impl IntoElement {
+    let (icon, state_color) = match pr.state {
+        PrState::Open => ("git-pull-request", color::TERM_GREEN),
+        PrState::Draft => ("git-pull-request-draft", color::INK_FAINT),
+        PrState::Merged => ("git-merge", color::TERM_MAGENTA),
+        PrState::Closed => ("git-pull-request-closed", color::RED),
+    };
+    let url = pr.url.clone();
+    let tip = format!("{} · {}", pr.state.label(), pr.title);
+    div()
+        .id(("pr-chip", cell.key()))
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(len(space::SPACE_1))
+        .h(len(TAB_HEIGHT))
+        .px(len(space::SPACE_2))
+        .rounded(len(radius::RADIUS_SM))
+        .cursor_pointer()
+        .text_size(px(12.))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(theme::color(color::INK_MUTED))
+        .hover(|s| s.bg(theme::color(color::CONTROL)))
+        .child(chrome::icon(icon, 14., theme::color(state_color)))
+        .child(format!("#{}", pr.number))
+        .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+        .on_click(move |_, _, _| {
+            let _ = std::process::Command::new("open").arg(&url).spawn();
+        })
 }
 
 fn state_color(state: AgentState) -> Hsla {
@@ -296,6 +352,17 @@ impl Workspace {
             }
         })
         .detach();
+        // Branches change inside panes without telling Saturn, and pull requests change on GitHub;
+        // a minute is fresh enough and far under GitHub's rate limit.
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(60)).await;
+                if this.update(cx, Workspace::refresh_checkouts).is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
         // Pane sizes change by dragging, which saves nothing on its own; quitting saves them.
         cx.on_app_quit(|this, cx| {
             this.save_session(cx);
@@ -325,6 +392,9 @@ impl Workspace {
             sidebar_tab: SidebarTab::Files,
             claude_sessions: HashMap::new(),
             clickup: ClickUpState::default(),
+            checkouts: HashMap::new(),
+            pull_requests: HashMap::new(),
+            checkout_refresh: Refresh::Idle,
             roots,
             root: project.clone(),
             follow_pane: true,
@@ -513,6 +583,55 @@ impl Workspace {
         self.after_layout_change(window, cx);
     }
 
+    /// Reads the branch each tab is on and the pull request of each branch, off the main thread.
+    pub fn refresh_checkouts(&mut self, cx: &mut Context<Self>) {
+        if self.checkout_refresh != Refresh::Idle {
+            self.checkout_refresh = Refresh::RunningStale;
+            return;
+        }
+        self.checkout_refresh = Refresh::Running;
+        let dirs: Vec<(TabId, PathBuf)> =
+            self.terminals.iter().map(|(tab, view)| (*tab, view.read(cx).cwd.clone())).collect();
+        cx.spawn(async move |this, cx| {
+            let (checkouts, pull_requests) = cx
+                .background_spawn(async move {
+                    let checkouts: HashMap<TabId, Checkout> = dirs
+                        .into_iter()
+                        .filter_map(|(tab, dir)| {
+                            let root = git::toplevel(&dir)?;
+                            let branch = git::branch(&root)?;
+                            Some((tab, Checkout { root, branch }))
+                        })
+                        .collect();
+                    let unique: HashSet<&Checkout> = checkouts.values().collect();
+                    let pull_requests: HashMap<Checkout, PullRequest> = unique
+                        .into_iter()
+                        .filter_map(|checkout| {
+                            github::pull_request(&checkout.root, &checkout.branch).map(|pr| (checkout.clone(), pr))
+                        })
+                        .collect();
+                    (checkouts, pull_requests)
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                let stale = this.checkout_refresh == Refresh::RunningStale;
+                this.checkout_refresh = Refresh::Idle;
+                this.checkouts = checkouts;
+                this.pull_requests = pull_requests;
+                cx.notify();
+                if stale {
+                    this.refresh_checkouts(cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// The pull request for the branch a tab is on.
+    fn pull_request_of(&self, tab: TabId) -> Option<&PullRequest> {
+        self.pull_requests.get(self.checkouts.get(&tab)?)
+    }
+
     /// The ticket a tab works on: a ticket whose key is the tab's name, its Claude session's name
     /// or its branch.
     pub fn ticket_of(&self, tab: TabId, cx: &gpui_kit::App) -> Option<&Ticket> {
@@ -524,7 +643,7 @@ impl Workspace {
         names.extend(self.names.get(&tab).cloned());
         names.extend(self.session_names.get(&tab).cloned());
         names.extend(view.title.clone());
-        names.extend(git::branch(&view.cwd));
+        names.extend(self.checkouts.get(&tab).map(|checkout| checkout.branch.clone()));
         self.clickup.tickets.iter().find(|ticket| {
             let key = ticket.key().to_lowercase();
             names.iter().any(|name| {
@@ -688,6 +807,7 @@ impl Workspace {
         })
         .detach();
         self.terminals.insert(tab, view);
+        self.refresh_checkouts(cx);
         Some(tab)
     }
 
@@ -779,6 +899,7 @@ impl Workspace {
                 if self.layout.focused_tab() == Some(tab) {
                     self.sync_root(window, cx);
                 }
+                self.refresh_checkouts(cx);
                 self.save_session(cx);
             }
         }
@@ -805,6 +926,7 @@ impl Workspace {
         self.terminals.remove(&tab);
         self.unseen.remove(&tab);
         self.names.remove(&tab);
+        self.checkouts.remove(&tab);
         self.layout.remove_tab(tab);
         self.after_layout_change(window, cx);
     }
@@ -1083,6 +1205,7 @@ impl Workspace {
                                 let _ = std::process::Command::new("open").arg(&url).spawn();
                             })
                     }))
+                    .children(self.pull_request_of(cell.active).map(|pr| pull_request_chip(cell_id, pr)))
                     .child(header_button("split-right", "columns-2", Placement::Right, cx))
                     .child(header_button("split-down", "rows-2", Placement::Down, cx))
                     .child(header_button("new-tab", "plus", Placement::Tab, cx)),

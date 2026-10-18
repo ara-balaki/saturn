@@ -9,5 +9,6 @@ pub mod format;
 pub mod git;
 pub mod layout;
 pub mod program_status;
+pub mod pull_request;
 pub mod session_name;
 pub mod shell_env;
