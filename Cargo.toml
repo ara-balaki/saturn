@@ -53,3 +53,5 @@ debug = "line-tables-only"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+# Symbols are only for debugging; a release build ships without them.
+strip = "symbols"

@@ -5920,7 +5920,6 @@ dependencies = [
  "tree-sitter-elm",
  "tree-sitter-erlang",
  "tree-sitter-fish",
- "tree-sitter-fsharp",
  "tree-sitter-gleam",
  "tree-sitter-glsl",
  "tree-sitter-haskell",
@@ -5928,7 +5927,6 @@ dependencies = [
  "tree-sitter-javascript",
  "tree-sitter-nix",
  "tree-sitter-objc",
- "tree-sitter-ocaml",
  "tree-sitter-powershell",
  "tree-sitter-prisma",
  "tree-sitter-r",
@@ -7214,16 +7212,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tree-sitter-fsharp"
-version = "0.3.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87affbae0d85926cebaa1abb18660904540708ab2c9ed7547f4809e6188125db"
-dependencies = [
- "cc",
- "tree-sitter-language",
-]
-
-[[package]]
 name = "tree-sitter-gleam"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7394,16 +7382,6 @@ name = "tree-sitter-objc"
 version = "3.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ca8bb556423fc176f0535e79d525f783a6684d3c9da81bf9d905303c129e1d2"
-dependencies = [
- "cc",
- "tree-sitter-language",
-]
-
-[[package]]
-name = "tree-sitter-ocaml"
-version = "0.26.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43adb10fcccbcbbce0f4adc9dab7cd55f0a5eafc2d71bd4c03fcc5d6767066e0"
 dependencies = [
  "cc",
  "tree-sitter-language",
