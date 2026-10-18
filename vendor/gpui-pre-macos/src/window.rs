@@ -3821,10 +3821,36 @@ extern "C" fn blurred_view_init_with_frame(this: &Object, _: Sel, frame: NSRect)
 extern "C" fn blurred_view_update_layer(this: &Object, _: Sel) {
     unsafe {
         let _: () = msg_send![super(this, class!(NSVisualEffectView)), updateLayer];
-        // Saturn's patch: keep the material whole. Its fill, brightness clamp, desktop tint and
-        // saturation are what make the blur read as macOS's frosted glass rather than grey fog;
-        // Saturn draws its chrome clear over it, as AppKit apps do over a sidebar material.
-        let _ = this;
+        // Saturn's patch: keep the material whole (its brightness clamp, desktop tint and
+        // saturation are what make the blur read as macOS's frosted glass rather than grey fog),
+        // but thin its fill, so more of what's behind the window shows through. Set, not
+        // multiplied, so each update lands on the same value.
+        let layer: id = msg_send![this, layer];
+        if !layer.is_null() {
+            soften_fill(layer);
+        }
+    }
+}
+
+/// How much of the material's own fill stays: 1.0 is AppKit's sidebar, 0.0 a bare blur.
+const MATERIAL_FILL: f32 = 0.6;
+
+/// Saturn's patch: turns the material's fill layers (those with a background colour, other than
+/// the backdrop that blurs) down to `MATERIAL_FILL`.
+unsafe fn soften_fill(layer: id) {
+    unsafe {
+        let class_name: id = msg_send![layer, className];
+        let backdrop = class_name.isEqualToString("CABackdropLayer");
+        let colour: id = msg_send![layer, backgroundColor];
+        if !backdrop && !colour.is_null() {
+            let _: () = msg_send![layer, setOpacity: MATERIAL_FILL];
+        }
+        let sublayers: id = msg_send![layer, sublayers];
+        if !sublayers.is_null() {
+            for i in 0..NSArray::count(sublayers) {
+                soften_fill(sublayers.objectAtIndex(i));
+            }
+        }
     }
 }
 
