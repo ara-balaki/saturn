@@ -1,0 +1,433 @@
+/* Saturn components. Every value comes from tokens.css; the one composite is the brand gradient. */
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  --sat-gradient: linear-gradient(
+    135deg,
+    var(--orange) 0%,
+    var(--purple) 58%,
+    var(--purple-deep) 100%
+  );
+}
+
+.sat-root {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 20px;
+  -webkit-font-smoothing: antialiased;
+}
+.sat-root *,
+.sat-root *::before,
+.sat-root *::after {
+  box-sizing: border-box;
+}
+.sat-root svg {
+  display: block;
+}
+
+/* Icon tile: the rounded square every icon sits in. */
+.sat-icon-tile {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--control);
+  color: var(--ink);
+  cursor: pointer;
+}
+.sat-icon-tile:hover {
+  background: var(--control-hover);
+}
+.sat-icon-tile:focus-visible {
+  outline: 2px solid var(--purple-text);
+  outline-offset: 2px;
+}
+.sat-icon-tile svg {
+  width: 16px;
+  height: 16px;
+}
+.sat-icon-tile--sm {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+}
+.sat-icon-tile--sm svg {
+  width: 13px;
+  height: 13px;
+}
+.sat-icon-tile--gradient {
+  background: var(--sat-gradient);
+}
+.sat-icon-tile--accent {
+  background: var(--purple);
+}
+.sat-icon-tile--outline {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+/* Buttons. */
+.sat-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 30px;
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-md);
+  font: 500 12px/16px var(--font-sans);
+  color: var(--ink);
+  background: var(--control);
+  cursor: pointer;
+}
+.sat-button:hover {
+  background: var(--control-hover);
+}
+.sat-button:focus-visible {
+  outline: 2px solid var(--purple-text);
+  outline-offset: 2px;
+}
+.sat-button--primary {
+  background: var(--purple);
+}
+.sat-button--primary:hover {
+  background: var(--purple-deep);
+}
+.sat-button--ghost {
+  background: transparent;
+  color: var(--ink-muted);
+}
+.sat-button--ghost:hover {
+  background: var(--control);
+  color: var(--ink);
+}
+.sat-button kbd {
+  font: 500 11px/14px var(--font-sans);
+  color: var(--ink-muted);
+}
+
+/* Segmented pills: the selected one is solid white. */
+.sat-pills {
+  display: inline-flex;
+  gap: var(--space-1);
+  padding: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+}
+.sat-pill {
+  height: 26px;
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-pill);
+  font: 500 12px/16px var(--font-sans);
+  color: var(--ink-muted);
+  background: transparent;
+  cursor: pointer;
+}
+.sat-pill:hover {
+  color: var(--ink);
+}
+.sat-pill[aria-selected='true'] {
+  background: var(--ink);
+  color: var(--ink-inverse);
+}
+
+/* Chips and count badges. */
+.sat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 20px;
+  padding: 0 7px;
+  border-radius: var(--radius-sm);
+  font: 600 11px/14px var(--font-sans);
+  white-space: nowrap;
+  background: var(--control);
+  color: var(--ink);
+}
+.sat-chip--yellow {
+  background: var(--yellow);
+  color: var(--ink-inverse);
+}
+.sat-chip--orange {
+  background: var(--orange);
+  color: var(--ink-inverse);
+}
+.sat-chip--purple {
+  background: var(--purple);
+  color: var(--ink);
+}
+.sat-chip--outline {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--ink-muted);
+}
+.sat-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  font: 500 11px/14px var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.sat-count--yellow {
+  background: var(--yellow);
+  box-shadow: none;
+  color: var(--ink-inverse);
+}
+
+/* Agent status: a dot and a word, never colour alone. */
+.sat-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 500 12px/16px var(--font-sans);
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+.sat-status__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--status-idle);
+  flex: none;
+}
+.sat-status[data-state='working'] .sat-status__dot {
+  background: var(--status-working);
+  animation: sat-pulse 1.4s ease-in-out infinite;
+}
+.sat-status[data-state='needs-you'] {
+  color: var(--status-needs-you);
+}
+.sat-status[data-state='needs-you'] .sat-status__dot {
+  background: var(--status-needs-you);
+  box-shadow: 0 0 0 3px rgba(255, 239, 99, 0.18);
+}
+.sat-status[data-state='your-turn'] {
+  color: var(--status-your-turn);
+}
+.sat-status[data-state='your-turn'] .sat-status__dot {
+  background: var(--status-your-turn);
+}
+.sat-status[data-state='error'] {
+  color: var(--status-error);
+}
+.sat-status[data-state='error'] .sat-status__dot {
+  background: var(--status-error);
+}
+@keyframes sat-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sat-status__dot {
+    animation: none !important;
+  }
+}
+
+/* Context meter: the brand's segmented gradient bar. Filled segments get their colour inline. */
+.sat-meter {
+  display: inline-flex;
+  gap: 2px;
+  align-items: stretch;
+  height: 10px;
+}
+.sat-meter__seg {
+  width: 3px;
+  border-radius: 2px;
+  background: var(--control);
+}
+
+/* Panels and terminal panes. */
+.sat-panel {
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.sat-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow: hidden;
+  transition: box-shadow 160ms ease;
+}
+.sat-pane.is-focused {
+  box-shadow: var(--glow-focus);
+}
+.sat-pane[data-attention='your-turn'] {
+  box-shadow: var(--glow-your-turn);
+}
+.sat-pane[data-attention='needs-you'] {
+  box-shadow: var(--glow-needs-you);
+}
+.sat-pane__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 34px;
+  padding: 0 var(--space-2) 0 var(--space-1);
+  background: var(--surface-raised);
+}
+.sat-pane__body {
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-3) var(--space-4);
+  font: 400 12px/15px var(--font-mono);
+  color: var(--term-white);
+  overflow: hidden;
+}
+.sat-pane__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  height: 26px;
+  padding: 0 var(--space-4);
+  border-top: 1px solid var(--line);
+  font: 400 11px/14px var(--font-sans);
+  color: var(--ink-muted);
+}
+.sat-pane__msg {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Tabs inside a pane. */
+.sat-tabs {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+}
+.sat-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  max-width: 180px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  font: 600 12px/16px var(--font-sans);
+  color: var(--ink-muted);
+  background: transparent;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.sat-tab:hover {
+  color: var(--ink);
+  background: var(--control);
+}
+.sat-tab[aria-selected='true'] {
+  color: var(--ink);
+  background: var(--control);
+}
+.sat-tab__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sat-tab[data-attention='needs-you'] {
+  color: var(--ink-inverse);
+  background: var(--yellow);
+}
+.sat-tab[data-attention='needs-you'] .sat-status__dot {
+  background: var(--ink-inverse);
+}
+
+/* Sidebar rows: file tree and git changes. */
+.sat-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 26px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--ink-muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.sat-row:hover {
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+.sat-row[aria-selected='true'] {
+  background: var(--control);
+  color: var(--ink);
+}
+.sat-row__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sat-row__git {
+  font: 600 11px/14px var(--font-mono);
+}
+.sat-row__git--m {
+  color: var(--orange);
+}
+.sat-row__git--a {
+  color: var(--term-green);
+}
+.sat-row svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+/* Dot matrix: the brand's halftone, for empty and drop states. */
+.sat-dots {
+  background-image: radial-gradient(var(--line-strong) 1.3px, transparent 1.7px);
+  background-size: 9px 9px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 30%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 30%, transparent 100%);
+}
+
+/* Dashed guide: the brand's dashed hairline, for drop targets and split previews. */
+.sat-guide {
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-lg);
+}
+
+/* Editor syntax colours. */
+.sat-code {
+  font: 400 12px/20px var(--font-mono);
+  color: var(--term-white);
+}
+.sat-code .k {
+  color: var(--purple-text);
+}
+.sat-code .s {
+  color: var(--term-green);
+}
+.sat-code .n {
+  color: var(--orange);
+}
+.sat-code .c {
+  color: var(--ink-faint);
+}
+.sat-code .ln {
+  display: inline-block;
+  width: 28px;
+  color: var(--ink-faint);
+  text-align: right;
+  margin-right: 14px;
+}
