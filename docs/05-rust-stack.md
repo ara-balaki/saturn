@@ -1,0 +1,193 @@
+# The Rust stack
+
+Decided 2026-10-18: Saturn is built entirely in native Rust, UI included. Electron and VS Code
+extensions are dropped. This document records what was researched (four parallel research tracks,
+crates.io and GitHub checked the same day) and what was chosen. It replaces the Electron sections
+(§3, §6, §7, §11, §13) of [02-proposal.md](02-proposal.md); the product, the features, the design
+system and the Claude Code findings all stay.
+
+## Summary
+
+| Need                                | Choice                                                                                | Version                                                                      |
+| ----------------------------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| UI framework                        | **GPUI**, through Longbridge's **gpui-kit**                                           | `gpui-kit` 0.7.3 = `gpui-pre` 0.3.9 + `gpui-component` 0.7.3, pinned exactly |
+| Components                          | gpui-component: dock, tabs, tree, editor, diff, lists, theming                        | same                                                                         |
+| Terminal engine                     | **alacritty_terminal**, behind our own trait so libghostty-vt can replace it          | 0.26.0                                                                       |
+| Claude's signals (OSC 7501, 7, 133) | Our own small parser that reads the stream before alacritty                           | —                                                                            |
+| PTY                                 | **portable-pty**; `libproc` for the foreground program and its folder                 | 0.9.0                                                                        |
+| Terminal view                       | **Our own GPUI element**, following MIT/Apache apps (okena, runner, tty7)             | —                                                                            |
+| Editor and syntax colours           | gpui-component `Editor` (tree-sitter 0.26 inside it)                                  | —                                                                            |
+| Diff                                | gpui-component `Diff` (split/unified), patches made with `similar`                    | `similar` 3.2                                                                |
+| Git                                 | **gix** for reading (status, HEAD, worktrees); the `git` CLI for anything that writes | 0.89.0                                                                       |
+| File watching                       | **notify** + notify-debouncer-full, filtered with **ignore**                          | 8.2.0, 0.7.0, 0.4.33                                                         |
+| Quick open                          | **nucleo** (Helix's matcher)                                                          | 0.5.0                                                                        |
+| Dock badge, notifications           | a thin `objc2-app-kit` / UserNotifications layer                                      | —                                                                            |
+| Design tokens                       | `design/tokens.json` compiled into Rust constants by a build script                   | —                                                                            |
+
+## UI framework: why GPUI
+
+Nothing has replaced GPUI. The newer names around it are snapshots and forks of GPUI itself:
+
+- **`gpui`** on crates.io is frozen at 0.2.2 (October 2025). Zed develops GPUI actively in its own
+  repo but doesn't publish it.
+- **`gpui-pre`** is a weekly snapshot of Zed's GPUI, published by Longbridge (Jason Lee, the
+  gpui-component author). 0.3.9 is zed@93d7456.
+- **`gpui-fast`** is Longbridge's experimental retained-mode fork (12 days old). It promises much
+  cheaper unchanged frames. It's a one-line feature switch in gpui-kit, worth benchmarking later on
+  the terminal grid.
+- **`gpui-kit`** bundles a matching `gpui-pre` and gpui-component, so the two never disagree.
+
+Why it wins:
+
+- **It's proven on exactly our workload:** Zed renders many terminals and editors in one window
+  with Metal and CoreText.
+- **The style API matches the design system one to one:** rounded corners, box shadows (our
+  glows), linear gradients at an angle (our 135° gradient), and custom fonts.
+- **gpui-kit already covers about 70% of the UI:** a dock with draggable tabs and nested splits, a
+  tree, a code editor, a diff view, lists and theming.
+- **It's the stack the ecosystem converged on:** more than a dozen open-source GPUI apps for
+  running agents exist (below).
+
+The alternatives looked at:
+
+| Framework                                          | Why not                                                                                            |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Iced 0.14 (+ `iced_term`)                          | The best fallback. No native menus, no accessibility yet, a basic text editor, slow releases       |
+| Slint 1.18                                         | No terminal and no code editor widget; the whole main panel would be from scratch                  |
+| egui 0.37                                          | Re-lays out every frame, which is costly with 16 live terminals; hard to make look like our design |
+| Makepad, Floem, Xilem, Dioxus Native, Freya, Vizia | Early, quiet, or unproven for dense text                                                           |
+
+**The risk is GPUI's API churn:** `gpui-pre` comes out weekly from one maintainer. We pin exact
+versions, commit `Cargo.lock`, and upgrade on purpose. Several agent apps fork GPUI for this
+reason; we don't need to yet.
+
+## Terminal engine
+
+Two real options:
+
+|                                              | alacritty_terminal 0.26                                  | libghostty-vt (Ghostty's engine)                                                                                  |
+| -------------------------------------------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Used by                                      | Nearly every GPUI agent app, Zed, Lapce, COSMIC Terminal | A growing few (paneflow, gpui-libghostty)                                                                         |
+| OSC 7501                                     | Not understood; we parse it ourselves before alacritty   | **Built in** (added 2026-10-06), including the probe reply                                                        |
+| OSC 7 / 133 / unknown sequences              | Dropped; same pre-parse                                  | Callbacks for each                                                                                                |
+| Keyboard (kitty protocol) and mouse encoding | We write it (references exist, MIT)                      | Encoders included                                                                                                 |
+| Build                                        | Pure Rust                                                | Needs Zig 0.16 at build time                                                                                      |
+| API stability                                | Stable, released                                         | "Not yet stable", no tagged releases; the Rust wrapper lacks the 7501 and 133 callbacks, so we'd need our own FFI |
+| Threading                                    | `Send`, one engine per pane                              | `!Send`, all panes on one thread                                                                                  |
+
+**Choice: alacritty_terminal.**
+
+- It's the stable, pure-Rust path, and most reference code we can learn from (MIT/Apache) is
+  written against it.
+- Catching OSC 7501 ourselves is small: we already have the parser from Phase 0.
+
+The engine sits behind a `TerminalEngine` trait, so libghostty-vt can replace it once its API
+settles. Its built-in OSC 7501 and input encoders make that attractive.
+
+How the terminal works, following the patterns in the reference apps:
+
+- One reader thread and one writer per pty; we drive alacritty's `Term` ourselves rather than
+  using its event loop.
+- Wakeups are batched (about 4 ms) into one repaint of the pane that changed.
+- DEC 2026 synchronized output is honoured, so Claude's frames never tear.
+- Cells with the same style are painted as one text run, backgrounds as separate rectangles, and
+  each row's shaped text is cached until the row changes.
+- IME pre-edit text is drawn at the cursor (real work: tty7 and runner each have code for it).
+
+## Licences
+
+Saturn stays permissively licensed, so **no GPL code goes in**. That rules out copying:
+
+- **Zed's** `terminal`, `terminal_view`, `editor`, `git_ui` and sidebar crates (GPL-3.0); `gpui`
+  itself is Apache-2.0.
+- **Warp's client** (AGPL).
+- **The GPL agent apps:** paneflow, waku, muxel, codux, COSMIC Terminal.
+
+We can read them for ideas. Code we may adapt, with attribution:
+
+- **MIT:** okena, runner, zeron.
+- **Apache-2.0:** tty7, herdr-gpui.
+- **MIT or Apache:** gpui-terminal.
+
+`cargo deny` checks every dependency's licence on each health run.
+
+## Prior art worth reading
+
+| Project              | Licence    | What to learn                                                             |
+| -------------------- | ---------- | ------------------------------------------------------------------------- |
+| contember/okena      | MIT        | Tabs, splits, detachable panes, restoring a workspace, a Claude extension |
+| yicheng47/runner     | MIT        | Closest product to Saturn; same `gpui-pre` line; IME code                 |
+| l0ng-ai/tty7         | Apache-2.0 | The most complete terminal element (IME, links)                           |
+| penso/herdr-gpui     | Apache-2.0 | App polish: dock badge, notifications, command palette, packaging         |
+| zortax/gpui-terminal | MIT/Apache | A small, readable terminal element to start from                          |
+| maddada/Ghostex      | MIT        | GPUI + libghostty-vt "agents workspace", for when we try Ghostty's engine |
+
+## Editor, diff, files and git
+
+- **Editor:** `EditorState::new(window, cx).language("tsx").line_number(true).searchable(true)`,
+  drawn with `Editor::new(&state)`. `⌘F` find and replace are built in, and it holds 200K-line files
+  (the authors' claim).
+- **Syntax colours:** TS, TSX, JSON, YAML, Markdown and Bash come as cargo features. There's no
+  `.env` grammar on crates.io, so `.env*` files are coloured as Bash for now.
+- **tree-sitter version:** Saturn must not depend on tree-sitter 0.27, because gpui-component uses
+  0.26 and Cargo allows only one.
+- **Diff:** gpui-component's diff view is read-only.
+  1. Read the HEAD version with `gix`.
+  2. Make a patch against the working file with `similar`.
+  3. Show it with `DiffState::new(DiffFile::parse(patch)?)` in split mode.
+  4. Editing happens in an `Editor` next to it, or behind an "Edit" button.
+- **Tree:** gpui-component's `Tree` is virtualized, with rows drawn by us (git badges). Folders
+  load when opened, walked one level at a time with `ignore::WalkBuilder`.
+- **Watching:**
+  - One recursive `notify` watch per worktree root, registered once, because adding watches one by
+    one is slow with FSEvents.
+  - Events in `node_modules` and `.git` are filtered out afterwards.
+  - Bursts are merged by the debouncer.
+- **Git:** `gix` reads status, HEAD blobs and worktrees. Status runs in the background and is
+  debounced, since gix has no fsmonitor speed-up yet. Anything that writes uses the `git` CLI.
+
+## Build and tooling
+
+- **Workspace layout:**
+  - `crates/saturn` (the app)
+  - `saturn-core` (layout, agent state, title rules: pure and unit-tested; ported from the
+    TypeScript versions and their tests)
+  - `saturn-terminal` (pty, engine, OSC parser, element)
+  - `saturn-design` (tokens)
+- **Checks, the usual setup in Rust form:**
+  - `cargo fmt`
+  - `cargo clippy` with warnings as errors (lint)
+  - `cargo test`
+  - `cargo machete` (dead dependencies, like knip)
+  - `cargo deny` (licences and advisories)
+- **Commits and docs:** conventional commits stay enforced by commitlint and husky, and oxfmt
+  formats Markdown and JSON. That's dev-only Node tooling; nothing of it ships in the app.
+- **Build cost:** the first build of GPUI takes 5–15 minutes and a few GB of disk; after that,
+  builds are incremental.
+
+## What happens to the Electron code
+
+The Electron app (Phases 0–1) stays in git history. Its parts carry over as follows:
+
+- **Behaviour:** the grid model, agent states, title rules, the OSC 7501 parser, the shell-env
+  fix, the quit-crash lesson (wait for shells before exit) and the end-to-end scenarios.
+- **Ported to Rust with their tests:** the grid model, agent states, title rules and the OSC 7501
+  parser.
+- **Removed in one commit:** the Electron code itself, once the Rust grid reaches the same point.
+
+## Sources
+
+- crates.io API (versions, dates, owners, licences) for every crate named above, checked
+  2026-10-18
+- https://github.com/longbridge/gpui-kit · https://github.com/longbridge/gpui-fast ·
+  https://crates.io/crates/gpui-pre
+- https://github.com/zed-industries/zed (gpui README, crate licences)
+- https://github.com/alacritty/alacritty · https://github.com/alacritty/vte
+- https://github.com/ghostty-org/ghostty/blob/main/include/ghostty/vt/terminal.h ·
+  https://github.com/Uzaaft/libghostty-rs · https://mitchellh.com/writing/libghostty-is-coming
+- https://github.com/wezterm/wezterm (portable-pty)
+- https://github.com/iced-rs/iced/releases/tag/0.14.0 · https://slint.dev/pricing
+- https://docs.rs/gix/0.89.0 · https://github.com/notify-rs/notify · https://github.com/helix-editor/nucleo
+- Prior art: contember/okena, yicheng47/runner, l0ng-ai/tty7, penso/herdr-gpui,
+  zortax/gpui-terminal, maddada/Ghostex, arthjean/paneflow,
+  https://dev.to/arthurj-dev/building-a-native-terminal-for-ai-coding-agents-in-rust-gpui-2bg4
