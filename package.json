@@ -1,69 +1,25 @@
 {
-  "name": "saturn",
-  "version": "0.0.1",
+  "name": "saturn-dev",
   "private": true,
-  "description": "A terminal grid for running many Claude Code agents side by side",
-  "main": "out/main/index.js",
+  "description": "Development tooling only (commit checks, Markdown/JSON formatting). Saturn itself is Rust: see Cargo.toml.",
+  "engines": {
+    "node": ">=24.2"
+  },
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
-    "start": "electron-vite preview",
-    "lint": "oxlint -c oxlint.config.mts --type-aware --report-unused-disable-directives",
-    "lint:fix": "oxlint -c oxlint.config.mts --type-aware --report-unused-disable-directives --fix",
-    "format": "oxfmt .",
-    "format:check": "oxfmt --check .",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.spikes.json",
-    "test": "vitest run",
-    "health": "pnpm run tokens:check && pnpm run lint && pnpm run typecheck && pnpm run format:check && pnpm run lint:dead && pnpm run test",
-    "prepare": "husky",
-    "postinstall": "node scripts/fix-node-pty.mjs",
-    "lint:dead": "knip --max-issues 0",
-    "tokens": "node scripts/build-tokens.mjs",
-    "tokens:check": "node scripts/build-tokens.mjs --check",
-    "predev": "pnpm run tokens",
-    "prebuild": "pnpm run tokens",
-    "e2e": "pnpm build && node e2e/smoke.mts"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "electron",
-      "node-pty"
-    ]
-  },
-  "dependencies": {
-    "@fontsource-variable/jetbrains-mono": "5.3.0",
-    "@fontsource-variable/plus-jakarta-sans": "5.3.0",
-    "@xterm/addon-fit": "0.11.0",
-    "@xterm/addon-unicode11": "0.9.0",
-    "@xterm/addon-web-links": "0.12.0",
-    "@xterm/addon-webgl": "0.19.0",
-    "@xterm/xterm": "6.0.0",
-    "node-pty": "1.1.0",
-    "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "fmt": "cargo fmt --all && oxfmt .",
+    "fmt:check": "cargo fmt --all --check && oxfmt --check .",
+    "lint": "cargo clippy --workspace --all-targets --features saturn/capture -- -D warnings",
+    "test": "cargo test --workspace",
+    "deps": "cargo machete && cargo deny check",
+    "health": "pnpm run fmt:check && pnpm run lint && pnpm run test && pnpm run deps",
+    "dev": "cargo run -p saturn",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.3",
     "@commitlint/config-conventional": "^21.2.3",
-    "@types/node": "^26.6.5",
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
-    "@vitejs/plugin-react": "6.1.2",
-    "@xterm/headless": "6.0.0",
-    "electron": "44.9.0",
-    "electron-vite": "6.0.0",
     "husky": "^9.1.7",
-    "knip": "^6.41.0",
-    "lint-staged": "^17.6.0",
-    "oxfmt": "^0.67.0",
-    "oxlint": "^1.88.0",
-    "oxlint-tsgolint": "^7.0.2004",
-    "playwright": "1.64.1",
-    "typescript": "7.0.2",
-    "vite": "8.3.4",
-    "vitest": "^5.0.5"
-  },
-  "engines": {
-    "node": ">=24.2"
+    "lint-staged": "^17.5.1",
+    "oxfmt": "^0.67.0"
   }
 }

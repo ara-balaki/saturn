@@ -165,9 +165,31 @@ We can read them for ideas. Code we may adapt, with attribution:
 - **Build cost:** the first build of GPUI takes 5–15 minutes and a few GB of disk; after that,
   builds are incremental.
 
+## Spike results (2026-10-18)
+
+Measured with `SATURN_PANES=12 SATURN_COMMAND="node scripts/tui-load.mjs 30 14" SATURN_PERF=1`,
+in a release build: every pane redraws a full screen of coloured text 30 times a second, inside
+synchronized-output brackets. These are the same conditions as the Electron spike in
+[03-phase0-findings.md](03-phase0-findings.md).
+
+|                                | Electron (Phase 0) | Native Rust       |
+| ------------------------------ | ------------------ | ----------------- |
+| Memory, 12 busy panes          | ~550 MB            | **~117 MB**       |
+| CPU                            | not measured       | ~31% of one core  |
+| Laying out all terminal frames | —                  | ~52 ms per second |
+
+- **Every terminal is laid out on every frame.** GPUI redraws the whole window at 120 Hz, about
+  1,300 terminal layouts a second. That is roughly 4 ms of each 8 ms frame.
+- **Room left:** caching shaped rows until they change, or switching on `gpui-fast`'s retained
+  mode.
+- **Rendering checked:** colours, bold, Czech diacritics, emoji, the block cursor and the focus glow
+  all render correctly (screenshot taken with `SATURN_SCREENSHOT`, `capture` feature).
+- **One fix it found:** a shell started from the Dock has no `LANG`, and zsh then shows typed
+  non-ASCII as `<0001fa90>`. Saturn sets `LANG=en_US.UTF-8` when it's missing, as Terminal.app does.
+
 ## What happens to the Electron code
 
-The Electron app (Phases 0–1) stays in git history. Its parts carry over as follows:
+The Electron app (Phases 0–1) was removed on 2026-10-18 and stays in git history. Its parts carry over as follows:
 
 - **Behaviour:** the grid model, agent states, title rules, the OSC 7501 parser, the shell-env
   fix, the quit-crash lesson (wait for shells before exit) and the end-to-end scenarios.
