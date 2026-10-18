@@ -5797,6 +5797,7 @@ dependencies = [
  "saturn-terminal",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

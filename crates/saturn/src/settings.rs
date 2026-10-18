@@ -8,7 +8,11 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 #[expect(clippy::struct_excessive_bools, reason = "independent on/off switches, each its own JSON field")]
 pub struct Settings {
-    pub last_project: Option<PathBuf>,
+    /// Projects opened before, most recent first, for the welcome screen.
+    pub recent_projects: Vec<PathBuf>,
+    /// The most recent project in settings written before `recent_projects` existed.
+    #[serde(skip_serializing)]
+    last_project: Option<PathBuf>,
     /// Tabs show the Claude session's name (or the terminal's title). Off: the folder, or a
     /// name typed by hand.
     pub name_tabs_after_sessions: bool,
@@ -45,6 +49,7 @@ impl AppearanceSetting {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            recent_projects: Vec::new(),
             last_project: None,
             name_tabs_after_sessions: true,
             rename_sessions_from_commands: true,
@@ -75,9 +80,32 @@ pub fn load() -> Settings {
         .unwrap_or_default()
 }
 
+/// How many projects the welcome screen offers.
+const RECENT: usize = 8;
+
+impl Settings {
+    /// Recent projects that still exist, most recent first.
+    pub fn recent(&self) -> Vec<PathBuf> {
+        let mut recent = self.recent_projects.clone();
+        if recent.is_empty() {
+            recent.extend(self.last_project.clone());
+        }
+        recent.retain(|path| path.is_dir());
+        recent
+    }
+
+    fn remember(&mut self, project: &Path) {
+        let mut recent = self.recent();
+        recent.retain(|path| path != project);
+        recent.insert(0, project.to_owned());
+        recent.truncate(RECENT);
+        self.recent_projects = recent;
+    }
+}
+
 pub fn remember_project(project: &Path) {
     let mut settings = load();
-    settings.last_project = Some(project.to_owned());
+    settings.remember(project);
     save(&settings);
 }
 
@@ -91,17 +119,15 @@ pub fn save(settings: &Settings) {
     }
 }
 
-/// The folder to open: `SATURN_PROJECT`, else the folder Saturn was started in (when started from
-/// a terminal), else the last project, else home.
-pub fn startup_project() -> PathBuf {
+/// The folder to open straight away: `SATURN_PROJECT`, else the folder Saturn was started in from
+/// a terminal. `None` (started from Finder, the Dock or Spotlight, which start apps in `/`) shows
+/// the welcome screen instead.
+pub fn startup_project() -> Option<PathBuf> {
     if let Some(project) = std::env::var_os("SATURN_PROJECT") {
-        return PathBuf::from(project);
+        return Some(PathBuf::from(project));
     }
-    let started_in = std::env::current_dir().ok().filter(|dir| dir != Path::new("/"));
-    started_in
-        .or_else(|| load().last_project.filter(|path| path.is_dir()))
-        .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from("/"))
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    std::env::current_dir().ok().filter(|dir| dir != Path::new("/") && Some(dir) != home.as_ref())
 }
 
 #[cfg(test)]
@@ -122,5 +148,26 @@ mod tests {
         let settings: Settings = serde_json::from_str(r#"{"name_tabs_after_sessions": false}"#).expect("loads");
         assert_eq!(settings.appearance, AppearanceSetting::System);
         assert!(!settings.name_tabs_after_sessions);
+    }
+
+    #[test]
+    fn recent_projects_keep_the_latest_first_without_duplicates() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let (a, b) = (dir.path().join("a"), dir.path().join("b"));
+        std::fs::create_dir_all(&a).expect("a");
+        std::fs::create_dir_all(&b).expect("b");
+        let mut settings = Settings::default();
+        settings.remember(&a);
+        settings.remember(&b);
+        settings.remember(&a);
+        assert_eq!(settings.recent(), [a.clone(), b]);
+    }
+
+    #[test]
+    fn an_old_last_project_becomes_the_first_recent_one() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let text = format!(r#"{{"last_project": {:?}}}"#, dir.path());
+        let settings: Settings = serde_json::from_str(&text).expect("loads");
+        assert_eq!(settings.recent(), [dir.path().to_owned()]);
     }
 }

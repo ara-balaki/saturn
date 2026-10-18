@@ -84,6 +84,10 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
     if let Some(path) = std::env::var_os("SATURN_OPEN_FILE") {
         cx.defer_in(window, move |workspace, window, cx| workspace.open_file(std::path::Path::new(&path), window, cx));
     }
+}
+
+/// The screenshot and the timed quit, for the window itself: they apply on the welcome screen too.
+pub fn start_window<T: 'static>(window: &mut Window, cx: &mut Context<T>) {
     capture(window, cx);
     if let Some(seconds) = var::<u64>("SATURN_QUIT_AFTER") {
         cx.spawn(async move |_, cx| {
@@ -95,7 +99,7 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
 }
 
 #[cfg(feature = "capture")]
-fn capture(window: &mut Window, cx: &mut Context<Workspace>) {
+fn capture<T: 'static>(window: &mut Window, cx: &mut Context<T>) {
     let Ok(path) = std::env::var("SATURN_SCREENSHOT") else { return };
     let after = var::<u64>("SATURN_SCREENSHOT_AFTER").unwrap_or(3);
     let handle = window.window_handle();
@@ -113,4 +117,4 @@ fn capture(window: &mut Window, cx: &mut Context<Workspace>) {
 }
 
 #[cfg(not(feature = "capture"))]
-fn capture(_: &mut Window, _: &mut Context<Workspace>) {}
+fn capture<T: 'static>(_: &mut Window, _: &mut Context<T>) {}

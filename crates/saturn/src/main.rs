@@ -1,5 +1,6 @@
 //! Saturn: a terminal grid for running many Claude Code agents side by side.
 
+mod app_view;
 mod assets;
 mod changes_view;
 mod chrome;
@@ -21,11 +22,11 @@ use gpui_kit::{
     WindowBounds, WindowOptions, actions, point, px, size,
 };
 
+use crate::app_view::AppView;
 use crate::workspace::{
     CloseTab, Copy, FocusDown, FocusLeft, FocusPane1, FocusPane2, FocusPane3, FocusPane4, FocusPane5, FocusPane6,
     FocusPane7, FocusPane8, FocusPane9, FocusRight, FocusUp, NewTab, NextAttention, NextTab, OpenProject, OpenSettings,
-    Paste, Placement, PreviousTab, SaveFile, SplitDown, SplitRight, ToggleEditor, ToggleMaximize, ToggleSidebar,
-    Workspace,
+    Paste, PreviousTab, SaveFile, SplitDown, SplitRight, ToggleEditor, ToggleMaximize, ToggleSidebar,
 };
 
 actions!(saturn, [Quit]);
@@ -140,27 +141,8 @@ fn main() {
             window_background: WindowBackgroundAppearance::Blurred,
             ..WindowOptions::default()
         };
-        gpui_kit::open_window(options, cx, |window, cx| {
-            cx.new(|cx| {
-                let mut workspace = Workspace::new(project, window, cx);
-                match spike::panes() {
-                    Some(panes) => {
-                        for index in 0..panes {
-                            workspace.open_terminal(spike::placement(index, panes), window, cx);
-                        }
-                    }
-                    // Where the last session left off, else one shell in the project.
-                    None => {
-                        if !workspace.restore(window, cx) {
-                            workspace.open_terminal(Placement::Tab, window, cx);
-                        }
-                    }
-                }
-                spike::start(&workspace, window, cx);
-                workspace
-            })
-        })
-        .expect("the window opens");
+        gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| AppView::new(project, window, cx)))
+            .expect("the window opens");
         // Automated runs (screenshots, spikes) must not take the keyboard from whatever the user is doing.
         if !spike::is_automated() {
             cx.activate(true);
