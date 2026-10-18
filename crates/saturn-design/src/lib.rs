@@ -94,29 +94,30 @@ mod tests {
 
     #[test]
     fn brand_colours_come_from_the_tokens() {
-        assert_eq!(color::PURPLE.dark, Color { rgb: 0x0072_3ceb, alpha: 1.0 });
-        assert_eq!(color::PURPLE.light, color::PURPLE.dark);
-        assert_eq!(color::STATUS_NEEDS_YOU.dark, color::YELLOW.dark);
+        assert_eq!(color::BLUE_VIVID.dark, Color { rgb: 0x001c_69e3, alpha: 1.0 });
+        assert_eq!(color::BLUE_VIVID.light, color::BLUE_VIVID.dark);
+        assert_eq!(color::STATUS_WORKING.dark, color::BLUE.dark);
     }
 
     #[test]
     fn light_mode_has_its_own_neutrals_and_signals() {
         assert_ne!(color::SURFACE.light, color::SURFACE.dark);
-        // Yellow is invisible on white except as a fill, so needs-you text turns amber.
-        assert_ne!(color::STATUS_NEEDS_YOU.light, color::YELLOW.light);
-        // Text on the brand colours stays the same in both themes.
+        // Amber text darkens in light mode; the amber fill stays, always with dark text on it.
+        assert_ne!(color::AMBER_TEXT.light, color::AMBER.light);
+        assert_eq!(color::AMBER.light, color::AMBER.dark);
+        assert_eq!(color::STATUS_NEEDS_YOU.light, color::AMBER_TEXT.light);
         assert_eq!(color::INK_ON_ACCENT.light, color::INK_ON_ACCENT.dark);
     }
 
     /// Every row of the nesting table in the design system's README: inner = outer − padding.
     #[test]
     fn nested_radii_follow_the_padding_rule() {
+        // The macOS window corner (about 16) and the 6px gap give panels their radius.
+        let window = 16.0;
         let nestings = [
-            (radius::RADIUS_XL, space::SPACE_2, radius::RADIUS_LG),
-            (radius::RADIUS_LG, space::SPACE_1, radius::RADIUS_MD),
+            (window, space::SPACE_2, radius::RADIUS_MD),
             (radius::RADIUS_MD, space::SPACE_1, radius::RADIUS_SM),
-            (radius::RADIUS_2XL, 14.0, radius::RADIUS_LG),
-            (radius::RADIUS_2XL, 18.0, radius::RADIUS_MD),
+            (radius::RADIUS_LG, space::SPACE_3, radius::RADIUS_SM),
         ];
         for (outer, padding, inner) in nestings {
             assert!((outer - padding - inner).abs() < f32::EPSILON, "{outer} − {padding} ≠ {inner}");
@@ -130,12 +131,12 @@ mod tests {
             assert!((glow[0].spread - 1.0).abs() < f32::EPSILON);
             assert!(!glow[0].inset);
         }
-        assert!((shadow::GLOW_NEEDS_YOU.dark[1].blur - 26.0).abs() < f32::EPSILON);
+        assert!((shadow::GLOW_NEEDS_YOU.dark[1].blur - 30.0).abs() < f32::EPSILON);
     }
 
     #[test]
     fn fonts_are_the_first_family_of_each_stack() {
-        assert_eq!(font::SANS, "Plus Jakarta Sans");
+        assert_eq!(font::SANS, "Urbanist");
         assert_eq!(font::MONO, "JetBrains Mono");
     }
 }

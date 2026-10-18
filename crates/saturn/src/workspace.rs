@@ -19,7 +19,7 @@ use saturn_core::session_name::rename_for_prompt;
 use saturn_design::{color, radius, shadow, space};
 use saturn_terminal::view::{TerminalView, TerminalViewEvent};
 
-use crate::chrome::{self, TileKind};
+use crate::chrome;
 use crate::settings::{self, AppearanceSetting, Settings};
 use crate::theme::{self, len};
 use crate::{dock, settings_view};
@@ -64,10 +64,10 @@ pub enum Placement {
     Down,
 }
 
-const TITLEBAR_HEIGHT: f32 = 44.0;
+/// Tall enough that the title bar's outer controls sit 10px from the window's edges: 48 = 28 + 2 × 10.
+const TITLEBAR_HEIGHT: f32 = 48.0;
 const TRAFFIC_LIGHTS_WIDTH: f32 = 76.0;
-const PANE_HEADER_HEIGHT: f32 = 40.0;
-const TAB_HEIGHT: f32 = 28.0;
+const TAB_HEIGHT: f32 = chrome::CONTROL_HEIGHT;
 /// No pane is dragged smaller than this share of its row or of the grid.
 const MIN_SHARE: f32 = 0.08;
 /// Programs a tab can close without asking, because nothing is lost.
@@ -87,11 +87,11 @@ impl Render for DraggedTab {
             .h(len(TAB_HEIGHT))
             .flex()
             .items_center()
-            .rounded(len(radius::RADIUS_LG))
-            .bg(theme::color(color::CONTROL))
+            .rounded(len(radius::RADIUS_SM))
+            .bg(theme::color(color::CONTROL_PRESSED))
             .border_1()
-            .border_color(theme::color(color::PURPLE))
-            .text_size(px(12.))
+            .border_color(theme::color(color::BLUE))
+            .text_size(px(13.))
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(theme::color(color::INK))
             .font_family(saturn_design::font::SANS)
@@ -527,10 +527,10 @@ impl Workspace {
         let selected = tab == cell.active;
         let state = self.tab_state(tab, cx);
         let name = self.tab_name(tab, cx);
-        // A tab hidden behind another that needs you turns yellow, so it can't be missed.
+        // A tab hidden behind another that needs you turns amber, so it can't be missed.
         let calling = !selected && state == AgentState::NeedsYou && self.unseen.contains(&tab);
         let (background, foreground) = match (calling, selected) {
-            (true, _) => (theme::color(color::YELLOW), theme::color(color::INK_ON_SIGNAL)),
+            (true, _) => (theme::color(color::AMBER), theme::color(color::INK_ON_SIGNAL)),
             (false, true) => (theme::color(color::CONTROL_PRESSED), theme::color(color::INK)),
             (false, false) => (gpui_kit::transparent_black(), theme::color(color::INK_MUTED)),
         };
@@ -541,8 +541,8 @@ impl Workspace {
             .flex()
             .items_center()
             .justify_center()
-            .size(px(18.))
-            .rounded_full()
+            .size(px(20.))
+            .rounded(len(radius::RADIUS_XS))
             .when(!selected, |close| close.invisible().group_hover("tab", gpui_kit::Styled::visible))
             .hover(|s| s.bg(theme::color(color::CONTROL_HOVER)))
             .child(chrome::icon("x", 11., foreground))
@@ -560,10 +560,11 @@ impl Workspace {
             .pl(len(space::SPACE_3))
             .pr(len(space::SPACE_1))
             .max_w(px(220.))
-            .rounded(len(radius::RADIUS_LG))
+            .rounded(len(radius::RADIUS_SM))
             .bg(background)
+            .when(!selected && !calling, |tab| tab.hover(|s| s.bg(theme::color(color::CONTROL))))
             .text_color(foreground)
-            .text_size(px(12.))
+            .text_size(px(13.))
             .font_weight(FontWeight::SEMIBOLD)
             .child(status_dot(state))
             .map(|tab_element| match renaming {
@@ -584,7 +585,7 @@ impl Workspace {
                 }
             }))
             .on_drag(DraggedTab { tab, name }, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
-            .drag_over::<DraggedTab>(|style, _, _, _| style.border_l_2().border_color(theme::color(color::PURPLE_TEXT)))
+            .drag_over::<DraggedTab>(|style, _, _, _| style.border_l_2().border_color(theme::color(color::BLUE)))
             .on_drop(cx.listener(move |this, dragged: &DraggedTab, window, cx| {
                 this.drop_tab(dragged.tab, cell_id, Some(index), window, cx);
             }))
@@ -608,21 +609,12 @@ impl Workspace {
         let terminal = self.terminals.get(&cell.active).cloned();
         let cell_id: CellId = cell.id;
         let header_button = |id: &'static str, icon: &str, placement: Placement, cx: &mut Context<Self>| {
-            chrome::icon_tile((id, cell_id.key()), icon, TileKind::Round, TAB_HEIGHT)
+            chrome::icon_button((id, cell_id.key()), icon, true)
                 .on_click(cx.listener(move |this, _, window, cx| this.open_in_cell(cell_id, placement, window, cx)))
         };
 
-        let mut pane = div()
-            .flex()
-            .flex_col()
-            .size_full()
-            .min_w_0()
-            .min_h_0()
-            .rounded(len(radius::RADIUS_XL))
-            .bg(theme::color(color::SURFACE))
-            .border_1()
-            .border_color(theme::color(color::LINE))
-            .overflow_hidden()
+        // A panel like every other: the tabs in its strip, the terminal in its well.
+        let mut pane = chrome::panel()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _, window, cx| {
@@ -633,14 +625,10 @@ impl Workspace {
                 div()
                     .id(("tabs", cell_id.key()))
                     .flex()
+                    .flex_none()
                     .items_center()
                     .gap(len(space::SPACE_1))
-                    .h(len(PANE_HEADER_HEIGHT))
-                    .p(len(space::SPACE_2))
-                    // GPUI clips children to a rectangle, not to the pane's rounded corners, so the
-                    // header rounds its own: the pane's radius minus its one-pixel border.
-                    .rounded_t(len(radius::RADIUS_XL - 1.))
-                    .bg(theme::color(color::SURFACE_RAISED))
+                    .h(len(TAB_HEIGHT))
                     .child(
                         div()
                             .id(("tab-strip", cell_id.key()))
@@ -659,14 +647,12 @@ impl Workspace {
                     .child(header_button("new-tab", "plus", Placement::Tab, cx)),
             )
             .child(
-                div()
+                chrome::well()
                     .id(("body", cell_id.key()))
-                    .flex_1()
-                    .min_h_0()
                     .pt(len(space::SPACE_3))
                     .pl(len(space::SPACE_4))
                     .pb(len(space::SPACE_1))
-                    .drag_over::<DraggedTab>(|style, _, _, _| style.bg(theme::color(color::PURPLE).opacity(0.08)))
+                    .drag_over::<DraggedTab>(|style, _, _, _| style.bg(theme::color(color::BLUE_VIVID).opacity(0.08)))
                     .on_drop(cx.listener(move |this, dragged: &DraggedTab, window, cx| {
                         this.drop_tab(dragged.tab, cell_id, None, window, cx);
                     }))
@@ -697,8 +683,8 @@ impl Workspace {
         div()
             .id(id)
             .flex_none()
-            .when(vertical, |d| d.w(len(space::SPACE_3)).h_full().cursor(CursorStyle::ResizeLeftRight))
-            .when(!vertical, |d| d.h(len(space::SPACE_3)).w_full().cursor(CursorStyle::ResizeUpDown))
+            .when(vertical, |d| d.w(len(space::SPACE_2)).h_full().cursor(CursorStyle::ResizeLeftRight))
+            .when(!vertical, |d| d.h(len(space::SPACE_2)).w_full().cursor(CursorStyle::ResizeUpDown))
             .on_drag(divider, |_, _, _, cx| cx.new(|_| DividerPreview))
             .into_any_element()
     }
@@ -765,9 +751,6 @@ impl Workspace {
             (count(&[AgentState::YourTurn, AgentState::Error]), AgentState::YourTurn, "your turn"),
             (count(&[AgentState::Working]), AgentState::Working, "working"),
         ];
-        let toggle = |id: &'static str, icon: &str, on: bool| {
-            chrome::icon_tile(id, icon, if on { TileKind::Plain } else { TileKind::Off }, 28.)
-        };
         // The title bar is drawn by Saturn, so the empty parts of it pass a double-click on to
         // macOS, which zooms or minimizes as System Settings says.
         let empty = |id: &'static str| {
@@ -777,17 +760,45 @@ impl Workspace {
                 }
             })
         };
+        // Controls live in tracks, as everywhere: the panel toggles on the left (raised while the
+        // panel is open), what the agents are doing on the right, then the one primary action.
+        let toggle = |id: &'static str, icon: &str, on: bool| {
+            chrome::track_item(id, on).child(chrome::icon(
+                icon,
+                16.,
+                theme::color(if on { color::INK } else { color::INK_MUTED }),
+            ))
+        };
+        let live: Vec<(usize, AgentState, &str)> = summary.into_iter().filter(|(n, _, _)| *n > 0).collect();
+        let activity = (!live.is_empty()).then(|| {
+            let mut track = chrome::track();
+            for (index, (n, state, label)) in live.into_iter().enumerate() {
+                if index > 0 {
+                    track = track.child(chrome::track_separator());
+                }
+                track = track.child(
+                    chrome::track_item(label, false)
+                        .px(len(space::SPACE_3))
+                        .when(state == AgentState::Working, |item| {
+                            item.bg(theme::color(color::BLUE_VIVID).opacity(0.14)).text_color(theme::color(color::BLUE))
+                        })
+                        .when(state != AgentState::Working, |item| item.text_color(state_color(state)))
+                        .child(status_dot(state))
+                        .child(format!("{n} {label}"))
+                        .on_click(cx.listener(|this, _, window, cx| this.next_attention(window, cx))),
+                );
+            }
+            track
+        });
         div()
             .flex()
             .items_center()
+            .gap(len(space::SPACE_2))
             .h(len(TITLEBAR_HEIGHT))
             .pr(len(space::SPACE_1))
-            .text_size(px(12.))
             .child(empty("titlebar-lights").flex_none().w(len(TRAFFIC_LIGHTS_WIDTH)))
             .child(
-                div()
-                    .flex()
-                    .gap(len(space::SPACE_2))
+                chrome::track()
                     .child(toggle("toggle-sidebar", "panel-left", self.sidebar_open).on_click(cx.listener(
                         |this, _, _, cx| {
                             this.sidebar_open = !this.sidebar_open;
@@ -802,38 +813,21 @@ impl Workspace {
                     ))),
             )
             .child(empty("titlebar-middle").flex_1())
-            .children(summary.into_iter().filter(|(n, _, _)| *n > 0).map(|(n, state, label)| {
-                div()
-                    .id(label)
-                    .flex()
-                    .items_center()
-                    .ml(len(space::SPACE_5))
-                    .gap(len(6.))
-                    .cursor_pointer()
-                    .text_color(if state == AgentState::Working {
-                        theme::color(color::INK_MUTED)
-                    } else {
-                        state_color(state)
-                    })
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(status_dot(state))
-                    .child(format!("{n} {label}"))
-                    .on_click(cx.listener(|this, _, window, cx| this.next_attention(window, cx)))
-            }))
+            .children(activity)
             .child(
                 // The empty grid has its own primary button; one per screen.
-                chrome::button("new-terminal", "New terminal", Some("⌘T"), !self.layout.is_empty())
-                    .ml(len(space::SPACE_5))
-                    .on_click(cx.listener(|this, _, window, cx| {
+                chrome::button("new-terminal", "New terminal", Some("⌘T"), !self.layout.is_empty()).on_click(
+                    cx.listener(|this, _, window, cx| {
                         this.open_terminal(Placement::Tab, window, cx);
-                    })),
+                    }),
+                ),
             )
     }
 
     /// Sidebar | (editor / grid), with draggable dividers. The panels stay in the same place in
     /// the tree when toggled, so terminals never restart.
     fn render_workbench(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let half_gap = len(space::SPACE_3 / 2.);
+        let half_gap = len(space::SPACE_2 / 2.);
         let name = self.project.file_name().map_or_else(|| "/".to_owned(), |name| name.to_string_lossy().into_owned());
         let grid = if self.layout.is_empty() {
             chrome::empty_grid(
@@ -915,9 +909,10 @@ impl Render for Workspace {
             .size_full()
             .flex()
             .flex_col()
-            .px(len(space::SPACE_3))
-            .pb(len(space::SPACE_3))
-            .bg(theme::color(color::GROUND))
+            .px(len(space::SPACE_2))
+            .pb(len(space::SPACE_2))
+            // Slightly translucent: the window is blurred, so the desktop shows through the gaps.
+            .bg(theme::color(color::GROUND).opacity(0.86))
             .text_color(theme::color(color::INK))
             .font_family(saturn_design::font::SANS)
             .track_focus(&self.focus)

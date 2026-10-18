@@ -1,3 +1,6 @@
 node_modules/
 target/
 .DS_Store
+
+# Screenshots and page snapshots from browser checks
+.playwright-mcp/

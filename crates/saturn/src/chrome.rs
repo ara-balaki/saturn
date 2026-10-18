@@ -1,14 +1,18 @@
-//! The window's chrome in the design system: icon tiles, buttons, pills, the textures, and the
-//! sidebar, editor and empty-grid placeholders.
+//! The window's chrome in the design system. One structure for every container: a panel
+//! (`surface-raised`, radius 10, 4px padding) holds a strip of controls and a well (`surface`,
+//! radius 6) with the content; controls that belong together sit in a track.
 
 use gpui_kit::{
-    AnyElement, App, Bounds, ColorSpace, ElementId, FontWeight, HighlightStyle, InteractiveElement as _, IntoElement,
-    ParentElement as _, Pixels, SharedString, StatefulInteractiveElement as _, Styled as _, StyledText, Window, canvas,
-    div, fill, linear_color_stop, linear_gradient, pattern_slash, point, prelude::FluentBuilder as _, px, size, svg,
+    AnyElement, App, Bounds, ColorSpace, ElementId, FontWeight, InteractiveElement as _, IntoElement,
+    ParentElement as _, Pixels, SharedString, StatefulInteractiveElement as _, Styled as _, Window, canvas, div, fill,
+    linear_color_stop, linear_gradient, point, prelude::FluentBuilder as _, px, size, svg,
 };
 use saturn_design::{color, radius, space};
 
 use crate::theme::{self, len};
+
+/// Height of every control: tabs, buttons, track items, segments. Dense, as development tools are.
+pub const CONTROL_HEIGHT: f32 = 28.0;
 
 /// A Lucide icon from gpui-kit's bundled set, e.g. `panel-left`. SVGs don't inherit the text
 /// colour, so it is given here.
@@ -16,163 +20,196 @@ pub fn icon(name: &str, size: f32, color: gpui_kit::Hsla) -> impl IntoElement {
     svg().path(SharedString::from(format!("icons/{name}.svg"))).size(px(size)).flex_none().text_color(color)
 }
 
-/// The brand gradient (orange → purple, blended in `OKLab`), for what marks where you are.
-pub fn brand_gradient() -> gpui_kit::Background {
+/// The fill of the one primary action: vivid blue sinking toward deep blue, blended in `OKLab`.
+fn accent_fill() -> gpui_kit::Background {
     linear_gradient(
         135.,
-        linear_color_stop(theme::color(color::ORANGE), 0.),
-        linear_color_stop(theme::color(color::PURPLE), 1.),
+        linear_color_stop(theme::color(color::BLUE_VIVID), 0.),
+        linear_color_stop(theme::color(color::BLUE_VIVID).blend(theme::color(color::BLUE_DEEP).opacity(0.45)), 1.),
     )
     .color_space(ColorSpace::Oklab)
 }
 
-/// The fill of anything that carries white text: purple to purple-deep, with an orange glint in
-/// the top-right corner. White on the orange itself is only 2.3:1, so the label sits on purple.
-/// `corner` is the element's radius; GPUI clips to rectangles, so the glint rounds itself.
-fn cta_fill<E: gpui_kit::Styled + gpui_kit::ParentElement>(element: E, corner: Pixels) -> E {
-    element
+/// A panel: the container every region is built from.
+pub fn panel() -> gpui_kit::Div {
+    div()
         .relative()
-        .bg(linear_gradient(
-            135.,
-            linear_color_stop(theme::color(color::PURPLE), 0.),
-            linear_color_stop(theme::color(color::PURPLE_DEEP), 1.),
-        )
-        .color_space(ColorSpace::Oklab))
-        .child(
-            div().absolute().top_0().left_0().size_full().rounded(corner).bg(linear_gradient(
-                225.,
-                linear_color_stop(theme::color(color::ORANGE).opacity(0.85), 0.),
-                linear_color_stop(theme::color(color::ORANGE).opacity(0.), 0.55),
-            )
-            .color_space(ColorSpace::Oklab)),
-        )
+        .flex()
+        .flex_col()
+        .gap(len(space::SPACE_1))
+        .size_full()
+        .min_w_0()
+        .min_h_0()
+        .p(len(space::SPACE_1))
+        .rounded(len(radius::RADIUS_MD))
+        .bg(theme::color(color::SURFACE_RAISED))
+        .border_1()
+        .border_color(theme::color(color::LINE))
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum TileKind {
-    Plain,
-    /// Where you are (the brand gradient).
-    Current,
-    /// A toggle that is switched off.
-    Off,
-    /// A small outlined circle: the actions in a pane header.
-    Round,
+/// A panel's well, holding its content. 4px inside the panel: 10 - 4 = 6.
+pub fn well() -> gpui_kit::Div {
+    div()
+        .relative()
+        .flex_1()
+        .min_w_0()
+        .min_h_0()
+        .rounded(len(radius::RADIUS_SM))
+        .bg(theme::color(color::SURFACE))
+        .border_1()
+        .border_color(theme::color(color::LINE))
+        .overflow_hidden()
 }
 
-/// The rounded square every icon sits in: `radius-md` up to 32px, `radius-lg` above; round tiles
-/// are circles.
-pub fn icon_tile(id: impl Into<ElementId>, name: &str, kind: TileKind, tile: f32) -> gpui_kit::Stateful<gpui_kit::Div> {
-    let corner = match kind {
-        TileKind::Round => tile / 2.,
-        _ if tile > 32. => radius::RADIUS_LG,
-        _ => radius::RADIUS_MD,
-    };
-    let glyph = theme::color(match kind {
-        TileKind::Off | TileKind::Round => color::INK_MUTED,
-        TileKind::Current => color::INK_ON_ACCENT,
-        TileKind::Plain => color::INK,
-    });
-    let tile_element = div()
+/// A track: controls that belong together, in one `surface` strip.
+pub fn track() -> gpui_kit::Div {
+    div()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(len(space::SPACE_1))
+        .p(len(space::SPACE_1))
+        .rounded(len(radius::RADIUS_MD))
+        .bg(theme::color(color::SURFACE))
+        .border_1()
+        .border_color(theme::color(color::LINE))
+}
+
+/// An item in a track. Pressed items are raised: selection is tone, not colour.
+pub fn track_item(id: impl Into<ElementId>, pressed: bool) -> gpui_kit::Stateful<gpui_kit::Div> {
+    div()
         .id(id)
         .flex()
         .flex_none()
         .items_center()
         .justify_center()
-        .size(px(tile))
-        .rounded(len(corner))
+        .gap(len(space::SPACE_2))
+        .h(len(CONTROL_HEIGHT))
+        .min_w(len(CONTROL_HEIGHT))
+        .rounded(len(radius::RADIUS_SM))
+        .text_size(px(13.))
+        .font_weight(FontWeight::SEMIBOLD)
         .cursor_pointer()
-        .map(|tile| match kind {
-            TileKind::Plain => {
-                tile.bg(theme::color(color::CONTROL)).hover(|s| s.bg(theme::color(color::CONTROL_HOVER)))
+        .map(|item| {
+            if pressed {
+                item.bg(theme::color(color::CONTROL_PRESSED)).text_color(theme::color(color::INK))
+            } else {
+                item.text_color(theme::color(color::INK_MUTED)).hover(|s| s.bg(theme::color(color::CONTROL)))
             }
-            TileKind::Current => tile.bg(brand_gradient()),
-            TileKind::Off => tile.hover(|s| s.bg(theme::color(color::CONTROL))),
-            TileKind::Round => tile
-                .border_1()
-                .border_color(theme::color(color::LINE_STRONG))
-                .hover(|s| s.bg(theme::color(color::CONTROL))),
-        });
-    let glyph_size = match tile {
-        t if t > 32. => 20.,
-        t if t >= 32. => 16.,
-        _ => 14.,
-    };
-    tile_element.child(icon(name, glyph_size, glyph))
+        })
 }
 
-/// A pill-shaped text button with an optional shortcut. `primary` is the one action a view is for.
+/// A thin divider between groups in a track.
+pub fn track_separator() -> impl IntoElement {
+    div().flex_none().w(px(1.)).h(px(20.)).mx(len(space::SPACE_1)).bg(theme::color(color::LINE_STRONG))
+}
+
+/// A square icon button, as tall as every control. Quiet ones have no fill until hovered.
+pub fn icon_button(id: impl Into<ElementId>, name: &str, quiet: bool) -> gpui_kit::Stateful<gpui_kit::Div> {
+    div()
+        .id(id)
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .size(len(CONTROL_HEIGHT))
+        .rounded(len(radius::RADIUS_SM))
+        .cursor_pointer()
+        .map(|button| {
+            if quiet {
+                button.hover(|s| s.bg(theme::color(color::CONTROL)))
+            } else {
+                button
+                    .bg(theme::color(color::CONTROL))
+                    .border_1()
+                    .border_color(theme::color(color::LINE))
+                    .hover(|s| s.bg(theme::color(color::CONTROL_HOVER)))
+            }
+        })
+        .child(icon(name, 14., theme::color(if quiet { color::INK_MUTED } else { color::INK })))
+}
+
+/// A text button with an optional shortcut. `primary` is the one action a view is for: the
+/// accent fill with a soft blue bloom beneath it.
 pub fn button(
     id: impl Into<ElementId>,
     label: &'static str,
     shortcut: Option<&'static str>,
     primary: bool,
 ) -> gpui_kit::Stateful<gpui_kit::Div> {
-    let height = 32.;
-    let element = div()
+    let hint = if primary { theme::color(color::INK_ON_ACCENT).opacity(0.7) } else { theme::color(color::INK_FAINT) };
+    div()
         .id(id)
         .flex()
         .flex_none()
         .items_center()
-        .h(px(height))
-        .px(len(space::SPACE_5))
-        .rounded_full()
+        .gap(len(space::SPACE_3))
+        .h(len(CONTROL_HEIGHT))
+        .px(len(space::SPACE_4))
+        .rounded(len(radius::RADIUS_SM))
         .cursor_pointer()
-        .text_size(px(12.))
+        .text_size(px(13.))
         .font_weight(FontWeight::SEMIBOLD)
-        .text_color(theme::color(if primary { color::INK_ON_ACCENT } else { color::INK }));
-    let element = if primary {
-        cta_fill(element, px(height / 2.))
-    } else {
-        element.bg(theme::color(color::CONTROL)).hover(|s| s.bg(theme::color(color::CONTROL_HOVER)))
-    };
-    let hint = if primary { theme::color(color::INK_ON_ACCENT).opacity(0.72) } else { theme::color(color::INK_MUTED) };
-    element.child(
-        div()
-            .relative()
-            .flex()
-            .items_center()
-            .gap(len(space::SPACE_3))
-            .child(label)
-            .children(shortcut.map(|keys| div().font_weight(FontWeight::NORMAL).text_color(hint).child(keys))),
+        .map(|button| {
+            if primary {
+                button.text_color(theme::color(color::INK_ON_ACCENT)).bg(accent_fill()).shadow(vec![
+                    gpui_kit::BoxShadow {
+                        color: theme::color(color::BLUE_VIVID).opacity(0.35),
+                        offset: point(px(0.), px(6.)),
+                        blur_radius: px(20.),
+                        spread_radius: px(0.),
+                        inset: false,
+                    },
+                ])
+            } else {
+                button
+                    .text_color(theme::color(color::INK))
+                    .bg(theme::color(color::CONTROL))
+                    .border_1()
+                    .border_color(theme::color(color::LINE))
+                    .hover(|s| s.bg(theme::color(color::CONTROL_HOVER)))
+            }
+        })
+        .child(label)
+        .children(shortcut.map(|keys| div().font_weight(FontWeight::NORMAL).text_color(hint).child(keys)))
+}
+
+/// A segmented switch: a track whose selected segment is raised.
+pub fn segmented(options: &[(&'static str, bool)]) -> gpui_kit::Div {
+    track().children(
+        options
+            .iter()
+            .map(|(label, selected)| track_item(*label, *selected).flex_1().px(len(space::SPACE_4)).child(*label)),
     )
 }
 
-/// Text whose `highlight` part runs through the brand gradient, one colour per character (GPUI has
-/// no gradient text). One per screen.
-pub fn gradient_text(text: &str, highlight: &str) -> StyledText {
-    let full = format!("{text}{highlight}");
-    let count = highlight.chars().count().max(2);
-    #[expect(clippy::cast_precision_loss, reason = "a few characters")]
-    let highlights = highlight
-        .char_indices()
-        .enumerate()
-        .map(|(n, (at, c))| {
-            let start = text.len() + at;
-            let colour = theme::mix_oklab(color::ORANGE, color::PURPLE_TEXT, n as f32 / (count - 1) as f32);
-            (start..start + c.len_utf8(), HighlightStyle { color: Some(colour), ..HighlightStyle::default() })
-        })
-        .collect::<Vec<_>>();
-    StyledText::new(full).with_highlights(highlights)
+/// A headline in two weights, the point in semibold: "No terminals **yet**".
+pub fn headline(light: &str, bold: &str, size: f32) -> impl IntoElement {
+    div()
+        .flex()
+        .gap(px(size * 0.25))
+        .text_size(px(size))
+        .line_height(px(size * 1.1))
+        .text_color(theme::color(color::INK))
+        .child(div().font_weight(FontWeight::LIGHT).child(light.to_owned()))
+        .child(div().font_weight(FontWeight::SEMIBOLD).child(bold.to_owned()))
 }
 
-/// The brand's halftone: `line-strong` dots at a 9px pitch, fading out downward.
-pub fn dot_matrix() -> impl IntoElement {
+/// The dot grid: faint dots on an 18px pitch, only inside empty areas.
+pub fn dot_grid() -> impl IntoElement {
     canvas(
         |_, _, _| (),
         |bounds: Bounds<Pixels>, (), window: &mut Window, _: &mut App| {
-            const PITCH: f32 = 9.;
+            const PITCH: f32 = 18.;
             let dot = theme::color(color::LINE_STRONG);
             let width = f32::from(bounds.size.width);
             let height = f32::from(bounds.size.height);
             let mut y = PITCH / 2.;
             while y < height {
-                let fade = (1. - y / height).clamp(0., 1.);
                 let mut x = PITCH / 2.;
                 while x < width {
-                    let origin = point(bounds.origin.x + px(x - 1.3), bounds.origin.y + px(y - 1.3));
-                    window.paint_quad(
-                        fill(Bounds::new(origin, size(px(2.6), px(2.6))), dot.opacity(fade)).corner_radii(px(1.3)),
-                    );
+                    let origin = point(bounds.origin.x + px(x - 1.), bounds.origin.y + px(y - 1.));
+                    window.paint_quad(fill(Bounds::new(origin, size(px(2.), px(2.))), dot).corner_radii(px(1.)));
                     x += PITCH;
                 }
                 y += PITCH;
@@ -185,83 +222,17 @@ pub fn dot_matrix() -> impl IntoElement {
     .left_0()
 }
 
-/// The brand's diagonal lines: `line-strong` hairlines at 45°, fading away from the top-right
-/// corner. For large empty areas.
-pub fn diagonal_lines(ground: gpui_kit::Hsla) -> impl IntoElement {
-    div()
-        .absolute()
-        .top_0()
-        .left_0()
-        .size_full()
-        // GPUI clips to rectangles: round with the panel (its radius less its border).
-        .rounded(len(radius::RADIUS_XL - 1.))
-        .bg(pattern_slash(theme::color(color::LINE_STRONG), 1., 12.))
-        .child(div().size_full().rounded(len(radius::RADIUS_XL - 1.)).bg(linear_gradient(
-            225.,
-            linear_color_stop(ground.opacity(0.), 0.),
-            linear_color_stop(ground, 0.7),
-        )))
-}
-
-/// A segmented switch whose selected pill is solid white.
-pub fn pills(options: &[(&'static str, bool)]) -> impl IntoElement {
-    div().flex().gap(px(2.)).p(px(3.)).rounded_full().bg(theme::color(color::CONTROL)).children(options.iter().map(
-        |(label, selected)| {
-            div()
-                .px(len(space::SPACE_5))
-                .h(px(28.))
-                .flex()
-                .items_center()
-                .rounded_full()
-                .text_size(px(12.))
-                .font_weight(FontWeight::SEMIBOLD)
-                .map(|pill| {
-                    if *selected {
-                        pill.bg(theme::color(color::INK)).text_color(theme::color(color::INK_INVERSE))
-                    } else {
-                        pill.text_color(theme::color(color::INK_MUTED))
-                    }
-                })
-                .child(*label)
-        },
-    ))
-}
-
-/// A panel on the ground: `surface`, `radius-xl`, one-pixel `line`.
-pub fn panel() -> gpui_kit::Div {
-    div()
-        .size_full()
-        .relative()
-        .rounded(len(radius::RADIUS_XL))
-        .bg(theme::color(color::SURFACE))
-        .border_1()
-        .border_color(theme::color(color::LINE))
-        .overflow_hidden()
-}
-
-/// An uppercase label above a group: 11px, weight 600, in `ink-muted`.
-pub fn eyebrow(text: impl Into<SharedString>) -> impl IntoElement {
-    div()
-        .text_size(px(11.))
-        .line_height(px(14.))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(theme::color(color::INK_MUTED))
-        .child(text.into().to_uppercase())
-}
-
-/// The sidebar until the file tree arrives (Phase 3): the project, the Files/Changes switch.
+/// The sidebar until the file tree arrives (Phase 3): the project, the Files/Changes switch, and
+/// an empty well.
 pub fn sidebar(project_name: &str, project_path: &str) -> AnyElement {
     panel()
-        .flex()
-        .flex_col()
-        .gap(len(space::SPACE_5))
-        .p(len(space::SPACE_2))
         .child(
             div()
                 .flex()
                 .items_center()
-                .gap(len(space::SPACE_4))
-                .child(icon_tile("project", "folder", TileKind::Current, 44.))
+                .gap(len(space::SPACE_3))
+                .pl(len(space::SPACE_1))
+                .child(icon_button("project", "folder", false))
                 .child(
                     div()
                         .min_w_0()
@@ -270,6 +241,7 @@ pub fn sidebar(project_name: &str, project_path: &str) -> AnyElement {
                                 .text_size(px(15.))
                                 .line_height(px(20.))
                                 .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(theme::color(color::INK))
                                 .truncate()
                                 .child(project_name.to_owned()),
                         )
@@ -277,100 +249,98 @@ pub fn sidebar(project_name: &str, project_path: &str) -> AnyElement {
                             div()
                                 .text_size(px(11.))
                                 .line_height(px(14.))
-                                .text_color(theme::color(color::INK_MUTED))
+                                .text_color(theme::color(color::INK_FAINT))
                                 .truncate()
                                 .child(project_path.to_owned()),
                         ),
                 ),
         )
-        .child(div().px(len(space::SPACE_1)).child(pills(&[("Files", true), ("Changes", false)])))
+        .child(segmented(&[("Files", true), ("Changes", false)]))
         .child(
-            div().relative().flex_1().rounded(len(radius::RADIUS_LG)).overflow_hidden().child(dot_matrix()).child(
-                div().flex().flex_col().gap(len(space::SPACE_2)).p(len(space::SPACE_4)).child(eyebrow("Files")).child(
-                    div()
-                        .text_size(px(13.))
-                        .text_color(theme::color(color::INK_MUTED))
-                        .child("The file tree comes in Phase 3."),
-                ),
+            well().child(dot_grid()).child(
+                div()
+                    .relative()
+                    .p(len(space::SPACE_4))
+                    .text_size(px(14.))
+                    .text_color(theme::color(color::INK_MUTED))
+                    .child("The file tree comes in Phase 3."),
             ),
         )
         .into_any_element()
 }
 
-/// The editor area until files open in it (Phase 3).
+/// The editor until files open in it (Phase 3).
 pub fn editor() -> AnyElement {
     panel()
-        .flex()
-        .items_center()
-        .justify_center()
         .child(
-            div()
-                .flex()
-                .flex_col()
-                .items_center()
-                .gap(len(space::SPACE_3))
-                .child(icon_tile("editor-file", "file", TileKind::Plain, 44.))
-                .child(
-                    div()
-                        .text_size(px(15.))
-                        .line_height(px(20.))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child("No file open"),
-                )
-                .child(
-                    div()
-                        .text_size(px(13.))
-                        .text_color(theme::color(color::INK_MUTED))
-                        .child("Opening and editing files comes in Phase 3. ⌘J hides this panel."),
-                ),
+            well().flex().items_center().justify_center().child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(len(space::SPACE_2))
+                    .child(
+                        div()
+                            .text_size(px(15.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme::color(color::INK))
+                            .child("No file open"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(14.))
+                            .text_color(theme::color(color::INK_MUTED))
+                            .child("Opening and editing files comes in Phase 3. ⌘J hides this panel."),
+                    ),
+            ),
         )
         .into_any_element()
 }
 
-/// What the grid shows with no terminal open: the diagonal lines, a light headline with one
-/// gradient word, and the action.
+/// What the grid shows with no terminal open: the dot grid, a headline in two weights, one
+/// sentence and the action.
 pub fn empty_grid(
     project_name: &str,
     new_terminal: impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut App) + 'static,
 ) -> AnyElement {
     panel()
-        .child(diagonal_lines(theme::color(color::SURFACE)))
         .child(
-            div().absolute().size_full().flex().items_center().justify_center().child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap(len(space::SPACE_6))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .gap(len(space::SPACE_3))
-                            .child(eyebrow(project_name.to_owned()))
-                            .child(
-                                div()
-                                    .text_size(px(28.))
-                                    .line_height(px(32.))
-                                    .font_weight(FontWeight::LIGHT)
-                                    .child(gradient_text("No terminals ", "yet")),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(13.))
-                                    .text_color(theme::color(color::INK_MUTED))
-                                    .child("Open a shell in the project folder, then start Claude in it."),
-                            ),
-                    )
-                    .child(button("empty-new", "New terminal", Some("⌘T"), true).on_click(new_terminal)),
+            well().child(dot_grid()).child(
+                div().absolute().size_full().flex().items_center().justify_center().child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .gap(len(space::SPACE_6))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .items_center()
+                                .gap(len(space::SPACE_3))
+                                .child(
+                                    div()
+                                        .text_size(px(11.))
+                                        .text_color(theme::color(color::INK_FAINT))
+                                        .child(project_name.to_owned()),
+                                )
+                                .child(headline("No terminals", "yet", 44.))
+                                .child(
+                                    div()
+                                        .text_size(px(14.))
+                                        .text_color(theme::color(color::INK_MUTED))
+                                        .child("Open a shell in the project folder, then start Claude in it."),
+                                ),
+                        )
+                        .child(button("empty-new", "New terminal", Some("⌘T"), true).on_click(new_terminal)),
+                ),
             ),
         )
         .into_any_element()
 }
 
 /// How the draggable gaps between panels look: nothing at rest (the gap of ground is the
-/// divider), a short purple pill while the pointer is on it or dragging.
+/// divider), a short blue pill while the pointer is on it or dragging.
 pub fn quiet_resize_handle() -> gpui_kit::base::ResizeHandleRenderer {
     std::rc::Rc::new(|handle, _, _| {
         use gpui_kit::base::ResizeHandleState;
@@ -378,11 +348,8 @@ pub fn quiet_resize_handle() -> gpui_kit::base::ResizeHandleRenderer {
         if handle.state() == ResizeHandleState::Idle {
             return Some(div().into_any_element());
         }
-        let pill = theme::color(color::PURPLE_TEXT).opacity(if handle.state() == ResizeHandleState::Hovered {
-            0.5
-        } else {
-            0.9
-        });
+        let pill =
+            theme::color(color::BLUE).opacity(if handle.state() == ResizeHandleState::Hovered { 0.5 } else { 0.9 });
         // The handle's own area is a one-pixel line; the pill is centred along it and overhangs
         // across it.
         Some(match handle.axis() {

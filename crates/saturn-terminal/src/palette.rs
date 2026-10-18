@@ -26,14 +26,14 @@ pub fn cursor() -> Rgb {
 }
 
 pub fn selection() -> Rgb {
-    rgb(color::PURPLE)
+    rgb(color::BLUE_VIVID)
 }
 
-/// How strongly selected text is tinted: less on a light background, where purple is louder.
+/// How strongly selected text is tinted: less on a light background, where blue is louder.
 pub fn selection_opacity() -> f32 {
     match saturn_design::appearance() {
-        saturn_design::Appearance::Dark => 0.55,
-        saturn_design::Appearance::Light => 0.28,
+        saturn_design::Appearance::Dark => 0.45,
+        saturn_design::Appearance::Light => 0.25,
     }
 }
 

@@ -12,8 +12,8 @@ mod workspace;
 use std::borrow::Cow;
 
 use gpui_kit::{
-    App, AppContext as _, Bounds, KeyBinding, Menu, MenuItem, TitlebarOptions, WindowBounds, WindowOptions, actions,
-    point, px, size,
+    App, AppContext as _, Bounds, KeyBinding, Menu, MenuItem, TitlebarOptions, WindowBackgroundAppearance,
+    WindowBounds, WindowOptions, actions, point, px, size,
 };
 
 use crate::workspace::{
@@ -28,9 +28,9 @@ actions!(saturn, [Quit]);
 /// weight. Instanced from the variable fonts with fontTools (OFL 1.1; neither declares a Reserved
 /// Font Name).
 const FONTS: [&[u8]; 5] = [
-    include_bytes!("../assets/fonts/PlusJakartaSans-Light.ttf"),
-    include_bytes!("../assets/fonts/PlusJakartaSans-Regular.ttf"),
-    include_bytes!("../assets/fonts/PlusJakartaSans-SemiBold.ttf"),
+    include_bytes!("../assets/fonts/Urbanist-Light.ttf"),
+    include_bytes!("../assets/fonts/Urbanist-Regular.ttf"),
+    include_bytes!("../assets/fonts/Urbanist-SemiBold.ttf"),
     include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf"),
     include_bytes!("../assets/fonts/JetBrainsMono-Bold.ttf"),
 ];
@@ -112,9 +112,12 @@ fn main() {
             titlebar: Some(TitlebarOptions {
                 title: Some("Saturn".into()),
                 appears_transparent: true,
-                traffic_light_position: Some(point(px(16.), px(16.))),
+                // Centred in the 48px title bar.
+                traffic_light_position: Some(point(px(18.), px(17.))),
             }),
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(1600.), px(1000.)), cx))),
+            // The glass is the window itself: macOS blurs the desktop behind the translucent ground.
+            window_background: WindowBackgroundAppearance::Blurred,
             ..WindowOptions::default()
         };
         gpui_kit::open_window(options, cx, |window, cx| {
