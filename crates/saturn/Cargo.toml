@@ -19,6 +19,22 @@ serde.workspace = true
 saturn-bridge.workspace = true
 async-channel.workspace = true
 serde_json.workspace = true
+notify.workspace = true
+# The same gpui-component gpui-kit bundles, named only to switch on the editor's languages.
+gpui-component = { version = "=0.7.3", features = [
+  "tree-sitter-bash",
+  "tree-sitter-css",
+  "tree-sitter-go",
+  "tree-sitter-html",
+  "tree-sitter-javascript",
+  "tree-sitter-markdown",
+  "tree-sitter-python",
+  "tree-sitter-rust",
+  "tree-sitter-toml",
+  "tree-sitter-tsx",
+  "tree-sitter-typescript",
+  "tree-sitter-yaml",
+] }
 gpui-pre = { version = "=0.3.9", features = ["test-support"], optional = true }
 gpui-pre-platform = { version = "=0.3.9", features = ["test-support"], optional = true }
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
@@ -34,8 +50,9 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString"] }
 
 [package.metadata.cargo-machete]
-# Only switched on by the `capture` feature, to turn on GPUI's window-to-image support.
-ignored = ["gpui-pre", "gpui-pre-platform", "image"]
+# gpui-pre*/image: only switched on by the `capture` feature, to turn on GPUI's window-to-image
+# support. gpui-component: named only to enable the editor's tree-sitter languages.
+ignored = ["gpui-pre", "gpui-pre-platform", "image", "gpui-component"]
 
 [lints]
 workspace = true

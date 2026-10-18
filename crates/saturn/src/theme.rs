@@ -77,6 +77,45 @@ fn component_theme(appearance: Appearance) -> gpui_kit::component::ThemeConfig {
         "danger.background": hex(c::RED),
         "danger.foreground": hex(c::INK_ON_ACCENT),
     });
+    // The editor's colours, with the same restraint as the chrome: blue for keywords, green for
+    // strings, amber for literals, faint comments, and grey for everything else.
+    let style = |token: Token| serde_json::json!({ "color": hex(token) });
+    let highlight = serde_json::json!({
+        "editor.background": hex(c::SURFACE),
+        "editor.foreground": hex(c::INK_BODY),
+        "editor.active_line.background": hex(c::SURFACE_RAISED),
+        "editor.line_number": hex(c::INK_FAINT),
+        "editor.active_line_number": hex(c::INK_MUTED),
+        "editor.invisible": hex(c::LINE_STRONG),
+        "editor.gutter.background": hex(c::SURFACE),
+        "syntax": {
+            "keyword": style(c::BLUE),
+            "tag": style(c::BLUE),
+            "link_uri": style(c::BLUE),
+            "string": style(c::TERM_GREEN),
+            "string.special": style(c::TERM_GREEN),
+            "string.escape": style(c::AMBER_TEXT),
+            "string.regex": style(c::AMBER_TEXT),
+            "number": style(c::AMBER_TEXT),
+            "boolean": style(c::AMBER_TEXT),
+            "constant": style(c::AMBER_TEXT),
+            "comment": style(c::INK_FAINT),
+            "comment_doc": style(c::INK_FAINT),
+            "function": style(c::INK),
+            "type": style(c::INK),
+            "constructor": style(c::INK),
+            "enum": style(c::INK),
+            "variant": style(c::INK),
+            "title": style(c::INK),
+            "property": style(c::INK_BODY),
+            "variable": style(c::INK_BODY),
+            "attribute": style(c::INK_MUTED),
+            "operator": style(c::INK_MUTED),
+            "punctuation": style(c::INK_MUTED),
+            "punctuation.bracket": style(c::INK_MUTED),
+            "punctuation.delimiter": style(c::INK_MUTED),
+        },
+    });
     serde_json::from_value(serde_json::json!({
         "name": "Saturn",
         "mode": if appearance == Appearance::Dark { "dark" } else { "light" },
@@ -88,6 +127,7 @@ fn component_theme(appearance: Appearance) -> gpui_kit::component::ThemeConfig {
         "radius.lg": radius::RADIUS_LG as usize,
         "shadow": false,
         "colors": colors,
+        "highlight": highlight,
     }))
     .expect("Saturn's theme config is valid")
 }

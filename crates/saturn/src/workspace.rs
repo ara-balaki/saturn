@@ -9,8 +9,8 @@ use gpui_kit::component::resizable::{h_resizable, resizable_panel, v_resizable};
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, AppContext as _, ClickEvent, Context, CursorStyle, DragMoveEvent, Entity,
     FocusHandle, Focusable as _, FontWeight, Hsla, InteractiveElement as _, IntoElement, MouseButton,
-    ParentElement as _, PathPromptOptions, PromptLevel, Render, StatefulInteractiveElement as _, Styled as _, Window,
-    actions, bounce, div, ease_in_out, prelude::FluentBuilder as _, px, relative,
+    ParentElement as _, PathPromptOptions, PromptLevel, Render, StatefulInteractiveElement as _, Styled as _,
+    Subscription, Window, actions, bounce, div, ease_in_out, prelude::FluentBuilder as _, px, relative,
 };
 use saturn_bridge::{Bridge, HookCall};
 use saturn_core::agent_state::{AgentState, tab_title};
@@ -20,6 +20,8 @@ use saturn_design::{color, radius, shadow, space};
 use saturn_terminal::view::{TerminalView, TerminalViewEvent};
 
 use crate::chrome;
+use crate::editor_view::EditorView;
+use crate::files_view::{FilesEvent, FilesView};
 use crate::settings::{self, AppearanceSetting, Settings};
 use crate::theme::{self, len};
 use crate::{dock, settings_view};
@@ -45,6 +47,7 @@ actions!(
         ToggleEditor,
         OpenProject,
         OpenSettings,
+        SaveFile,
         FocusPane1,
         FocusPane2,
         FocusPane3,
@@ -134,6 +137,12 @@ pub struct Workspace {
     session_names: HashMap<TabId, String>,
     /// The number on the Dock icon right now.
     badge: usize,
+    /// The project's file tree, in the sidebar.
+    files: Entity<FilesView>,
+    /// Opens what is picked in the tree; kept so the subscription lives as long as the tree.
+    files_events: Subscription,
+    /// Open files, in the top panel.
+    editor: Entity<EditorView>,
 }
 
 /// The Saturn plugin (`plugin/` in this repository) that Claude sessions in Saturn's panes load.
@@ -232,7 +241,12 @@ impl Workspace {
             })
             .detach();
         }
+        let files = cx.new(|cx| FilesView::new(&project, cx));
+        let files_events = Self::follow_files(&files, window, cx);
         Self {
+            files,
+            files_events,
+            editor: cx.new(|_| EditorView::default()),
             project,
             layout: Layout::default(),
             terminals: HashMap::new(),
@@ -248,6 +262,20 @@ impl Workspace {
             session_names: HashMap::new(),
             badge: 0,
         }
+    }
+
+    /// Opens `path` in the editor, showing the editor if it was hidden.
+    pub fn open_file(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
+        self.editor.update(cx, |editor, cx| editor.open(path, window, cx));
+        self.editor_open = true;
+        cx.notify();
+    }
+
+    /// A file picked in the tree opens in the editor, which shows itself if it was hidden.
+    fn follow_files(files: &Entity<FilesView>, window: &mut Window, cx: &mut Context<Self>) -> Subscription {
+        cx.subscribe_in(files, window, |this, _, event: &FilesEvent, window, cx| match event {
+            FilesEvent::Open(path) => this.open_file(path, window, cx),
+        })
     }
 
     pub fn settings(&self) -> &Settings {
@@ -511,6 +539,8 @@ impl Workspace {
             let Some(project) = paths.into_iter().next() else { return };
             settings::remember_project(&project);
             let _ = this.update_in(cx, |this, window, cx| {
+                this.files = cx.new(|cx| FilesView::new(&project, cx));
+                this.files_events = Self::follow_files(&this.files, window, cx);
                 this.project = project;
                 if this.layout.is_empty() {
                     this.open_terminal(Placement::Tab, window, cx);
@@ -848,7 +878,7 @@ impl Workspace {
                         .size(px(270.))
                         .size_range(px(200.)..px(480.))
                         .visible(self.sidebar_open)
-                        .child(div().size_full().pr(half_gap).child(chrome::sidebar(&name, &path))),
+                        .child(div().size_full().pr(half_gap).child(chrome::sidebar(&name, &path, self.files.clone()))),
                 )
                 .child(
                     resizable_panel().child(
@@ -860,7 +890,7 @@ impl Workspace {
                                         .size(px(260.))
                                         .size_range(px(120.)..px(4000.))
                                         .visible(self.editor_open)
-                                        .child(div().size_full().pb(half_gap).child(chrome::editor())),
+                                        .child(div().size_full().pb(half_gap).child(self.editor.clone())),
                                 )
                                 .child(
                                     resizable_panel().child(
@@ -900,6 +930,7 @@ impl Workspace {
 }
 
 impl Render for Workspace {
+    #[expect(clippy::too_many_lines, reason = "the window's action table, one line per action")]
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.unseen.len() != self.badge {
             self.badge = self.unseen.len();
@@ -963,6 +994,7 @@ impl Render for Workspace {
             }))
             .on_action(cx.listener(|_, _: &OpenProject, window, cx| Self::open_project(window, cx)))
             .on_action(cx.listener(|_, _: &OpenSettings, window, cx| settings_view::open(cx.weak_entity(), window, cx)))
+            .on_action(cx.listener(|this, _: &SaveFile, _, cx| this.editor.update(cx, EditorView::save)))
             .on_action(cx.listener(|this, _: &Copy, _, cx| {
                 if let Some(view) = this.focused_view() {
                     view.update(cx, |view, cx| view.copy_selection(cx));

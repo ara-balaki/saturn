@@ -222,9 +222,8 @@ pub fn dot_grid() -> impl IntoElement {
     .left_0()
 }
 
-/// The sidebar until the file tree arrives (Phase 3): the project, the Files/Changes switch, and
-/// an empty well.
-pub fn sidebar(project_name: &str, project_path: &str) -> AnyElement {
+/// The sidebar: the project, the Files/Changes switch, and the file tree in the well.
+pub fn sidebar(project_name: &str, project_path: &str, files: impl IntoElement) -> AnyElement {
     panel()
         .child(
             div()
@@ -256,44 +255,7 @@ pub fn sidebar(project_name: &str, project_path: &str) -> AnyElement {
                 ),
         )
         .child(segmented(&[("Files", true), ("Changes", false)]))
-        .child(
-            well().child(dot_grid()).child(
-                div()
-                    .relative()
-                    .p(len(space::SPACE_4))
-                    .text_size(px(14.))
-                    .text_color(theme::color(color::INK_MUTED))
-                    .child("The file tree comes in Phase 3."),
-            ),
-        )
-        .into_any_element()
-}
-
-/// The editor until files open in it (Phase 3).
-pub fn editor() -> AnyElement {
-    panel()
-        .child(
-            well().flex().items_center().justify_center().child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap(len(space::SPACE_2))
-                    .child(
-                        div()
-                            .text_size(px(15.))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme::color(color::INK))
-                            .child("No file open"),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(14.))
-                            .text_color(theme::color(color::INK_MUTED))
-                            .child("Opening and editing files comes in Phase 3. ⌘J hides this panel."),
-                    ),
-            ),
-        )
+        .child(well().child(files))
         .into_any_element()
 }
 
