@@ -110,7 +110,8 @@ fn component_theme(appearance: Appearance) -> gpui_kit::component::ThemeConfig {
         "success.background": hex(c::TERM_GREEN),
         "success.foreground": hex(c::INK_ON_SIGNAL),
         "danger.background": hex(c::RED),
-        "danger.foreground": hex(c::INK_ON_ACCENT),
+        // Dark mode's red is light: dark ink on it, as on green.
+        "danger.foreground": hex(if appearance == Appearance::Dark { c::INK_ON_SIGNAL } else { c::INK_ON_ACCENT }),
     });
     let highlight = serde_json::json!({
         // The editor sits in a well, which draws the glass; its own background stays clear.
