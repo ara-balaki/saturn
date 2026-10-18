@@ -4,3 +4,6 @@ target/
 
 # Screenshots and page snapshots from browser checks
 .playwright-mcp/
+
+# Local notes, never committed.
+notes/

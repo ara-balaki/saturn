@@ -2,9 +2,8 @@
 
 Decided 2026-10-18: Saturn is built entirely in native Rust, UI included. Electron and VS Code
 extensions are dropped. This document records what was researched (four parallel research tracks,
-crates.io and GitHub checked the same day) and what was chosen. It replaces the Electron sections
-(§3, §6, §7, §11, §13) of [02-proposal.md](02-proposal.md); the product, the features, the design
-system and the Claude Code findings all stay.
+crates.io and GitHub checked the same day) and what was chosen. It replaces the earlier Electron plan;
+the product, the features, the design system and the Claude Code findings all stay.
 
 ## Summary
 
@@ -169,8 +168,7 @@ We can read them for ideas. Code we may adapt, with attribution:
 
 Measured with `SATURN_PANES=12 SATURN_COMMAND="node scripts/tui-load.mjs 30 14" SATURN_PERF=1`,
 in a release build: every pane redraws a full screen of coloured text 30 times a second, inside
-synchronized-output brackets. These are the same conditions as the Electron spike in
-[03-phase0-findings.md](03-phase0-findings.md).
+synchronized-output brackets. These are the same conditions as the earlier Electron spike.
 
 |                                | Electron (Phase 0) | Native Rust       |
 | ------------------------------ | ------------------ | ----------------- |

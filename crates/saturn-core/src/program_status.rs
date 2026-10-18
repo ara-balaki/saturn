@@ -3,7 +3,7 @@
 //! Claude asks `ESC ] 7501 ; ? ST` once at startup. A terminal that answers with any OSC 7501 whose
 //! data starts with `?` then receives `state=<state>:app=claude-code[:id=..][:kind=..][:progress=N]
 //! [:title=<base64>][:msg=<base64>]` as the session changes, and `state=clear` when it exits.
-//! Verified against a real session in Phase 0 (docs/03-phase0-findings.md).
+//! Verified against a real Claude Code session.
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
