@@ -97,5 +97,12 @@ pub fn open(workspace: WeakEntity<Workspace>, window: &mut Window, cx: &mut App)
                 settings.format_on_save,
                 change(workspace.clone(), |settings, on| settings.format_on_save = on),
             ))
+            .child(setting_row(
+                "notifications",
+                "Notifications",
+                "When an agent needs you or finishes while Saturn is in the background, macOS shows a notification. Only in Saturn.app.",
+                settings.notifications,
+                change(workspace.clone(), |settings, on| settings.notifications = on),
+            ))
     });
 }

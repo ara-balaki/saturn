@@ -6,6 +6,7 @@ mod chrome;
 mod dock;
 mod editor_view;
 mod files_view;
+mod notify;
 mod session;
 mod settings;
 mod settings_view;
@@ -117,6 +118,9 @@ fn main() {
     gpui_kit::application().with_assets(assets::Assets).run(move |cx| {
         gpui_kit::init(cx);
         theme::apply(settings::load().appearance, cx);
+        if settings::load().notifications && !spike::is_automated() {
+            notify::request_permission();
+        }
         cx.text_system()
             .add_fonts(FONTS.iter().map(|font| Cow::Borrowed(*font)).collect())
             .expect("the bundled fonts load");

@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[expect(clippy::struct_excessive_bools, reason = "independent on/off switches, each its own JSON field")]
 pub struct Settings {
     pub last_project: Option<PathBuf>,
     /// Tabs show the Claude session's name (or the terminal's title). Off: the folder, or a
@@ -15,6 +16,8 @@ pub struct Settings {
     pub rename_sessions_from_commands: bool,
     /// Saving a file runs the project's own formatter on it, when the project has one.
     pub format_on_save: bool,
+    /// A notification when an agent needs you or finishes while Saturn is in the background.
+    pub notifications: bool,
     pub appearance: AppearanceSetting,
 }
 
@@ -46,6 +49,7 @@ impl Default for Settings {
             name_tabs_after_sessions: true,
             rename_sessions_from_commands: true,
             format_on_save: true,
+            notifications: true,
             appearance: AppearanceSetting::System,
         }
     }

@@ -27,7 +27,7 @@ use crate::files_view::{FilesEvent, FilesView};
 use crate::session::{self, SavedGrid, SavedTab};
 use crate::settings::{self, AppearanceSetting, Settings};
 use crate::theme::{self, len};
-use crate::{dock, settings_view};
+use crate::{dock, notify, settings_view};
 
 actions!(
     saturn,
@@ -592,6 +592,9 @@ impl Workspace {
             TerminalViewEvent::Exited => self.forget(tab, window, cx),
             TerminalViewEvent::StateChanged => {
                 let asks = self.terminals.get(&tab).is_some_and(|view| view.read(cx).state.asks_for_you());
+                if asks && !window.is_window_active() && self.settings.notifications {
+                    self.notify_about(tab, cx);
+                }
                 if asks && !self.is_looking_at(tab, window) {
                     self.unseen.insert(tab);
                 } else if !asks {
@@ -613,6 +616,23 @@ impl Workspace {
                 self.save_session(cx);
             }
         }
+    }
+
+    /// A macOS notification about a tab that needs you or finished, while Saturn is in the background.
+    fn notify_about(&self, tab: TabId, cx: &Context<Self>) {
+        let Some(view) = self.terminals.get(&tab) else { return };
+        let (state, message) = {
+            let view = view.read(cx);
+            (view.state, view.message.clone())
+        };
+        let name = self.tab_name(tab, cx);
+        let (title, fallback, sound) = match state {
+            AgentState::NeedsYou => (format!("{name} needs you"), "Waiting for your answer", true),
+            AgentState::Error => (format!("{name} stopped"), "The turn failed", true),
+            _ => (format!("{name} is done"), "Your turn", false),
+        };
+        let body = message.filter(|message| !message.is_empty()).unwrap_or_else(|| fallback.to_owned());
+        notify::post(&format!("tab-{}", tab.0), &title, &body, sound);
     }
 
     fn forget(&mut self, tab: TabId, window: &mut Window, cx: &mut Context<Self>) {
