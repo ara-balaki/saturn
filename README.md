@@ -23,7 +23,8 @@ It isn't an IDE and doesn't try to replace yours. It's the place the agents live
 
 ## What it does
 
-- **A grid of terminals.** Split right (⌘D) and down (⌘⇧D), tabs in every pane, drag the dividers,
+- **A grid of terminals.** Split right (⌘D) and down (⌘⇧D), or drag a tab onto a pane's edge to
+  split it there; tabs in every pane, drag the dividers,
   maximise one pane (⌘⇧↩). A real terminal underneath (alacritty's engine), so TUIs, colours and
   mouse work as they should.
 - **Agents that tell you how they're doing.** Each tab shows whether its agent is working, idle,

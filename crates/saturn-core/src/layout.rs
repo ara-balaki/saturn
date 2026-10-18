@@ -268,6 +268,40 @@ impl Layout {
         self.rows.insert(at.row + 1, Row { id, cells: vec![new_cell], size: half });
     }
 
+    /// Moves a tab out of its cell into a new cell beside `target`: left or right of it in its row,
+    /// or in a new row above or below. Its old cell goes when it empties. Nothing happens when the
+    /// tab is the only one in `target` itself: a cell can't be split off from itself.
+    pub fn split_with(&mut self, tab: TabId, target: CellId, side: Direction) {
+        let alone_in_target = self.cell(target).is_some_and(|cell| cell.tabs == [tab]);
+        if alone_in_target || self.position_of_tab(tab).is_none() || self.position(target).is_none() {
+            return;
+        }
+        self.remove_tab(tab);
+        let Some(at) = self.position(target) else { return };
+        self.maximized = None;
+        match side {
+            Direction::Left | Direction::Right => {
+                let half = self.rows[at.row].cells[at.cell].size / 2.0;
+                let new_cell = self.new_cell(tab, half);
+                self.focused = Some(new_cell.id);
+                let row = &mut self.rows[at.row];
+                row.cells[at.cell].size = half;
+                let index = if side == Direction::Right { at.cell + 1 } else { at.cell };
+                row.cells.insert(index, new_cell);
+            }
+            Direction::Up | Direction::Down => {
+                let half = self.rows[at.row].size / 2.0;
+                let new_cell = self.new_cell(tab, 1.0);
+                self.focused = Some(new_cell.id);
+                let id = RowId(self.new_id());
+                self.rows[at.row].size = half;
+                let index = if side == Direction::Down { at.row + 1 } else { at.row };
+                self.rows.insert(index, Row { id, cells: vec![new_cell], size: half });
+            }
+        }
+        self.fill();
+    }
+
     /// Takes a tab out of the grid; an emptied cell or row goes with it.
     pub fn remove_tab(&mut self, tab: TabId) {
         let Some(at) = self.position_of_tab(tab) else { return };
@@ -491,6 +525,38 @@ mod tests {
         layout.resize_rows(&[0.3]);
         let restored = Layout::from_shape(&layout.shape(), &[A]);
         assert_eq!(restored.rows[0].size, 1.0);
+    }
+
+    #[test]
+    fn a_dragged_tab_splits_a_cell_on_the_side_it_lands() {
+        // A cell with two tabs: dragging the second to its own right edge splits it in two.
+        let mut layout = Layout::default();
+        layout.add_tab(A, None);
+        layout.add_tab(B, None);
+        let first = layout.rows[0].cells[0].id;
+        layout.split_with(B, first, Direction::Right);
+        assert_eq!(shape(&layout), [[[1], [2]]]);
+        assert_eq!(layout.focused_tab(), Some(B));
+        let sizes: Vec<f32> = layout.rows[0].cells.iter().map(|c| c.size).collect();
+        assert!((sizes.iter().sum::<f32>() - 1.0).abs() < 1e-6);
+
+        // Dropping B on A's left edge puts it back on the left; B's old cell goes.
+        layout.split_with(B, first, Direction::Left);
+        assert_eq!(shape(&layout), [[[2], [1]]]);
+
+        // A new row below A, from B.
+        layout.split_with(B, first, Direction::Down);
+        assert_eq!(shape(&layout), vec![vec![vec![1]], vec![vec![2]]]);
+        assert!((layout.rows.iter().map(|r| r.size).sum::<f32>() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_lone_tab_cannot_split_off_from_itself() {
+        let mut layout = Layout::default();
+        layout.add_tab(A, None);
+        let only = layout.rows[0].cells[0].id;
+        layout.split_with(A, only, Direction::Right);
+        assert_eq!(shape(&layout), [[[1]]]);
     }
 
     #[test]

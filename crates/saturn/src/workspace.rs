@@ -8,10 +8,10 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::resizable::{h_resizable, resizable_panel, v_resizable};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::{
-    Animation, AnimationExt as _, AnyElement, AppContext as _, ClickEvent, Context, CursorStyle, DragMoveEvent, Entity,
-    FocusHandle, Focusable as _, FontWeight, Hsla, InteractiveElement as _, IntoElement, MouseButton,
-    ParentElement as _, PathPromptOptions, PromptLevel, Render, StatefulInteractiveElement as _, Styled as _,
-    Subscription, Window, actions, bounce, div, ease_in_out, prelude::FluentBuilder as _, px, relative,
+    Animation, AnimationExt as _, AnyElement, AppContext as _, Bounds, ClickEvent, Context, CursorStyle, DragMoveEvent,
+    Entity, FocusHandle, Focusable as _, FontWeight, Hsla, InteractiveElement as _, IntoElement, MouseButton,
+    ParentElement as _, PathPromptOptions, Pixels, Point, PromptLevel, Render, StatefulInteractiveElement as _,
+    Styled as _, Subscription, Window, actions, bounce, div, ease_in_out, prelude::FluentBuilder as _, px, relative,
 };
 use saturn_bridge::{Bridge, HookCall};
 use saturn_core::agent_activity;
@@ -168,6 +168,8 @@ pub struct Workspace {
     clickup: ClickUpState,
     /// Each agent's steps and context, for the Agents tab.
     activity: HashMap<TabId, Activity>,
+    /// Where a dragged tab would land: a cell, and the side to split it on (`None`: into the cell).
+    drop_target: Option<(CellId, Option<Direction>)>,
     /// The repository and branch each tab is in, read in the background.
     checkouts: HashMap<TabId, Checkout>,
     /// The pull request of each branch a tab is on, from `gh`.
@@ -262,6 +264,30 @@ fn start_bridge() -> Option<(Bridge, async_channel::Receiver<HookCall>)> {
     }
 }
 
+/// A pane's ticket: its status in ClickUp's own colour, opening the ticket.
+fn ticket_chip(cell: CellId, ticket: &Ticket) -> impl IntoElement {
+    let url = ticket.url.clone();
+    div()
+        .id(("ticket-chip", cell.key()))
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(len(space::SPACE_2))
+        .h(len(TAB_HEIGHT))
+        .px(len(space::SPACE_3))
+        .rounded(len(radius::RADIUS_SM))
+        .cursor_pointer()
+        .text_size(px(12.))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(theme::color(color::INK_MUTED))
+        .hover(|s| s.bg(theme::fill_hover()))
+        .child(ticket_picker::status_dot(ticket))
+        .child(ticket.status.clone())
+        .on_click(move |_, _, _| {
+            let _ = std::process::Command::new("open").arg(&url).spawn();
+        })
+}
+
 /// A pane's pull request: its number in the colour of its state, opening it on GitHub.
 fn pull_request_chip(cell: CellId, pr: &PullRequest) -> impl IntoElement {
     let (icon, state_color) = match pr.state {
@@ -292,6 +318,34 @@ fn pull_request_chip(cell: CellId, pr: &PullRequest) -> impl IntoElement {
         .on_click(move |_, _, _| {
             let _ = std::process::Command::new("open").arg(&url).spawn();
         })
+}
+
+/// Where in a pane a dragged tab lands: within a quarter of an edge splits the pane on that side,
+/// anywhere further in moves the tab into the pane (`None`).
+fn drop_side(bounds: Bounds<Pixels>, at: Point<Pixels>) -> Option<Direction> {
+    let x = f32::from(at.x - bounds.origin.x) / f32::from(bounds.size.width).max(1.);
+    let y = f32::from(at.y - bounds.origin.y) / f32::from(bounds.size.height).max(1.);
+    let edges = [(x, Direction::Left), (1. - x, Direction::Right), (y, Direction::Up), (1. - y, Direction::Down)];
+    let (distance, side) =
+        edges.into_iter().fold((f32::MAX, Direction::Left), |best, edge| if edge.0 < best.0 { edge } else { best });
+    (distance < 0.25).then_some(side)
+}
+
+/// The blue preview of where a dropped tab goes: half the pane on a side, or the whole pane.
+fn drop_preview(side: Option<Direction>) -> impl IntoElement {
+    let preview = div()
+        .absolute()
+        .rounded(len(radius::RADIUS_SM))
+        .bg(theme::color(color::BLUE_VIVID).opacity(0.14))
+        .border_2()
+        .border_color(theme::color(color::BLUE).opacity(0.7));
+    match side {
+        Some(Direction::Left) => preview.top_0().left_0().h_full().w(relative(0.5)),
+        Some(Direction::Right) => preview.top_0().right_0().h_full().w(relative(0.5)),
+        Some(Direction::Up) => preview.top_0().left_0().w_full().h(relative(0.5)),
+        Some(Direction::Down) => preview.bottom_0().left_0().w_full().h(relative(0.5)),
+        None => preview.top_0().left_0().size_full(),
+    }
 }
 
 fn state_color(state: AgentState) -> Hsla {
@@ -415,6 +469,7 @@ impl Workspace {
             clickup: ClickUpState::default(),
             checkouts: HashMap::new(),
             activity: HashMap::new(),
+            drop_target: None,
             pull_requests: HashMap::new(),
             checkout_refresh: Refresh::Idle,
             roots,
@@ -1273,6 +1328,33 @@ impl Workspace {
         self.update_layout(window, cx, |layout| layout.move_tab(tab, cell, index));
     }
 
+    /// Where a tab being dragged over `cell_id` would land. Every pane hears every move of a drag;
+    /// only the one under the pointer answers.
+    fn track_drop(&mut self, cell_id: CellId, event: &DragMoveEvent<DraggedTab>, cx: &mut Context<Self>) {
+        let target = event
+            .bounds
+            .contains(&event.event.position)
+            .then(|| (cell_id, drop_side(event.bounds, event.event.position)));
+        let mine = self.drop_target.is_some_and(|(cell, _)| cell == cell_id);
+        if target.is_some() && self.drop_target != target {
+            self.drop_target = target;
+            cx.notify();
+        } else if target.is_none() && mine {
+            self.drop_target = None;
+            cx.notify();
+        }
+    }
+
+    /// A tab dropped on a pane: split the pane on the side it landed, or move into it.
+    fn drop_on_pane(&mut self, tab: TabId, cell_id: CellId, window: &mut Window, cx: &mut Context<Self>) {
+        let side = self.drop_target.filter(|(cell, _)| *cell == cell_id).and_then(|(_, side)| side);
+        self.drop_target = None;
+        match side {
+            Some(side) => self.update_layout(window, cx, |layout| layout.split_with(tab, cell_id, side)),
+            None => self.drop_tab(tab, cell_id, None, window, cx),
+        }
+    }
+
     /// Asks for a folder and adds it to the window's repos.
     fn open_project(window: &mut Window, cx: &mut Context<Self>) {
         let paths = cx.prompt_for_paths(PathPromptOptions {
@@ -1411,28 +1493,7 @@ impl Workspace {
                                 this.drop_tab(dragged.tab, cell_id, None, window, cx);
                             })),
                     )
-                    .children(self.ticket_of(cell.active, cx).map(|ticket| {
-                        let url = ticket.url.clone();
-                        div()
-                            .id(("ticket-chip", cell_id.key()))
-                            .flex()
-                            .flex_none()
-                            .items_center()
-                            .gap(len(space::SPACE_2))
-                            .h(len(TAB_HEIGHT))
-                            .px(len(space::SPACE_3))
-                            .rounded(len(radius::RADIUS_SM))
-                            .cursor_pointer()
-                            .text_size(px(12.))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme::color(color::INK_MUTED))
-                            .hover(|s| s.bg(theme::fill_hover()))
-                            .child(ticket_picker::status_dot(ticket))
-                            .child(ticket.status.clone())
-                            .on_click(move |_, _, _| {
-                                let _ = std::process::Command::new("open").arg(&url).spawn();
-                            })
-                    }))
+                    .children(self.ticket_of(cell.active, cx).map(|ticket| ticket_chip(cell_id, ticket)))
                     .children(self.pull_request_of(cell.active).map(|pr| pull_request_chip(cell_id, pr)))
                     .child(header_button("split-right", "columns-2", Placement::Right, cx))
                     .child(header_button("split-down", "rows-2", Placement::Down, cx))
@@ -1444,11 +1505,18 @@ impl Workspace {
                     .pt(len(space::SPACE_3))
                     .pl(len(space::SPACE_4))
                     .pb(len(space::SPACE_1))
-                    .drag_over::<DraggedTab>(|style, _, _, _| style.bg(theme::color(color::BLUE_VIVID).opacity(0.08)))
-                    .on_drop(cx.listener(move |this, dragged: &DraggedTab, window, cx| {
-                        this.drop_tab(dragged.tab, cell_id, None, window, cx);
+                    .on_drag_move(cx.listener(move |this, event: &DragMoveEvent<DraggedTab>, _, cx| {
+                        this.track_drop(cell_id, event, cx);
                     }))
-                    .children(terminal),
+                    .on_drop(cx.listener(move |this, dragged: &DraggedTab, window, cx| {
+                        this.drop_on_pane(dragged.tab, cell_id, window, cx);
+                    }))
+                    .children(terminal)
+                    .children(
+                        self.drop_target
+                            .filter(|(cell, _)| *cell == cell_id && cx.has_active_drag())
+                            .map(|(_, side)| drop_preview(side)),
+                    ),
             );
         if let Some(glow) = glow {
             pane = pane.border_color(gpui_kit::transparent_black()).shadow(theme::shadows(glow));
@@ -1916,7 +1984,19 @@ fn read_tail(path: &Path) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::move_divider;
+    use super::{Direction, drop_side, move_divider};
+    use gpui_kit::{Bounds, point, px, size};
+
+    #[test]
+    fn a_dropped_tab_splits_on_the_nearest_edge_or_joins_in_the_middle() {
+        let pane = Bounds::new(point(px(100.), px(50.)), size(px(400.), px(200.)));
+        let at = |x: f32, y: f32| drop_side(pane, point(px(x), px(y)));
+        assert_eq!(at(110., 150.), Some(Direction::Left));
+        assert_eq!(at(490., 150.), Some(Direction::Right));
+        assert_eq!(at(300., 60.), Some(Direction::Up));
+        assert_eq!(at(300., 240.), Some(Direction::Down));
+        assert_eq!(at(300., 150.), None);
+    }
 
     #[test]
     fn moves_a_divider_and_keeps_the_pair_total() {
