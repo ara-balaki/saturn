@@ -1251,7 +1251,12 @@ impl Workspace {
                             this.editor_open = !this.editor_open;
                             cx.notify();
                         },
-                    ))),
+                    )))
+                    .child(chrome::track_separator())
+                    .child(
+                        toggle("open-settings", "settings", false)
+                            .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx))),
+                    ),
             )
             .child(empty("titlebar-middle").flex_1())
             .children(activity)
