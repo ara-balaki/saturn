@@ -1,0 +1,4 @@
+{
+  "name": "saturn-spike",
+  "description": "Phase 0: logs every hook event and tests renaming a session from UserPromptSubmit"
+}

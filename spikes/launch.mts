@@ -1,5 +1,5 @@
 // Phase 0 harness: launch the built app with a grid of panes, let them run, take a screenshot.
-// Usage: node spikes/launch.ts --panes 4 --command 'echo hi' --cwd ~/x --seconds 5 --out name
+// Usage: node spikes/launch.mts --panes 4 --command 'echo hi' --cwd ~/x --seconds 5 --out name
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -39,7 +39,33 @@ if (values.cwd) query.set('cwd', values.cwd);
 await page.goto(`${page.url().split('?')[0]}?${query.toString()}`);
 
 const started = Date.now();
-await page.waitForTimeout(Number(values.seconds) * 1000);
+// Frame pacing of the renderer while the panes run: long frames are what makes typing feel slow.
+const frames = await page.evaluate(
+  async (ms) => {
+    const deltas: number[] = [];
+    let last = performance.now();
+    const end = last + ms;
+    await new Promise<void>((done) => {
+      const tick = (now: number) => {
+        deltas.push(now - last);
+        last = now;
+        if (now < end) requestAnimationFrame(tick);
+        else done();
+      };
+      requestAnimationFrame(tick);
+    });
+    deltas.sort((a, b) => a - b);
+    const at = (q: number) => Math.round(deltas[Math.floor(q * (deltas.length - 1))] ?? 0);
+    return {
+      count: deltas.length,
+      p50: at(0.5),
+      p95: at(0.95),
+      max: at(1),
+      over50ms: deltas.filter((d) => d > 50).length,
+    };
+  },
+  Number(values.seconds) * 1000,
+);
 const metrics = await app.evaluate(({ app: electronApp }) =>
   electronApp.getAppMetrics().map((metric) => ({
     type: metric.type,
@@ -48,5 +74,5 @@ const metrics = await app.evaluate(({ app: electronApp }) =>
   })),
 );
 await page.screenshot({ path: join(logs, `${values.out}.png`) });
-console.log(JSON.stringify({ seconds: (Date.now() - started) / 1000, metrics }, null, 2));
+console.log(JSON.stringify({ seconds: (Date.now() - started) / 1000, frames, metrics }, null, 2));
 await app.close();
