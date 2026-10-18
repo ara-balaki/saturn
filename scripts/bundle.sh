@@ -1,16 +1,28 @@
 #!/bin/sh
-# Builds Saturn.app (release build, icon, the Claude plugin inside) and signs it for this Mac.
+# Builds Saturn.app (release build, icon, the Claude plugin inside) and signs it ad hoc.
 # `--install` also puts it in /Applications, replacing an older Saturn.app there.
+# `--dmg` builds it for Apple Silicon and Intel and packs it into a disk image to share.
 set -eu
 cd "$(dirname "$0")/.."
+mode=${1:-}
 
-cargo build --release -p saturn
+if [ "$mode" = "--dmg" ]; then
+  cargo build --release -p saturn --target aarch64-apple-darwin
+  cargo build --release -p saturn --target x86_64-apple-darwin
+  binary=target/release/saturn-universal
+  mkdir -p target/release
+  lipo -create -output "$binary" \
+    target/aarch64-apple-darwin/release/saturn target/x86_64-apple-darwin/release/saturn
+else
+  cargo build --release -p saturn
+  binary=target/release/saturn
+fi
 
 app=target/release/Saturn.app
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-cp target/release/saturn "$app/Contents/MacOS/saturn"
+cp "$binary" "$app/Contents/MacOS/saturn"
 cp crates/saturn/assets/app/Saturn.icns "$app/Contents/Resources/Saturn.icns"
 cp -R plugin "$app/Contents/Resources/plugin"
 
@@ -34,11 +46,26 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Ad-hoc signature: enough for this Mac to run it and to allow notifications.
+# Ad-hoc signature: enough to run it and to allow notifications. Without an Apple Developer ID
+# it isn't notarised, so a Mac that downloaded it asks once (System Settings → Privacy &
+# Security → Open Anyway).
 codesign --force --deep --sign - "$app"
 echo "Built $app ($version)"
 
-if [ "${1:-}" = "--install" ]; then
+if [ "$mode" = "--dmg" ]; then
+  stage=target/release/dmg
+  rm -rf "$stage"
+  mkdir -p "$stage"
+  cp -R "$app" "$stage/Saturn.app"
+  ln -s /Applications "$stage/Applications"
+  cp scripts/how-to-open.txt "$stage/How to open Saturn.txt"
+  dmg="target/release/Saturn-$version.dmg"
+  rm -f "$dmg"
+  hdiutil create -quiet -volname "Saturn $version" -srcfolder "$stage" -format UDZO "$dmg"
+  echo "Built $dmg"
+fi
+
+if [ "$mode" = "--install" ]; then
   rm -rf /Applications/Saturn.app
   cp -R "$app" /Applications/Saturn.app
   echo "Installed /Applications/Saturn.app"

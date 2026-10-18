@@ -2,3 +2,5 @@
 channel = "1.99.1"
 components = ["rustfmt", "clippy"]
 profile = "minimal"
+# Intel too, for the shared disk image (`pnpm dist:dmg`).
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]

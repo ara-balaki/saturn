@@ -87,8 +87,14 @@ pnpm install-app      # builds Saturn.app and puts it in /Applications
 
 Then open Saturn from Spotlight and pick a folder. Run `claude` in any pane.
 
-The app is signed for your own Mac only, so it isn't notarised for sharing. Rust's version is pinned in
-`rust-toolchain.toml`, and rustup installs it on the first build.
+Rust's version is pinned in `rust-toolchain.toml`, and rustup installs it on the first build.
+
+### Share it
+
+`pnpm dist:dmg` builds `target/release/Saturn-<version>.dmg`, for Apple Silicon and Intel Macs.
+Saturn isn't signed with an Apple Developer ID, so the first time someone opens it, macOS can't
+check it: they click Done, then **Open Anyway** in System Settings → Privacy & Security. The disk
+image carries a note that says so. They need [Claude Code](https://claude.com/claude-code) too.
 
 ## Shortcuts
 
