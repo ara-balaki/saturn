@@ -1,0 +1,388 @@
+/* Layout of the window. Components and every colour, size and radius come from the design system
+   (design/components.css and the generated design/tokens.css). */
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--ground);
+}
+
+body.is-resizing {
+  user-select: none;
+}
+
+body.is-resizing .xterm {
+  pointer-events: none;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.app {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0 var(--space-2) var(--space-2);
+}
+
+/* Title bar: the window's drag handle; room on the left for the traffic lights. */
+.titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex: none;
+  height: 44px;
+  padding-left: 76px;
+  -webkit-app-region: drag;
+}
+
+.titlebar button {
+  -webkit-app-region: no-drag;
+}
+
+.titlebar__toggles,
+.titlebar__status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.titlebar__status {
+  gap: var(--space-4);
+}
+
+.titlebar__count {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.titlebar .sat-icon-tile[aria-pressed='false'] {
+  color: var(--ink-muted);
+  background: transparent;
+}
+
+.sat-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Workbench: sidebar | (editor / grid), with draggable gaps. */
+.workbench {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.workbench__side {
+  display: flex;
+  flex: none;
+  min-width: 0;
+}
+
+.workbench__main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.workbench__editor {
+  display: flex;
+  flex: none;
+  min-height: 0;
+}
+
+.workbench__grid {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Resizers are the gaps between panels. */
+.resizer {
+  flex: none;
+  position: relative;
+  z-index: 1;
+}
+
+.resizer--col {
+  width: var(--space-2);
+  cursor: col-resize;
+}
+
+.resizer--row {
+  height: var(--space-2);
+  cursor: row-resize;
+}
+
+.resizer::after {
+  content: '';
+  position: absolute;
+  border-radius: var(--radius-pill);
+  background: var(--purple);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.resizer--col::after {
+  inset: 30% 2px;
+}
+
+.resizer--row::after {
+  inset: 2px 30%;
+}
+
+.resizer:hover::after,
+body.is-resizing .resizer:active::after {
+  opacity: 0.8;
+}
+
+/* Sidebar placeholder. */
+.sidebar {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: var(--space-1);
+}
+
+.sidebar__project {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.sidebar__name {
+  min-width: 0;
+}
+
+.sidebar__title {
+  font: 500 15px/20px var(--font-sans);
+}
+
+.sidebar__path {
+  overflow: hidden;
+  font: 400 11px/14px var(--font-sans);
+  color: var(--ink-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.sidebar .sat-pills {
+  align-self: flex-start;
+}
+
+.sidebar__empty {
+  position: relative;
+  flex: 1;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.sidebar__dots {
+  position: absolute;
+  inset: 0;
+}
+
+.sidebar__empty p {
+  position: relative;
+  margin: var(--space-6) var(--space-4);
+  color: var(--ink-muted);
+}
+
+/* Editor placeholder. */
+.editor {
+  display: grid;
+  flex: 1;
+  place-items: center;
+}
+
+.editor__empty {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: center;
+  text-align: center;
+}
+
+.editor__title {
+  font: 600 13px/18px var(--font-sans);
+}
+
+.editor__hint {
+  color: var(--ink-muted);
+}
+
+/* The terminal grid. */
+.grid {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.grid-row {
+  display: flex;
+  flex-basis: 0;
+  min-height: 0;
+}
+
+.grid-cell {
+  display: flex;
+  flex-basis: 0;
+  min-width: 0;
+}
+
+.cell {
+  flex: 1;
+}
+
+.cell .sat-tab {
+  position: relative;
+  padding-right: var(--space-2);
+}
+
+.tab-close {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--ink-muted);
+  background: transparent;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.tab-close svg {
+  width: 11px;
+  height: 11px;
+}
+
+.sat-tab:hover .tab-close,
+.sat-tab[aria-selected='true'] .tab-close {
+  opacity: 1;
+}
+
+.tab-close:hover {
+  color: var(--ink);
+  background: var(--control-hover);
+}
+
+.sat-tab[data-attention='needs-you'] .tab-close {
+  color: var(--ink-inverse);
+}
+
+.tab-rename {
+  width: 120px;
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  outline: 1px solid var(--purple-text);
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface);
+}
+
+.cell-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.cell-slot {
+  position: absolute;
+  inset: var(--space-2) 0 var(--space-1) var(--space-3);
+}
+
+.terminal-host {
+  width: 100%;
+  height: 100%;
+}
+
+.cell-drop {
+  position: absolute;
+  inset: var(--space-2);
+  border-color: var(--purple-text);
+  background: rgba(114, 60, 235, 0.08);
+  pointer-events: none;
+}
+
+.xterm .xterm-viewport {
+  background-color: transparent !important;
+}
+
+/* The empty grid. */
+.empty-grid {
+  position: relative;
+  flex: 1;
+}
+
+.empty-grid__dots {
+  position: absolute;
+  inset: 0;
+}
+
+.empty-grid__content {
+  position: relative;
+  display: grid;
+  gap: var(--space-3);
+  place-content: center;
+  justify-items: center;
+  height: 100%;
+  text-align: center;
+}
+
+.empty-grid__title {
+  font: 600 13px/18px var(--font-sans);
+}
+
+.empty-grid__hint {
+  color: var(--ink-muted);
+}
+
+/* Welcome, before a project is open. */
+.welcome {
+  position: relative;
+  flex: 1;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.welcome__dots {
+  position: absolute;
+  inset: 0;
+}
+
+.welcome__content {
+  position: relative;
+  display: grid;
+  gap: var(--space-4);
+  place-content: center;
+  justify-items: center;
+  height: 100%;
+}
+
+.welcome__title {
+  margin: 0;
+  font: 300 64px/1 var(--font-sans);
+  letter-spacing: -0.03em;
+}
+
+.welcome__hint {
+  margin: 0 0 var(--space-3);
+  color: var(--ink-muted);
+}
