@@ -14,12 +14,34 @@ fn available() -> bool {
     NSBundle::mainBundle().bundleIdentifier().is_some()
 }
 
+/// Notes what macOS answered in `notifications.log` in Saturn's data folder: a refusal comes back
+/// only here, never on screen.
+fn note(line: &str) {
+    use std::io::Write as _;
+    let Some(dir) = crate::settings::data_dir() else { return };
+    let _ = std::fs::create_dir_all(&dir);
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.as_secs());
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("notifications.log")) {
+        let _ = writeln!(file, "{stamp} {line}");
+    }
+}
+
+/// macOS's error, in its words.
+#[expect(unsafe_code, reason = "the completion handler hands the error over as a raw pointer")]
+fn describe(error: *mut NSError) -> String {
+    // SAFETY: AppKit passes a valid NSError or null, alive for the handler's call.
+    unsafe { error.as_ref() }.map_or_else(|| "no error".to_owned(), |error| error.localizedDescription().to_string())
+}
+
 /// Asks once for permission; macOS remembers the answer.
 pub fn request_permission() {
     if !available() {
+        note("not in Saturn.app: notifications are off");
         return;
     }
-    let done = RcBlock::new(|_granted: Bool, _error: *mut NSError| {});
+    let done = RcBlock::new(|granted: Bool, error: *mut NSError| {
+        note(&format!("permission granted: {}, {}", granted.as_bool(), describe(error)));
+    });
     UNUserNotificationCenter::currentNotificationCenter().requestAuthorizationWithOptions_completionHandler(
         UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound,
         &done,
@@ -39,5 +61,11 @@ pub fn post(id: &str, title: &str, body: &str, sound: bool) {
         content.setSound(Some(&UNNotificationSound::defaultSound()));
     }
     let request = UNNotificationRequest::requestWithIdentifier_content_trigger(&NSString::from_str(id), &content, None);
-    UNUserNotificationCenter::currentNotificationCenter().addNotificationRequest_withCompletionHandler(&request, None);
+    let done = RcBlock::new(|error: *mut NSError| {
+        if !error.is_null() {
+            note(&format!("a notification was refused: {}", describe(error)));
+        }
+    });
+    UNUserNotificationCenter::currentNotificationCenter()
+        .addNotificationRequest_withCompletionHandler(&request, Some(&done));
 }
