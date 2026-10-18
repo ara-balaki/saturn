@@ -3,12 +3,14 @@
 //! repository's diff with gpui-component's diff view.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 
 use gpui_kit::component::diff::{Diff, DiffFile, DiffMode, DiffState};
 use gpui_kit::component::input::{Editor, EditorState, InputEvent};
 use gpui_kit::{
     AnyElement, AppContext as _, Context, Entity, FontWeight, InteractiveElement as _, IntoElement, MouseButton,
-    ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, Subscription, Window, div,
+    ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, Subscription, Task, Window, div,
     prelude::FluentBuilder as _, px,
 };
 use saturn_core::format;
@@ -20,6 +22,8 @@ use gpui_kit::component::tooltip::Tooltip;
 use crate::chrome;
 use crate::history_view::{HistoryEvent, HistoryView};
 use crate::impact_view::ImpactView;
+use crate::lsp::{self, Provider, Servers, Status};
+use crate::references_view::ReferencesView;
 use crate::schema_view::SchemaView;
 use crate::theme::{self, len};
 
@@ -33,7 +37,20 @@ struct OpenFile {
     saved: String,
     /// The file changed on disk while it had unsaved changes here; the user picks which to keep.
     changed_on_disk: bool,
+    /// How its language server answers for it, when Saturn knows one for its language.
+    language: Option<Status>,
+    /// Asking its server for its problems, a moment after the last change.
+    pull: Option<Task<()>>,
     _changes: Subscription,
+}
+
+impl OpenFile {
+    fn document(&self) -> Option<&Arc<saturn_core::lsp::Document>> {
+        match &self.language {
+            Some(Status::Running(document)) => Some(document),
+            _ => None,
+        }
+    }
 }
 
 impl OpenFile {
@@ -63,6 +80,7 @@ enum Front {
     History,
     Schema,
     Impact,
+    References,
 }
 
 #[derive(Default)]
@@ -79,6 +97,12 @@ pub struct EditorView {
     schema: Option<Entity<SchemaView>>,
     /// What the changes reach, once opened.
     impact: Option<Entity<ImpactView>>,
+    /// Where a symbol is used, once asked.
+    references: Option<Entity<ReferencesView>>,
+    /// The language servers, started with the first file that has one.
+    servers: Option<Servers>,
+    /// Applies what the servers report while the panel lives.
+    server_events: Option<Task<()>>,
     /// Whether the panel takes the grid's room too, for a diagram or the history.
     maximized: bool,
     /// Why the last file could not be opened or saved, shown in the strip until the next action.
@@ -114,20 +138,307 @@ impl EditorView {
             state.set_value(text.clone(), window, cx);
             state
         });
-        let changes = cx.subscribe(&state, |_, _, event: &InputEvent, cx| {
+        let changes = cx.subscribe(&state, |this, state, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
+                if let Some(index) = this.files.iter().position(|file| file.state == state)
+                    && let Some(document) = this.files[index].document()
+                {
+                    document.sync(state.read(cx).value().as_ref());
+                    this.pull_diagnostics(index, Duration::from_millis(400), cx);
+                }
                 cx.notify();
             }
         });
+        let language = self.start_language(path, &text, &state, cx);
         self.files.push(OpenFile {
             path: path.to_owned(),
             state,
             saved: text,
             changed_on_disk: false,
+            language,
+            pull: None,
             _changes: changes,
         });
         self.active = self.files.len() - 1;
+        self.pull_diagnostics(self.active, Duration::ZERO, cx);
         cx.notify();
+    }
+
+    /// Asks a server that reports problems only when asked (TypeScript 7) for the file's, after
+    /// `delay`; a newer change cancels the question.
+    fn pull_diagnostics(&mut self, index: usize, delay: Duration, cx: &mut Context<Self>) {
+        let Some(file) = self.files.get_mut(index) else { return };
+        let Some(document) = file
+            .document()
+            .filter(|document| !document.server.is_ready() || document.server.can("diagnosticProvider"))
+            .cloned()
+        else {
+            return;
+        };
+        file.pull = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(delay).await;
+            let params = serde_json::json!({ "textDocument": { "uri": document.uri } });
+            let Ok(answer) = document.server.request("textDocument/diagnostic", params).await else { return };
+            // "unchanged" keeps what's shown.
+            if answer.get("kind").and_then(serde_json::Value::as_str) != Some("full") {
+                return;
+            }
+            let items = answer.get("items").cloned().unwrap_or_default();
+            let diagnostics = serde_json::from_value(items).unwrap_or_default();
+            let uri = document.uri.clone();
+            let _ = this.update(cx, |this, cx| this.server_event(lsp::Event::Diagnostics { uri, diagnostics }, cx));
+        }));
+    }
+
+    /// Opens `path` with the cursor at `position` (go to definition, a reference).
+    pub fn open_at(&mut self, path: &Path, position: lsp_types::Position, window: &mut Window, cx: &mut Context<Self>) {
+        self.open(path, window, cx);
+        if let Some(file) = self.files.iter().find(|file| file.path == path) {
+            let state = file.state.clone();
+            state.update(cx, |state, cx| {
+                state.set_cursor_position(position, window, cx);
+                state.focus(window, cx);
+            });
+        }
+    }
+
+    /// Asks the active file's server everything at `line`:`character` and prints the answers, then
+    /// shows its references (spikes: hover, completion and definition need a person otherwise).
+    pub fn probe_language(&mut self, line: u32, character: u32, window: &mut Window, cx: &mut Context<Self>) {
+        use gpui_kit::component::input::RopeExt as _;
+        let Some(file) = self.files.get(self.active) else { return };
+        let state = file.state.clone();
+        let (text, providers) = {
+            let state = state.read(cx);
+            let lsp = state.lsp();
+            let providers = (
+                lsp.hover_provider.clone(),
+                lsp.definition_provider.clone(),
+                lsp.completion_provider.clone(),
+                lsp.code_action_providers.first().cloned(),
+            );
+            (state.text().clone(), providers)
+        };
+        let offset = text.position_to_offset(&lsp_types::Position::new(line, character));
+        let (hover, definition, completion, actions) = providers;
+        let hover = hover.map(|provider| provider.hover(&text, offset, window, cx));
+        let definition = definition.map(|provider| provider.definitions(&text, offset, window, cx));
+        let context = lsp_types::CompletionContext {
+            trigger_kind: lsp_types::CompletionTriggerKind::INVOKED,
+            trigger_character: None,
+        };
+        let completion = completion.map(|provider| provider.completions(&text, offset, context, window, cx));
+        let actions_task =
+            actions.as_ref().map(|provider| provider.code_actions(state.clone(), offset..offset, window, cx));
+        cx.spawn_in(window, async move |_, cx| {
+            if let Some(Ok(Some(hover))) = match hover {
+                Some(task) => Some(task.await),
+                None => None,
+            } {
+                eprintln!(
+                    "probe hover: {}",
+                    serde_json::to_string(&hover.contents).unwrap_or_default().chars().take(160).collect::<String>()
+                );
+            }
+            if let Some(Ok(links)) = match definition {
+                Some(task) => Some(task.await),
+                None => None,
+            } {
+                for link in links {
+                    eprintln!(
+                        "probe definition: {} line {}",
+                        link.target_uri.as_str(),
+                        link.target_range.start.line + 1
+                    );
+                }
+            }
+            if let Some(Ok(answer)) = match completion {
+                Some(task) => Some(task.await),
+                None => None,
+            } {
+                let items = match answer {
+                    lsp_types::CompletionResponse::Array(items) => items,
+                    lsp_types::CompletionResponse::List(list) => list.items,
+                };
+                let labels: Vec<String> = items.iter().take(6).map(|item| item.label.clone()).collect();
+                eprintln!("probe completion: {} items, first {labels:?}", items.len());
+            }
+            if let (Some(provider), Some(Ok(actions))) = (
+                actions,
+                match actions_task {
+                    Some(task) => Some(task.await),
+                    None => None,
+                },
+            ) {
+                eprintln!("probe actions: {:?}", actions.iter().map(|action| action.title.clone()).collect::<Vec<_>>());
+                if let Some(references) = actions.into_iter().find(|action| action.title == "Find references") {
+                    let task =
+                        cx.update(|window, cx| provider.perform_code_action(state, references, false, window, cx));
+                    if let Ok(task) = task {
+                        eprintln!("probe references: {:?}", task.await.map(|()| "shown"));
+                    }
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Opens `path` in its language's server and gives its editor the server's features.
+    fn start_language(
+        &mut self,
+        path: &Path,
+        text: &str,
+        state: &Entity<EditorState>,
+        cx: &mut Context<Self>,
+    ) -> Option<Status> {
+        if self.servers.is_none() {
+            let (servers, events) = Servers::new();
+            self.servers = Some(servers);
+            self.server_events = Some(cx.spawn(async move |this, cx| {
+                while let Ok(event) = events.recv().await {
+                    if this.update(cx, |this, cx| this.server_event(event, cx)).is_err() {
+                        break;
+                    }
+                }
+            }));
+        }
+        let status = self.servers.as_mut()?.open(path, text)?;
+        if std::env::var_os("SATURN_LSP_DEBUG").is_some() {
+            let state = match &status {
+                Status::Running(_) => "running".to_owned(),
+                Status::Missing(spec) => format!("missing {}", spec.name),
+                Status::Installing(spec) => format!("installing {}", spec.name),
+                Status::Failed(problem) => problem.clone(),
+            };
+            eprintln!("lsp: {} → {state}", path.display());
+        }
+        if let Status::Running(document) = &status {
+            Provider::attach(document.clone(), path, cx.weak_entity(), state, cx);
+        }
+        Some(status)
+    }
+
+    fn server_event(&mut self, event: lsp::Event, cx: &mut Context<Self>) {
+        if std::env::var_os("SATURN_LSP_DEBUG").is_some() {
+            match &event {
+                lsp::Event::Diagnostics { uri, diagnostics } => {
+                    eprintln!("lsp: {} problems in {uri}", diagnostics.len());
+                }
+                lsp::Event::Stopped { name, reason, .. } => {
+                    eprintln!("lsp: {name} stopped: {reason:?}");
+                }
+            }
+        }
+        match event {
+            lsp::Event::Diagnostics { uri, diagnostics } => {
+                // Matched ignoring case: on a case-insensitive disk a server may lowercase paths.
+                let Some(file) =
+                    self.files.iter().find(|file| file.document().is_some_and(|d| d.uri.eq_ignore_ascii_case(&uri)))
+                else {
+                    return;
+                };
+                file.state.update(cx, |state, cx| {
+                    let text = state.text().clone();
+                    if let Some(set) = state.diagnostics_mut() {
+                        set.reset(&text);
+                        set.extend(diagnostics);
+                    }
+                    cx.notify();
+                });
+            }
+            lsp::Event::Stopped { name, root, reason } => {
+                if let Some(servers) = self.servers.as_mut() {
+                    servers.forget(name, &root);
+                }
+                for file in &mut self.files {
+                    if file
+                        .document()
+                        .is_some_and(|document| document.server.name == name && document.server.root == root)
+                    {
+                        let problem = reason.as_deref().map_or_else(|| format!("{name} stopped"), first_sentence);
+                        file.language = Some(Status::Failed(problem));
+                    }
+                }
+                cx.notify();
+            }
+        }
+    }
+
+    /// Installs the language server the active file is missing, then starts it for every open
+    /// file of that language.
+    fn install_language(&mut self, cx: &mut Context<Self>) {
+        let Some(Status::Missing(spec)) = self.files.get(self.active).and_then(|file| file.language.clone()) else {
+            return;
+        };
+        let missing = |file: &OpenFile| matches!(file.language, Some(Status::Missing(s)) if s.name == spec.name);
+        for file in self.files.iter_mut().filter(|file| missing(file)) {
+            file.language = Some(Status::Installing(spec));
+        }
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let outcome = cx.background_spawn(async move { lsp::install(spec) }).await;
+            let _ = this.update(cx, |this, cx| {
+                let installing =
+                    |file: &OpenFile| matches!(file.language, Some(Status::Installing(s)) if s.name == spec.name);
+                for index in 0..this.files.len() {
+                    if !installing(&this.files[index]) {
+                        continue;
+                    }
+                    let (path, state) = (this.files[index].path.clone(), this.files[index].state.clone());
+                    let language = match &outcome {
+                        Ok(()) => this.start_language(&path, &state.read(cx).value(), &state, cx),
+                        Err(problem) => Some(Status::Failed(format!("Couldn't install {}: {problem}", spec.name))),
+                    };
+                    this.files[index].language = language;
+                    this.pull_diagnostics(index, Duration::ZERO, cx);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Shows where a symbol is used.
+    pub fn show_references(&mut self, from: &Path, locations: Vec<lsp_types::Location>, cx: &mut Context<Self>) {
+        let editor = cx.weak_entity();
+        let from = from.to_owned();
+        match &self.references {
+            Some(references) => references.update(cx, |view, cx| view.set(&from, locations, cx)),
+            None => self.references = Some(cx.new(|cx| ReferencesView::new(&from, locations, editor, cx))),
+        }
+        self.front = Front::References;
+        cx.notify();
+    }
+
+    /// The active file's language server, when it needs a word: missing, installing, or stopped.
+    fn render_language_notice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let file = self.files.get(self.active).filter(|_| self.front == Front::File)?;
+        let note = |text: String, colour| {
+            div().px(len(space::SPACE_2)).text_size(px(12.)).text_color(theme::color(colour)).child(text)
+        };
+        let notice = match file.language.as_ref()? {
+            Status::Running(_) => return None,
+            Status::Missing(spec) if !spec.npm.is_empty() => div()
+                .flex()
+                .items_center()
+                .gap(len(space::SPACE_1))
+                .child(note(format!("No {} language server", spec.name), color::INK_FAINT))
+                .child(
+                    chrome::button("install-language", "Install", None, false)
+                        .tooltip(|window, cx| {
+                            Tooltip::new("Installs it with npm into Saturn's own folder").build(window, cx)
+                        })
+                        .on_click(cx.listener(|this, _, _, cx| this.install_language(cx))),
+                ),
+            Status::Missing(spec) => {
+                note(format!("Install {} for completions and errors", spec.servers[0].0), color::INK_FAINT)
+            }
+            Status::Installing(spec) => {
+                note(format!("Installing the {} language server…", spec.name), color::INK_FAINT)
+            }
+            Status::Failed(problem) => note(problem.clone(), color::INK_MUTED),
+        };
+        Some(notice.into_any_element())
     }
 
     /// Files changed on disk: an open copy without unsaved changes reloads; one with them asks.
@@ -310,8 +621,14 @@ impl EditorView {
         }
         let Some(file) = self.files.get_mut(self.active) else { return };
         let text = file.state.read(cx).value().to_string();
+        let mut server = None;
         match std::fs::write(&file.path, &text) {
             Ok(()) => {
+                server = file.document().map(|document| {
+                    document.sync(&text);
+                    document.saved();
+                    document.server.clone()
+                });
                 file.saved = text;
                 file.changed_on_disk = false;
                 self.problem = None;
@@ -320,6 +637,14 @@ impl EditorView {
                 }
             }
             Err(error) => self.problem = Some(format!("Could not save {}: {error}", file.name())),
+        }
+        // A save can fix or break the files that use this one.
+        let ours = |file: &OpenFile| {
+            file.document().is_some_and(|document| server.as_ref().is_some_and(|s| Arc::ptr_eq(s, &document.server)))
+        };
+        let indices: Vec<usize> = (0..self.files.len()).filter(|&index| ours(&self.files[index])).collect();
+        for index in indices {
+            self.pull_diagnostics(index, Duration::from_millis(200), cx);
         }
         cx.notify();
     }
@@ -501,6 +826,44 @@ impl EditorView {
         )
     }
 
+    fn render_references_tab(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.references.as_ref()?;
+        let in_front = self.front == Front::References;
+        Some(
+            chrome::track_item("references-tab", in_front)
+                .group("references-tab")
+                .pl(len(space::SPACE_3))
+                .pr(len(space::SPACE_1))
+                .child(chrome::icon("search", 13., theme::color(color::INK_MUTED)))
+                .child("References")
+                .child(
+                    div()
+                        .id("references-close")
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .size(px(20.))
+                        .rounded(len(radius::RADIUS_XS))
+                        .hover(|s| s.bg(theme::fill_control()))
+                        .child(chrome::icon("x", 11., theme::color(color::INK_MUTED)))
+                        .when(!in_front, |slot| {
+                            slot.invisible().group_hover("references-tab", gpui_kit::Styled::visible)
+                        })
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.references = None;
+                            this.front = Front::File;
+                            cx.notify();
+                        })),
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.front = Front::References;
+                    cx.notify();
+                }))
+                .into_any_element(),
+        )
+    }
+
     fn render_history_tab(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.history.as_ref()?;
         let in_front = self.front == Front::History;
@@ -629,6 +992,8 @@ impl Render for EditorView {
             self.schema.clone().map(gpui_kit::IntoElement::into_any_element)
         } else if self.front == Front::Impact {
             self.impact.clone().map(gpui_kit::IntoElement::into_any_element)
+        } else if self.front == Front::References {
+            self.references.clone().map(gpui_kit::IntoElement::into_any_element)
         } else {
             self.files
                 .get(self.active)
@@ -672,10 +1037,12 @@ impl Render for EditorView {
                     .children(self.render_schema_tab(cx))
                     .children(self.render_history_tab(cx))
                     .children(self.render_impact_tab(cx))
+                    .children(self.render_references_tab(cx))
                     .children(self.render_review_tab(cx))
                     .children((0..self.files.len()).map(|index| self.render_tab(index, cx)))
                     .child(div().flex_1())
                     .children(self.render_disk_notice(cx))
+                    .children(self.render_language_notice(cx))
                     .children(self.render_impact_button(cx))
                     .children(self.render_review_controls(cx))
                     .child(
@@ -701,6 +1068,18 @@ impl Render for EditorView {
             .child(chrome::well().child(body))
             .into_any_element()
     }
+}
+
+/// A server's reason, short enough for the strip: its first sentence, without the server's own
+/// "Request initialize failed with message:" preamble.
+fn first_sentence(reason: &str) -> String {
+    // rustup's stand-in for a component that isn't installed.
+    if reason.contains("Unknown binary 'rust-analyzer'") {
+        return "rust-analyzer isn't installed: rustup component add rust-analyzer".to_owned();
+    }
+    let reason = reason.rsplit("message: ").next().unwrap_or(reason);
+    let end = reason.find(". ").map_or(reason.len(), |end| end + 1);
+    reason[..end].to_owned()
 }
 
 fn display_name(path: &Path) -> String {

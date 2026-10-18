@@ -11,6 +11,7 @@ pub mod git;
 pub mod git_graph;
 pub mod imports;
 pub mod layout;
+pub mod lsp;
 pub mod program_status;
 pub mod pull_request;
 pub mod schema;

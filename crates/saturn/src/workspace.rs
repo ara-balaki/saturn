@@ -841,6 +841,11 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Asks the open file's language server about `line`:`character` (spikes).
+    pub fn probe_language(&mut self, line: u32, character: u32, window: &mut Window, cx: &mut Context<Self>) {
+        self.editor.update(cx, |editor, cx| editor.probe_language(line, character, window, cx));
+    }
+
     /// Opens the Impact tab for `repo`.
     pub fn show_impact(&mut self, repo: &Path, cx: &mut Context<Self>) {
         self.editor.update(cx, |editor, cx| {

@@ -41,6 +41,10 @@ It isn't an IDE and doesn't try to replace yours. It's the place the agents live
   syntax highlighting for about 60 languages that saves with your project's own formatter (Prettier, Biome, oxfmt or
   rustfmt, whichever the project uses). Files an agent changes reload by themselves; if you have
   unsaved edits, Saturn asks first.
+- **Language servers.** TypeScript and JavaScript, Rust, Python and Go files get completions,
+  hover, go to definition (⌘-click), quick fixes and Find references (⌘.), and errors underlined as
+  you type, from the server your project already uses. For TypeScript, Saturn installs one with a
+  click when there's none (the project's own TypeScript when it has one, else TypeScript 7).
 - **Review what changed.** The Changes tab lists every changed file, with a diff for each, for your
   uncommitted work or for the whole branch. History shows every branch as a graph, with tags,
   authors and dates; click a commit to see its diff.

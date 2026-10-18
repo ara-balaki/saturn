@@ -7,7 +7,8 @@
 //!   in the editor (`SATURN_SAVE=1` saves it after a moment); `SATURN_REVIEW=1` shows the Changes tab and reviews the first change.
 //! - `SATURN_MORE_REPOS=a:b` adds more repos to the window, as ⌘O would; `SATURN_FAKE_AGENTS=1`
 //!   gives the panes made-up agents; `SATURN_HISTORY=1` opens the History tab, `SATURN_IMPACT=1` the Impact tab (focused on `SATURN_IMPACT_FOCUS`), `SATURN_SCHEMA=1`
-//!   the database diagram.
+//!   the database diagram; `SATURN_LSP_PROBE=line:col` asks the open file's language server about
+//!   that place (0-based) and prints its answers.
 //! - `SATURN_SCREENSHOT=path.png` saves what the window draws after `SATURN_SCREENSHOT_AFTER`
 //!   seconds (needs the `capture` feature); `SATURN_QUIT_AFTER` quits after that many seconds.
 
@@ -104,6 +105,18 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
         for path in std::env::split_paths(&paths) {
             cx.defer_in(window, move |workspace, window, cx| workspace.add_project(path, window, cx));
         }
+    }
+    if let Some((line, character)) =
+        std::env::var("SATURN_LSP_PROBE").ok().and_then(|at| at.split_once(':').map(|(l, c)| (l.parse(), c.parse())))
+        && let (Ok(line), Ok(character)) = (line, character)
+    {
+        // After the opened file's server has had a moment to start.
+        cx.spawn_in(window, async move |workspace, cx| {
+            cx.background_executor().timer(Duration::from_secs(3)).await;
+            let _ =
+                workspace.update_in(cx, |workspace, window, cx| workspace.probe_language(line, character, window, cx));
+        })
+        .detach();
     }
     if let Some(path) = std::env::var_os("SATURN_OPEN_FILE") {
         cx.defer_in(window, move |workspace, window, cx| workspace.open_file(std::path::Path::new(&path), window, cx));

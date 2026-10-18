@@ -19,6 +19,9 @@ serde.workspace = true
 saturn-bridge.workspace = true
 async-channel.workspace = true
 serde_json.workspace = true
+anyhow = "1"
+# The protocol types gpui-component's editor speaks, at its version.
+lsp-types = { version = "0.97.0", features = ["proposed"] }
 # Grammars and highlight queries beyond the ones gpui-component bundles, and the full queries
 # for its TSX and Swift; see src/languages.rs. The TSX/Swift ones are pinned to the versions
 # gpui-component builds, so there is one copy of each grammar.
