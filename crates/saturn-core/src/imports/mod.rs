@@ -8,6 +8,9 @@ use std::path::{Component, Path, PathBuf};
 
 use serde_json::Value;
 
+mod python;
+mod rust;
+
 const SOURCE: [&str; 8] = ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
 
 /// The import graph of a repository, by paths relative to its top.
@@ -377,23 +380,56 @@ fn walk(root: &Path) -> ignore::WalkBuilder {
     walk
 }
 
-/// Reads every JavaScript and TypeScript file in `root` (gitignored folders such as
-/// `node_modules` skipped) and builds its import graph.
+/// The languages whose imports the graph follows.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Language {
+    Script,
+    Rust,
+    Python,
+}
+
+fn language(path: &Path) -> Option<Language> {
+    match path.extension()?.to_str()? {
+        ext if SOURCE.contains(&ext) && !path.to_string_lossy().ends_with(".d.ts") => Some(Language::Script),
+        "rs" => Some(Language::Rust),
+        "py" => Some(Language::Python),
+        _ => None,
+    }
+}
+
+/// Whether the graph follows imports in `path`'s language: JavaScript, TypeScript, Rust, Python.
+pub fn follows(path: &Path) -> bool {
+    language(path).is_some()
+}
+
+/// Reads every JavaScript, TypeScript, Rust and Python file in `root` (gitignored folders such as
+/// `node_modules` and `target` skipped) and builds its import graph.
 pub fn build(root: &Path) -> Graph {
     let mut sources: BTreeMap<PathBuf, Vec<String>> = BTreeMap::new();
     for entry in walk(root).build().flatten() {
         let path = entry.path();
-        let is_source = path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| SOURCE.contains(&ext));
         let Ok(relative) = path.strip_prefix(root) else { continue };
-        if !is_source || relative.to_string_lossy().ends_with(".d.ts") {
-            continue;
-        }
+        let Some(language) = language(path) else { continue };
         if let Ok(text) = std::fs::read_to_string(path) {
-            sources.insert(relative.to_owned(), specifiers(&text));
+            let found = match language {
+                Language::Script => specifiers(&text),
+                Language::Rust => rust::paths(&text),
+                Language::Python => python::imports(&text),
+            };
+            sources.insert(relative.to_owned(), found);
         }
     }
-    let resolver = Resolver::new(root, sources.keys().cloned().collect());
-    Graph::from_imports(&sources, |from, specifier| resolver.resolve(from, specifier))
+    let of = |wanted: Language| -> Vec<PathBuf> {
+        sources.keys().filter(|file| language(file) == Some(wanted)).cloned().collect()
+    };
+    let scripts = Resolver::new(root, of(Language::Script).into_iter().collect());
+    let crates = rust::Crates::new(root, &of(Language::Rust));
+    let modules = python::Modules::new(&of(Language::Python));
+    Graph::from_imports(&sources, |from, specifier| match language(from)? {
+        Language::Script => scripts.resolve(from, specifier),
+        Language::Rust => crates.resolve(from, specifier),
+        Language::Python => modules.resolve(from, specifier),
+    })
 }
 
 #[cfg(test)]

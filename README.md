@@ -48,8 +48,9 @@ It isn't an IDE and doesn't try to replace yours. It's the place the agents live
 - **Review what changed.** The Changes tab lists every changed file, with a diff for each, for your
   uncommitted work or for the whole branch. History shows every branch as a graph, with tags,
   authors and dates; click a commit to see its diff.
-- **See what a change reaches.** Impact follows JavaScript and TypeScript imports (relative paths,
-  `tsconfig` aliases, a monorepo's own packages) to every file that depends on what changed,
+- **See what a change reaches.** Impact follows imports in JavaScript and TypeScript (relative
+  paths, `tsconfig` aliases, a monorepo's own packages), Rust (modules and the workspace's crates)
+  and Python to every file that depends on what changed,
   nearest first, grouped by folder. Click a file to see what it uses and what uses it.
 - **A diagram of the database.** When a project has a Prisma schema or SQL migrations, the
   database button draws every table with its columns and keys, and a line for each foreign key,

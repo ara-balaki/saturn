@@ -1,5 +1,5 @@
-//! The Impact view, in the editor panel: what the changes reach. Every JavaScript and TypeScript
-//! file that imports a changed file, directly or through others, grouped by the folder it lives
+//! The Impact view, in the editor panel: what the changes reach. Every JavaScript, TypeScript,
+//! Rust and Python file that imports a changed file, directly or through others, grouped by the folder it lives
 //! in, nearest first. Clicking a file focuses it: what it uses on the left, what uses it on the
 //! right, and clicking either side walks the graph.
 
@@ -129,7 +129,7 @@ impl ImpactView {
             self.changed.iter().filter(|file| self.graph.imports.contains_key(*file)).collect();
         let headline = match (self.changed.len(), followed.len(), self.affected.len()) {
             (0, _, _) => "Nothing has changed here yet.".to_owned(),
-            (_, 0, _) => "None of the changed files are JavaScript or TypeScript.".to_owned(),
+            (_, 0, _) => "None of the changed files are JavaScript, TypeScript, Rust or Python.".to_owned(),
             (_, n, 0) => format!("{} used by nothing else.", files(n, "changed file is", "changed files are")),
             (_, n, m) => {
                 format!("{} used by {}.", files(n, "changed file is", "changed files are"), files(m, "other", "others"))
@@ -321,7 +321,7 @@ impl ImpactView {
                     .p(len(space::SPACE_4))
                     .text_size(px(13.))
                     .text_color(theme::color(color::INK_MUTED))
-                    .child("Saturn follows JavaScript and TypeScript imports for now.")
+                    .child("Saturn follows imports in JavaScript, TypeScript, Rust and Python.")
                     .into_any_element()
             })
             .into_any_element()

@@ -899,16 +899,11 @@ impl EditorView {
         )
     }
 
-    /// For a JavaScript or TypeScript file in a repository: a button that shows what it uses and
-    /// what uses it.
+    /// For a file whose imports Saturn follows (JavaScript, TypeScript, Rust, Python): a button
+    /// that shows what it uses and what uses it.
     fn render_impact_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let file = self.files.get(self.active).filter(|_| self.front == Front::File)?;
-        let script = file
-            .path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| matches!(ext, "ts" | "tsx" | "mts" | "cts" | "js" | "jsx" | "mjs" | "cjs"));
-        if !script {
+        if !saturn_core::imports::follows(&file.path) {
             return None;
         }
         let repo = file.path.ancestors().skip(1).find(|folder| folder.join(".git").exists())?.to_owned();
