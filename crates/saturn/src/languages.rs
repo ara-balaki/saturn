@@ -66,11 +66,20 @@ fn tsx_highlights() -> String {
     .join("\n")
 }
 
+/// JavaScript's injections for TSX, without the one that hands every comment to the JSDoc grammar:
+/// Saturn bundles no JSDoc colours, so `/** … */` would lose its comment grey.
+fn tsx_injections() -> String {
+    let query = tree_sitter_javascript::INJECTIONS_QUERY;
+    let Some(start) = query.find("((comment) @injection.content") else { return query.to_owned() };
+    let end = query[start..].find("\n\n").map_or(query.len(), |end| start + end);
+    format!("{}{}", &query[..start], &query[end..])
+}
+
 pub fn register() {
     let registry = LanguageRegistry::singleton();
     if let Some(mut tsx) = registry.language("tsx") {
         tsx.highlights = tsx_highlights().into();
-        tsx.injections = tree_sitter_javascript::INJECTIONS_QUERY.into();
+        tsx.injections = tsx_injections().into();
         registry.register("tsx", &tsx);
     }
     for extra in extras() {
@@ -99,5 +108,16 @@ mod tests {
         if let Err(error) = tree_sitter::Query::new(&tsx, &tsx_highlights()) {
             panic!("tsx's highlights query: {error}");
         }
+        if let Err(error) = tree_sitter::Query::new(&tsx, &tsx_injections()) {
+            panic!("tsx's injections query: {error}");
+        }
+    }
+
+    #[test]
+    fn tsx_comments_stay_comments() {
+        let injections = tsx_injections();
+        assert!(!injections.contains("jsdoc"));
+        // The other injections stay: tagged template literals and regexes.
+        assert!(injections.contains("template_string") && injections.contains("regex"));
     }
 }
