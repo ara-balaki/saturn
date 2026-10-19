@@ -1738,6 +1738,10 @@ impl Workspace {
                             .flex_1()
                             .min_w_0()
                             .gap(px(2.))
+                            // Scrolling clips to the strip, which would cut the raised tab's shadow:
+                            // the strip reaches a few pixels past its tabs on every side instead.
+                            .m(px(-4.))
+                            .p(px(4.))
                             .overflow_x_scroll()
                             .children((0..cell.tabs.len()).map(|index| self.render_tab(cell, index, cx)))
                             .on_drop(cx.listener(move |this, dragged: &DraggedTab, window, cx| {
