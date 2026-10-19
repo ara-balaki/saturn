@@ -106,7 +106,11 @@ a real one.
 ```sh
 pnpm install-app      # Saturn.app in /Applications, for this Mac
 pnpm dist:dmg         # a disk image for Apple Silicon and Intel, to share
+pnpm release 0.2.0    # publish a version: installed copies offer it within the hour
 ```
+
+Releasing needs the Sparkle signing key in the publisher's keychain; updates signed with any other
+key are refused by every installed Saturn.
 
 Saturn isn't notarised (there's no Apple Developer ID), so a downloaded copy is opened once with
 Open Anyway; the disk image explains how.

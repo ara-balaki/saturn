@@ -26,6 +26,7 @@ mod settings_view;
 mod spike;
 mod theme;
 mod ticket_picker;
+mod updates;
 mod workspace;
 
 use std::borrow::Cow;
@@ -43,7 +44,7 @@ use crate::workspace::{
     ToggleMaximize, ToggleSidebar,
 };
 
-actions!(saturn, [Quit]);
+actions!(saturn, [Quit, CheckForUpdates]);
 
 /// The login shell's `PATH`, read once at start, for the tools Saturn runs itself.
 pub static LOGIN_PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -100,6 +101,7 @@ fn bind_keys(cx: &mut App) {
 fn set_menus(cx: &mut App) {
     cx.set_menus(vec![
         Menu::new("Saturn").items([
+            MenuItem::action("Check for Updates…", CheckForUpdates),
             MenuItem::action("Settings…", OpenSettings),
             MenuItem::separator(),
             MenuItem::action("Quit Saturn", Quit),
@@ -161,6 +163,7 @@ fn main() {
             .expect("the bundled fonts load");
         bind_keys(cx);
         cx.on_action(|_: &Quit, cx| cx.quit());
+        cx.on_action(|_: &CheckForUpdates, _| updates::check());
         set_menus(cx);
 
         open_main_window(project, cx);
@@ -168,6 +171,9 @@ fn main() {
         if !spike::is_automated() {
             cx.activate(true);
             show_menu_bar(cx);
+            updates::start();
+        } else if std::env::var_os("SATURN_UPDATES_DEBUG").is_some() {
+            updates::start();
         }
     });
 }

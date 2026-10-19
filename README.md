@@ -98,6 +98,11 @@ Saturn isn't signed with an Apple Developer ID, so the first time someone opens 
 check it: they click Done, then **Open Anyway** in System Settings → Privacy & Security. The disk
 image carries a note that says so. They need [Claude Code](https://claude.com/claude-code) too.
 
+Saturn updates itself with [Sparkle](https://sparkle-project.org): every hour it checks the newest
+GitHub release and offers what's new (Saturn → Check for Updates… checks now). `pnpm release 0.2.0`
+publishes a version: it tags it, builds the disk image, signs it with the Sparkle key in your
+keychain, and puts it on GitHub with the feed.
+
 ## Shortcuts
 
 | Keys        | Does                                   |
@@ -176,5 +181,5 @@ saves what the window draws.
 ## Licence
 
 [MIT](LICENSE). Saturn bundles [Urbanist](https://github.com/coreyhu/Urbanist) and
-[JetBrains Mono](https://www.jetbrains.com/lp/mono/) (SIL Open Font Licence) and a few
-[Lucide](https://lucide.dev) icons (ISC).
+[JetBrains Mono](https://www.jetbrains.com/lp/mono/) (SIL Open Font Licence) a few
+[Lucide](https://lucide.dev) icons (ISC), and [Sparkle](https://sparkle-project.org) (MIT) for updates.

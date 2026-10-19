@@ -16,7 +16,8 @@
     "prepare": "husky",
     "dist": "sh scripts/bundle.sh",
     "install-app": "sh scripts/bundle.sh --install",
-    "dist:dmg": "sh scripts/bundle.sh --dmg"
+    "dist:dmg": "sh scripts/bundle.sh --dmg",
+    "release": "sh scripts/release.sh"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.3",

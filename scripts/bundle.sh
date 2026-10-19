@@ -27,6 +27,10 @@ rm -rf "$app"
 mkdir -p "$out" "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$binary" "$app/Contents/MacOS/saturn"
 cp crates/saturn/assets/app/Saturn.icns "$app/Contents/Resources/Saturn.icns"
+# Sparkle, which Saturn loads at launch to update itself from the GitHub releases.
+sparkle=$(sh scripts/sparkle.sh)
+mkdir -p "$app/Contents/Frameworks"
+cp -R "$sparkle/Sparkle.framework" "$app/Contents/Frameworks/"
 cp -R plugin "$app/Contents/Resources/plugin"
 
 cat > "$app/Contents/Info.plist" <<PLIST
@@ -45,6 +49,12 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>NSHighResolutionCapable</key><true/>
+  <!-- Updates: the newest GitHub release's feed, signed with the key in the publisher's keychain;
+       checked every hour, the shortest Sparkle allows. -->
+  <key>SUFeedURL</key><string>https://github.com/itsjonasarden/saturn/releases/latest/download/appcast.xml</string>
+  <key>SUPublicEDKey</key><string>L6qK9LpfH0C48mSjQNc4JAnNxO7rokEYbdIR5gemae0=</string>
+  <key>SUEnableAutomaticChecks</key><true/>
+  <key>SUScheduledCheckInterval</key><integer>3600</integer>
 </dict>
 </plist>
 PLIST
