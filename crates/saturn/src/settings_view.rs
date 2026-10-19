@@ -114,6 +114,10 @@ pub struct SettingsView {
     recording: Option<(&'static str, Subscription)>,
     /// What the last shortcut change did besides itself ("Taken from Close tab").
     note: Option<String>,
+    /// Whether Claude Code shows Saturn's status line, read as Settings opens; and why the last
+    /// change to it failed.
+    status_line: bool,
+    status_line_problem: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -165,6 +169,8 @@ impl SettingsView {
             command,
             recording: None,
             note: None,
+            status_line: crate::status_line::is_installed(),
+            status_line_problem: None,
             _subscriptions: subscriptions.into_iter().chain(observed).collect(),
         }
     }
@@ -346,8 +352,27 @@ impl SettingsView {
         ]
     }
 
-    fn claude(&self, settings: &Settings) -> Vec<Row> {
+    fn claude(&self, settings: &Settings, cx: &mut Context<Self>) -> Vec<Row> {
+        let detail = format!(
+            "Under Claude Code's prompt, in Saturn and in any other terminal: the model, how full the context is, the step when Claude keeps a task list, and how much of the session's limit is used. Turning it on keeps the status line you had, to put back when you turn it off.{}",
+            self.status_line_problem.as_ref().map(|problem| format!(" {problem}")).unwrap_or_default()
+        );
         vec![
+            Row::new(
+                Section::Claude,
+                "Status line in Claude Code",
+                detail,
+                Switch::new("status-line").checked(self.status_line).on_click(cx.listener(|this, on: &bool, _, cx| {
+                    match crate::status_line::set_installed(*on) {
+                        Ok(()) => {
+                            this.status_line = *on;
+                            this.status_line_problem = None;
+                        }
+                        Err(problem) => this.status_line_problem = Some(problem),
+                    }
+                    cx.notify();
+                })),
+            ),
             Row::new(
                 Section::Claude,
                 "Name tabs after Claude's session",
@@ -569,7 +594,7 @@ impl SettingsView {
         rows.extend(self.appearance(&settings));
         rows.extend(self.editor(&settings));
         rows.extend(self.terminal(&settings));
-        rows.extend(self.claude(&settings));
+        rows.extend(self.claude(&settings, cx));
         rows.extend(SHORTCUTS.iter().map(|shortcut| self.shortcut_row(shortcut, &settings, cx)));
         rows.extend(self.clickup(cx));
         rows

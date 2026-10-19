@@ -26,6 +26,7 @@ mod settings;
 mod settings_view;
 mod spike;
 mod status_bar;
+mod status_line;
 mod theme;
 mod ticket_picker;
 mod tickets_view;
@@ -117,6 +118,11 @@ pub fn set_menus(cx: &mut App) {
 }
 
 fn main() {
+    // Claude Code runs Saturn for its status line: print it and go, without a window.
+    if std::env::args().nth(1).as_deref() == Some(status_line::ARGUMENT) {
+        status_line::print();
+        return;
+    }
     // Off the main thread: an interactive shell's startup files can take a moment.
     std::thread::spawn(|| {
         if let Some(path) = saturn_core::shell_env::login_path() {

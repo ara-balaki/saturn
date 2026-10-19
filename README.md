@@ -153,7 +153,9 @@ them. They're stored in `~/Library/Application Support/Saturn/settings.json`.
   line numbers, indent guides, visible whitespace, tab width.
 - **Terminal**: Option as Meta (Option+B jumps a word back in the shell) instead of typing the
   characters your keyboard layout puts on it; copy on select.
-- **Claude**: tabs named after Claude's session (a name you type yourself always wins); sessions
+- **Claude**: Saturn's status line under Claude Code's prompt (model, context, the task list's
+  step, the session's limit), in Saturn and in any other terminal; turning it on keeps the one you
+  had, to put back. Tabs named after Claude's session (a name you type yourself always wins); sessions
   named after tickets, so `/start abc-224` renames the session to `ABC-224`, as `/rename ABC-224`
   would. Tickets mentioned in normal prompts never rename anything.
 - **Keyboard shortcuts**: click one and press the keys you want; a shortcut that had them gives them
