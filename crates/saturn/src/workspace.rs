@@ -1827,11 +1827,15 @@ impl Workspace {
                     Some("⌘O"),
                     !self.clickup.connected() && !self.layout.is_empty(),
                 )
+                .h(len(chrome::TRACK_HEIGHT))
+                .rounded(len(radius::RADIUS_MD))
                 .tooltip(chrome::tip("Open another repository in this window"))
                 .on_click(cx.listener(|_, _, window, cx| Self::open_project(window, cx))),
             )
             .children(self.clickup.connected().then(|| {
                 chrome::button("new-agent", "New agent", Some("⌘⇧T"), true)
+                    .h(len(chrome::TRACK_HEIGHT))
+                    .rounded(len(radius::RADIUS_MD))
                     .tooltip(chrome::tip("Start an agent on a ClickUp ticket, in its own worktree"))
                     .on_click(cx.listener(|_, _, window, cx| ticket_picker::open(cx.weak_entity(), window, cx)))
             }))

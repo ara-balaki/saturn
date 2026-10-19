@@ -360,8 +360,7 @@ impl SchemaView {
     /// Zoom out, the zoom level, zoom in, and fit: floating in the corner.
     fn render_controls(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div().absolute().top(len(space::SPACE_2)).right(len(space::SPACE_2)).child(
-            chrome::track()
-                .bg(theme::color(color::SURFACE))
+            chrome::floating(chrome::track())
                 .child(
                     chrome::icon_button("zoom-out", "zoom-out", true)
                         .tooltip(chrome::tip("Zoom out (or pinch, or ⌘-scroll)"))
@@ -546,15 +545,20 @@ impl Render for SchemaView {
         let search = self.search_field(window, cx);
         let found = self.matches().len();
         root.child(
-            div()
+            // An island over the diagram, as the zoom controls are: tables never show through.
+            chrome::floating(div())
                 .absolute()
                 .top(len(space::SPACE_2))
                 .left(len(space::SPACE_2))
-                .w(px(260.))
+                .w(px(280.))
+                .h(px(36.))
+                .px(len(space::SPACE_3))
+                .rounded(len(radius::RADIUS_MD))
                 .flex()
                 .items_center()
                 .gap(len(space::SPACE_2))
-                .child(div().flex_1().child(Input::new(&search).cleanable(true)))
+                .child(chrome::icon("search", 14., theme::color(color::INK_FAINT)))
+                .child(div().flex_1().child(Input::new(&search).appearance(false).cleanable(true)))
                 .when(!self.query.trim().is_empty(), |row| {
                     row.child(div().flex_none().text_size(px(11.)).text_color(theme::color(color::INK_FAINT)).child(
                         match found {
