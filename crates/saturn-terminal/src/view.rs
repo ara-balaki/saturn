@@ -83,6 +83,8 @@ pub struct TerminalView {
     scroll_remainder: f32,
     geometry: Rc<Cell<Option<Geometry>>>,
     drag: Drag,
+    /// The cell a drag the program follows was last reported at, so each cell is reported once.
+    reported: Option<(usize, usize)>,
 }
 
 impl EventEmitter<TerminalViewEvent> for TerminalView {}
@@ -134,6 +136,7 @@ impl TerminalView {
             scroll_remainder: 0.0,
             geometry: Rc::default(),
             drag: Drag::None,
+            reported: None,
         }
     }
 
@@ -155,6 +158,7 @@ impl TerminalView {
                     cx.emit(TerminalViewEvent::TitleChanged);
                 }
                 TerminalEvent::Bell => cx.emit(TerminalViewEvent::Bell),
+                TerminalEvent::Copy(text) => cx.write_to_clipboard(ClipboardItem::new_string(text)),
                 TerminalEvent::Status(status) => {
                     self.has_program_status = true;
                     self.state = AgentState::from_program_status(&status);
@@ -273,6 +277,7 @@ impl TerminalView {
         let Some((row, col, side)) = self.cell_at(event.position) else { return };
         if self.program_wants_mouse(event.modifiers) {
             self.drag = Drag::Reporting;
+            self.reported = Some((row, col));
             self.report_mouse(row, col, true);
         } else {
             self.drag = Drag::Selecting;
@@ -282,7 +287,23 @@ impl TerminalView {
     }
 
     fn mouse_move(&mut self, event: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        if self.drag != Drag::Selecting || event.pressed_button != Some(MouseButton::Left) {
+        if event.pressed_button != Some(MouseButton::Left) {
+            return;
+        }
+        // A program that follows drags (Claude Code selecting text) gets each cell the mouse moves
+        // to, as a drag of the left button.
+        if self.drag == Drag::Reporting {
+            let follows = self.terminal.mode().intersects(TermMode::MOUSE_DRAG | TermMode::MOUSE_MOTION);
+            if let Some((row, col, _)) = self.cell_at(event.position)
+                && follows
+                && self.reported != Some((row, col))
+            {
+                self.reported = Some((row, col));
+                self.terminal.write(format!("\x1b[<32;{};{}M", col + 1, row + 1).into_bytes());
+            }
+            return;
+        }
+        if self.drag != Drag::Selecting {
             return;
         }
         if let Some((row, col, side)) = self.cell_at(event.position) {

@@ -28,6 +28,9 @@ pub enum TerminalEvent {
     Status(ProgramStatus),
     Cwd(PathBuf),
     PromptStart,
+    /// The program put text on the clipboard (OSC 52), as Claude Code does when you select in it.
+    /// Reading the clipboard stays refused.
+    Copy(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,6 +113,7 @@ impl Terminal {
                 EngineEvent::Title(title) => out.push(TerminalEvent::Title(Some(title))),
                 EngineEvent::ResetTitle => out.push(TerminalEvent::Title(None)),
                 EngineEvent::Bell => out.push(TerminalEvent::Bell),
+                EngineEvent::ClipboardStore(_, text) => out.push(TerminalEvent::Copy(text)),
                 _ => {}
             }
         }
@@ -227,7 +231,8 @@ mod tests {
         let (mut terminal, output) =
             Terminal::spawn(Path::new("/tmp"), size, &[("TERM", "xterm-256color")]).expect("a shell starts");
         terminal.write(
-            b"printf '\\033]0;ABC-236\\007\\033]7501;state=done:app=claude-code\\007'; echo saturn-$((40+2)); exit\r"
+            // A title, Claude's status, and text for the clipboard ("copied", base64), as programs send them.
+            b"printf '\\033]0;ABC-236\\007\\033]7501;state=done:app=claude-code\\007\\033]52;c;Y29waWVk\\007'; echo saturn-$((40+2)); exit\r"
                 .to_vec(),
         );
 
@@ -249,5 +254,6 @@ mod tests {
             events.iter().any(|e| matches!(e, TerminalEvent::Status(s) if s.state == "done")),
             "events: {events:?}"
         );
+        assert!(events.contains(&TerminalEvent::Copy("copied".into())), "events: {events:?}");
     }
 }
