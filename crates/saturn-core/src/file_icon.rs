@@ -30,7 +30,7 @@ pub fn file_icon(name: &str) -> FileIcon {
         }
         "package.json" => Some(FileIcon::Icon("package")),
         "makefile" | "justfile" | "procfile" | "brewfile" | "gemfile" | "rakefile" => {
-            Some(FileIcon::Icon("file-terminal"))
+            Some(FileIcon::Icon("square-terminal"))
         }
         "cargo.lock" | "package-lock.json" | "pnpm-lock.yaml" | "yarn.lock" | "bun.lockb" | "bun.lock"
         | "poetry.lock" | "uv.lock" | "gemfile.lock" | "composer.lock" | "flake.lock" | "go.sum" => {
@@ -57,7 +57,8 @@ pub fn file_icon(name: &str) -> FileIcon {
         Some((_, extension)) => by_extension(extension),
         // A dotfile without an extension (`.npmrc`, `.editorconfig`) is configuration.
         None if lower.starts_with('.') => FileIcon::Icon("settings-2"),
-        None => FileIcon::Icon("file"),
+        // No extension at all (`report`, `CODEOWNERS`): most likely text, or a script.
+        None => FileIcon::Icon("text-align-start"),
     }
 }
 
@@ -89,9 +90,9 @@ fn by_extension(extension: &str) -> FileIcon {
         "graphql" | "gql" => Format("GQ"),
         "xml" | "plist" => Format("<>"),
         "json" | "jsonc" | "json5" => Icon("braces"),
-        "md" | "mdx" | "markdown" | "rst" | "adoc" => Icon("book-open"),
-        "txt" | "log" => Icon("file-text"),
-        "sh" | "bash" | "zsh" | "fish" | "ps1" => Icon("file-terminal"),
+        "md" | "mdx" | "markdown" | "rst" | "adoc" | "txt" => Icon("book-open"),
+        "log" => Icon("text-align-start"),
+        "sh" | "bash" | "zsh" | "fish" | "ps1" | "command" => Icon("square-terminal"),
         "sql" | "prisma" | "db" | "sqlite" => Icon("database"),
         "css" | "scss" | "sass" | "less" => Icon("palette"),
         "html" | "htm" => Icon("globe"),
@@ -134,7 +135,10 @@ mod tests {
         assert_eq!(file_icon("pnpm-workspace.yaml"), Format("Y"));
         assert_eq!(file_icon(".npmrc"), Icon("settings-2"));
         assert_eq!(file_icon(".editorconfig"), Icon("settings-2"));
-        assert_eq!(file_icon("notes"), Icon("file"));
+        assert_eq!(file_icon("report"), Icon("text-align-start"));
+        assert_eq!(file_icon("release.sh"), Icon("square-terminal"));
+        assert_eq!(file_icon("how-to-open.txt"), Icon("book-open"));
+        assert_eq!(file_icon("archive.weird"), Icon("file"));
         assert_eq!(file_icon("photo.PNG"), Icon("image"));
     }
 }
