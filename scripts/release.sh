@@ -67,6 +67,10 @@ cat > target/appcast.xml <<XML
 </rss>
 XML
 
+# The same disk image under a name without the version, so the README's download link
+# (releases/latest/download/Saturn.dmg) always gets the newest.
+cp "$dmg" target/Saturn.dmg
+
 git push -q origin main "$tag"
-gh release create "$tag" "$dmg" target/appcast.xml --title "Saturn $version" --notes "$markdown"
+gh release create "$tag" "$dmg" target/Saturn.dmg target/appcast.xml --title "Saturn $version" --notes "$markdown"
 echo "Released Saturn $version: every installed Saturn offers it within the hour."
