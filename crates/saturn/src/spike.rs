@@ -124,18 +124,7 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
         .detach();
     }
     if let Ok(which) = std::env::var("SATURN_PALETTE") {
-        // After the window and its dialog layer exist: `files` (⌘P) or `commands` (⌘⇧P).
-        cx.spawn_in(window, async move |workspace, cx| {
-            cx.background_executor().timer(Duration::from_millis(800)).await;
-            let _ = workspace.update_in(cx, |workspace, window, cx| {
-                if which == "files" {
-                    crate::palette::go_to_file(cx.weak_entity(), workspace.root().to_owned(), window, cx);
-                } else {
-                    crate::palette::commands(window, cx);
-                }
-            });
-        })
-        .detach();
+        open_palette(which, window, cx);
     }
     if std::env::var_os("SATURN_MAXIMIZE_EDITOR").is_some() {
         cx.defer_in(window, |workspace, _, cx| workspace.maximize_editor(cx));
@@ -151,6 +140,31 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
     if let Some(path) = std::env::var_os("SATURN_OPEN_FILE") {
         cx.defer_in(window, move |workspace, window, cx| workspace.open_file(std::path::Path::new(&path), window, cx));
     }
+}
+
+/// Opens a palette (`files` or `commands`) once the window is up, and reports whether its search
+/// has the keyboard.
+fn open_palette(which: String, window: &mut Window, cx: &mut Context<Workspace>) {
+    // After the window and its dialog layer exist: `files` (⌘P) or `commands` (⌘⇧P).
+    cx.spawn_in(window, async move |workspace, cx| {
+        cx.background_executor().timer(Duration::from_millis(800)).await;
+        let _ = workspace.update_in(cx, |workspace, window, cx| {
+            if which == "files" {
+                crate::palette::go_to_file(cx.weak_entity(), workspace.root().to_owned(), window, cx);
+            } else {
+                crate::palette::commands(window, cx);
+            }
+        });
+        cx.background_executor().timer(Duration::from_millis(600)).await;
+        let _ = workspace.update_in(cx, |_, window, cx| {
+            let palette =
+                crate::palette::LAST.with_borrow(|last| last.as_ref().and_then(gpui_kit::WeakEntity::upgrade));
+            if let Some(palette) = palette {
+                eprintln!("palette: search focused = {}", palette.read(cx).search_has_focus(window, cx));
+            }
+        });
+    })
+    .detach();
 }
 
 /// The screenshot and the timed quit, for the window itself: they apply on the welcome screen too.

@@ -1,7 +1,7 @@
 //! The status bar along the window's foot: on the left, the errors and warnings and the file's
 //! language server; on the right, the cursor, the file's language, and the branch with how far it
-//! is ahead of and behind its upstream. Quiet text on the glass; the counts and the branch are
-//! buttons.
+//! is ahead of and behind its upstream. A slim card, like the panes, so it reads over any
+//! desktop; the counts and the branch are buttons.
 
 use std::path::{Path, PathBuf};
 
@@ -19,7 +19,7 @@ use crate::problems_view;
 use crate::theme::{self, len};
 use crate::workspace::Workspace;
 
-pub const HEIGHT: f32 = 26.;
+pub const HEIGHT: f32 = 28.;
 
 /// The branch checked out, and commits ahead of and behind its upstream.
 #[derive(Clone, PartialEq, Eq)]
@@ -110,7 +110,8 @@ impl StatusBar {
             .gap(len(space::SPACE_1))
             .h(px(20.))
             .px(len(space::SPACE_2))
-            .rounded(len(radius::RADIUS_XS))
+            // 4px inside the bar's card (radius 10).
+            .rounded(len(radius::RADIUS_SM))
     }
 
     fn render_problems(errors: usize, warnings: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -178,11 +179,13 @@ impl Render for StatusBar {
                 .child(name)
                 .tooltip(chrome::tip(tip))
         });
-        div()
-            .flex()
+        chrome::card()
+            .flex_row()
             .flex_none()
             .items_center()
             .h(px(HEIGHT))
+            .mt(len(space::SPACE_2))
+            .mb(len(space::SPACE_2))
             .px(len(space::SPACE_1))
             .text_size(px(12.))
             .text_color(theme::color(color::INK_MUTED))

@@ -98,7 +98,6 @@ impl Palette {
         // Screenshots type their query up front.
         let typed = std::env::var("SATURN_PALETTE_QUERY").unwrap_or_default();
         let search = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder).default_value(typed));
-        search.update(cx, |search, cx| search.focus(window, cx));
         let search_events = cx.subscribe_in(&search, window, |this, _, event: &InputEvent, window, cx| match event {
             InputEvent::Change => this.filter(cx),
             InputEvent::PressEnter { .. } => this.choose(window, cx),
@@ -264,7 +263,24 @@ impl Render for Palette {
     }
 }
 
+impl Palette {
+    /// Whether typing goes into the search (spikes check it).
+    pub fn search_has_focus(&self, window: &Window, cx: &App) -> bool {
+        use gpui_kit::Focusable as _;
+        self.search.focus_handle(cx).is_focused(window)
+    }
+}
+
+thread_local! {
+    /// The palette open last (spikes check its focus).
+    pub static LAST: RefCell<Option<gpui_kit::WeakEntity<Palette>>> = const { RefCell::new(None) };
+}
+
 fn open(title: &'static str, palette: Entity<Palette>, window: &mut Window, cx: &mut App) {
+    // Once the dialog is up: it takes the focus as it opens, and typing belongs in the search.
+    let search = palette.read(cx).search.clone();
+    LAST.with_borrow_mut(|last| *last = Some(palette.downgrade()));
+    window.defer(cx, move |window, cx| search.update(cx, |search, cx| search.focus(window, cx)));
     window.open_dialog(cx, move |dialog, _, _| {
         dialog
             .title(title)

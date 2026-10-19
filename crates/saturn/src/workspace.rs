@@ -2055,8 +2055,8 @@ impl Render for Workspace {
             .flex()
             .flex_col()
             .px(len(space::SPACE_2))
-            // No fill: the title bar, sidebar and gaps are the window's glass (theme::overlay). The
-            // status bar is the foot, so no padding below.
+            // No fill: the title bar and the gaps are the window's glass (theme::overlay). The
+            // status bar's card sets the space below.
             .text_color(theme::color(color::INK))
             .font_family(saturn_design::font::SANS)
             .track_focus(&self.focus)
