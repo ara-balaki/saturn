@@ -10,7 +10,8 @@
 //!   the database diagram, `SATURN_LINEAGE=1` the dbt lineage graph; `SATURN_LSP_PROBE=line:col` asks the open file's language server about
 //!   that place (0-based) and prints its answers; `SATURN_PROBLEMS=1` lists the
 //!   servers' errors and warnings; `SATURN_PALETTE=files|commands` opens a palette, with
-//!   `SATURN_PALETTE_QUERY` typed in it; `SATURN_TICKET_PICKER=1` opens New agent.
+//!   `SATURN_PALETTE_QUERY` typed in it; `SATURN_TICKET_PICKER=1` opens New agent;
+//!   `SATURN_TICKET_FILTERS=1` opens the Tickets panel's filters.
 //! - `SATURN_KEYS="e c h tab"` presses those keys in the focused pane, through the window, and prints
 //!   the tab count after each; `SATURN_REBIND=new-tab=cmd-t` moves a shortcut first, as Settings
 //!   would. `SATURN_SETTINGS_SECTION=keyboard` opens Settings on that section.

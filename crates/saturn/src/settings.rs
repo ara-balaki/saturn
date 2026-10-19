@@ -35,6 +35,8 @@ pub struct Settings {
     pub terminal: TerminalSettings,
     /// The Claude plan's limits at the foot of the sidebar.
     pub show_usage: bool,
+    /// Which tickets the Tickets panel shows.
+    pub ticket_filter: saturn_core::clickup::Filter,
 }
 
 /// How files look in the editor.
@@ -151,6 +153,7 @@ impl Default for Settings {
             editor: EditorSettings::default(),
             terminal: TerminalSettings::default(),
             show_usage: true,
+            ticket_filter: saturn_core::clickup::Filter::default(),
         }
     }
 }

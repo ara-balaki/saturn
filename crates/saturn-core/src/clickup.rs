@@ -2,7 +2,9 @@
 //! show on the pane. Parsed from ClickUp's API v2 (<https://developer.clickup.com>); the HTTP calls
 //! live in the app.
 
-use serde::Deserialize;
+use std::collections::BTreeSet;
+
+use serde::{Deserialize, Serialize};
 
 /// One task, as the picker and the pane header show it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,6 +19,11 @@ pub struct Ticket {
     pub status_color: Option<String>,
     pub url: String,
     pub list: Option<String>,
+    /// `urgent`, `high`, `normal` or `low`, when it has one.
+    pub priority: Option<String>,
+    pub tags: Vec<String>,
+    /// When it's due, in milliseconds since 1970.
+    pub due: Option<i64>,
 }
 
 impl Ticket {
@@ -43,6 +50,18 @@ struct TaskJson {
     url: String,
     #[serde(default)]
     list: Option<NamedJson>,
+    #[serde(default)]
+    priority: Option<PriorityJson>,
+    #[serde(default)]
+    tags: Vec<NamedJson>,
+    /// ClickUp sends dates as strings of milliseconds.
+    #[serde(default)]
+    due_date: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct PriorityJson {
+    priority: String,
 }
 
 #[derive(Deserialize)]
@@ -67,6 +86,9 @@ impl From<TaskJson> for Ticket {
             status_color: task.status.color.filter(|color| color.starts_with('#')),
             url: task.url,
             list: task.list.map(|list| list.name),
+            priority: task.priority.map(|priority| priority.priority),
+            tags: task.tags.into_iter().map(|tag| tag.name).collect(),
+            due: task.due_date.and_then(|due| due.parse().ok()),
         }
     }
 }
@@ -120,6 +142,78 @@ pub fn parse_workspaces(json: &str) -> Result<Vec<(String, String)>, serde_json:
     serde_json::from_str::<Body>(json).map(|body| body.teams.into_iter().map(|team| (team.id, team.name)).collect())
 }
 
+/// ClickUp's priorities, most pressing first.
+pub const PRIORITIES: [&str; 4] = ["urgent", "high", "normal", "low"];
+
+/// When a ticket is due, as the filter offers it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Due {
+    Overdue,
+    NextWeek,
+    NoDate,
+}
+
+impl Due {
+    pub const ALL: [Self; 3] = [Self::Overdue, Self::NextWeek, Self::NoDate];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Overdue => "Overdue",
+            Self::NextWeek => "Next 7 days",
+            Self::NoDate => "No due date",
+        }
+    }
+
+    /// Where a ticket falls, at `now` (milliseconds); `None` when due later than a week out.
+    pub fn of(ticket: &Ticket, now: i64) -> Option<Self> {
+        const WEEK: i64 = 7 * 24 * 60 * 60 * 1000;
+        match ticket.due {
+            None => Some(Self::NoDate),
+            Some(due) if due < now => Some(Self::Overdue),
+            Some(due) if due < now + WEEK => Some(Self::NextWeek),
+            Some(_) => None,
+        }
+    }
+}
+
+/// Which tickets the Tickets panel shows. Within a kind any chosen value matches (to do or
+/// review); across kinds all must (to do, and urgent). An empty kind lets everything through.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Filter {
+    pub statuses: BTreeSet<String>,
+    pub priorities: BTreeSet<String>,
+    pub lists: BTreeSet<String>,
+    pub tags: BTreeSet<String>,
+    pub due: BTreeSet<Due>,
+}
+
+impl Filter {
+    /// How many values are chosen, for the filter button's badge.
+    pub fn count(&self) -> usize {
+        self.statuses.len() + self.priorities.len() + self.lists.len() + self.tags.len() + self.due.len()
+    }
+
+    pub fn keeps(&self, ticket: &Ticket, now: i64) -> bool {
+        let one_of = |chosen: &BTreeSet<String>, value: Option<&String>| {
+            chosen.is_empty() || value.is_some_and(|value| chosen.contains(value))
+        };
+        one_of(&self.statuses, Some(&ticket.status))
+            && one_of(&self.priorities, ticket.priority.as_ref())
+            && one_of(&self.lists, ticket.list.as_ref())
+            && (self.tags.is_empty() || ticket.tags.iter().any(|tag| self.tags.contains(tag)))
+            && (self.due.is_empty() || Due::of(ticket, now).is_some_and(|due| self.due.contains(&due)))
+    }
+}
+
+/// Adds `value` to `set`, or takes it out if it's there.
+pub fn toggle<T: Ord>(set: &mut BTreeSet<T>, value: T) {
+    if !set.remove(&value) {
+        set.insert(value);
+    }
+}
+
 /// Groups tickets by status for the picker, keeping ClickUp's order of first appearance.
 pub fn by_status(tickets: &[Ticket]) -> Vec<(&str, Vec<&Ticket>)> {
     let mut groups: Vec<(&str, Vec<&Ticket>)> = Vec::new();
@@ -166,6 +260,29 @@ mod tests {
         assert!(tickets[0].matches("dark mode"));
         assert!(tickets[1].matches("READY"));
         assert!(!tickets[1].matches("dark mode"));
+    }
+
+    #[test]
+    fn reads_priority_tags_and_due_date_and_filters_by_them() {
+        let json = r##"{"id": "1", "name": "Pay out refunds", "status": {"status": "to do"}, "url": "u",
+            "list": {"name": "Web"}, "priority": {"priority": "urgent", "color": "#f50000"},
+            "tags": [{"name": "billing"}], "due_date": "1000"}"##;
+        let ticket = parse_task(json).expect("parses");
+        assert_eq!(
+            (ticket.priority.as_deref(), ticket.tags.as_slice(), ticket.due),
+            (Some("urgent"), &["billing".to_owned()][..], Some(1000))
+        );
+        let mut filter = Filter::default();
+        assert!(filter.keeps(&ticket, 0));
+        toggle(&mut filter.statuses, "to do".to_owned());
+        toggle(&mut filter.statuses, "review".to_owned());
+        assert!(filter.keeps(&ticket, 0), "any chosen status matches");
+        toggle(&mut filter.priorities, "low".to_owned());
+        assert!(!filter.keeps(&ticket, 0), "every kind must match");
+        toggle(&mut filter.priorities, "low".to_owned());
+        filter.due.insert(Due::Overdue);
+        assert!(filter.keeps(&ticket, 5000) && !filter.keeps(&ticket, 0));
+        assert_eq!(filter.count(), 3);
     }
 
     #[test]

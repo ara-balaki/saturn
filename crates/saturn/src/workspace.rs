@@ -1044,24 +1044,77 @@ impl Workspace {
     /// Made-up ClickUp tickets, and the Tickets panel open (`pnpm demo`, spikes, screenshots).
     /// They're never refreshed, so the made-up token never reaches ClickUp.
     pub fn fake_tickets(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let ticket = |id: &str, key: &str, title: &str, status: &str, colour: &str| Ticket {
-            id: id.to_owned(),
-            custom_id: Some(key.to_owned()),
-            title: title.to_owned(),
-            status: status.to_owned(),
-            status_color: Some(colour.to_owned()),
-            url: format!("https://app.clickup.com/t/{id}"),
-            list: Some("Web".to_owned()),
-        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| i64::try_from(since.as_millis()).unwrap_or(0));
+        let day = 24 * 60 * 60 * 1000;
+        let ticket =
+            |id: &str, key: &str, title: &str, status: &str, colour: &str, more: (&str, &str, &str, Option<i64>)| {
+                let (list, priority, tag, due) = more;
+                Ticket {
+                    id: id.to_owned(),
+                    custom_id: Some(key.to_owned()),
+                    title: title.to_owned(),
+                    status: status.to_owned(),
+                    status_color: Some(colour.to_owned()),
+                    url: format!("https://app.clickup.com/t/{id}"),
+                    list: Some(list.to_owned()),
+                    priority: Some(priority.to_owned()),
+                    tags: vec![tag.to_owned()],
+                    due: due.map(|days| now + days * day),
+                }
+            };
         self.clickup.token = Some("demo".to_owned());
         self.clickup.made_up = true;
         self.clickup.tickets = vec![
-            ticket("a1", "ABC-240", "Filter on every list page", "in progress", "#5f55ee"),
-            ticket("a2", "ABC-236", "Round VAT half up on invoices", "in progress", "#5f55ee"),
-            ticket("a3", "ABC-251", "Retry failed webhooks with backoff", "review", "#f8ae00"),
-            ticket("a4", "ABC-224", "Name sessions after their ticket", "to do", "#87909e"),
-            ticket("a5", "ABC-258", "Show refunds on the order page", "to do", "#87909e"),
-            ticket("a6", "ABC-262", "Export the customer list as CSV", "to do", "#87909e"),
+            ticket(
+                "a1",
+                "ABC-240",
+                "Filter on every list page",
+                "in progress",
+                "#5f55ee",
+                ("Web", "high", "frontend", Some(2)),
+            ),
+            ticket(
+                "a2",
+                "ABC-236",
+                "Round VAT half up on invoices",
+                "in progress",
+                "#5f55ee",
+                ("Billing", "urgent", "billing", Some(-1)),
+            ),
+            ticket(
+                "a3",
+                "ABC-251",
+                "Retry failed webhooks with backoff",
+                "review",
+                "#f8ae00",
+                ("API", "normal", "backend", Some(5)),
+            ),
+            ticket(
+                "a4",
+                "ABC-224",
+                "Name sessions after their ticket",
+                "to do",
+                "#87909e",
+                ("Web", "low", "frontend", None),
+            ),
+            ticket(
+                "a5",
+                "ABC-258",
+                "Show refunds on the order page",
+                "to do",
+                "#87909e",
+                ("Billing", "high", "billing", Some(12)),
+            ),
+            ticket(
+                "a6",
+                "ABC-262",
+                "Export the customer list as CSV",
+                "to do",
+                "#87909e",
+                ("API", "normal", "backend", None),
+            ),
         ];
         // Opened directly, not through toggle_tickets: that would send the made-up token to ClickUp.
         let workspace = cx.weak_entity();
