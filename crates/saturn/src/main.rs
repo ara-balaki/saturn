@@ -27,6 +27,7 @@ mod spike;
 mod status_bar;
 mod theme;
 mod ticket_picker;
+mod tickets_view;
 mod updates;
 mod workspace;
 
@@ -42,7 +43,7 @@ use crate::workspace::{
     CloseTab, CommandPalette, Copy, FocusDown, FocusLeft, FocusPane1, FocusPane2, FocusPane3, FocusPane4, FocusPane5,
     FocusPane6, FocusPane7, FocusPane8, FocusPane9, FocusRight, FocusUp, GoToFile, NewTab, NextAttention, NextTab,
     OpenProject, OpenSettings, OpenTicketPicker, Paste, PreviousTab, SaveFile, SplitDown, SplitRight, ToggleEditor,
-    ToggleMaximize, ToggleSidebar,
+    ToggleMaximize, ToggleSidebar, ToggleTickets,
 };
 
 actions!(saturn, [Quit, CheckForUpdates]);
@@ -86,6 +87,7 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-t", OpenTicketPicker, None),
         KeyBinding::new("cmd-j", ToggleEditor, None),
         KeyBinding::new("cmd-p", GoToFile, None),
+        KeyBinding::new("cmd-alt-b", ToggleTickets, None),
         KeyBinding::new("cmd-shift-p", CommandPalette, None),
         KeyBinding::new("cmd-1", FocusPane1, None),
         KeyBinding::new("cmd-2", FocusPane2, None),
@@ -129,6 +131,7 @@ fn set_menus(cx: &mut App) {
             MenuItem::separator(),
             MenuItem::action("Toggle Sidebar", ToggleSidebar),
             MenuItem::action("Toggle Editor", ToggleEditor),
+            MenuItem::action("Toggle Tickets", ToggleTickets),
         ]),
         Menu::new("Edit").items([MenuItem::action("Copy", Copy), MenuItem::action("Paste", Paste)]),
     ]);

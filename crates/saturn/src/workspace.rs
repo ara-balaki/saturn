@@ -33,6 +33,7 @@ use crate::session::{self, SavedGrid, SavedTab};
 use crate::settings::{self, AppearanceSetting, Settings};
 use crate::status_bar::StatusBar;
 use crate::theme::{self, len};
+use crate::tickets_view::TicketsView;
 use crate::{agents_view, dock, github, menu_bar, notify, palette, settings_view, ticket_picker};
 
 actions!(
@@ -73,6 +74,7 @@ actions!(
         ShowImpact,
         ShowSchema,
         ShowProblems,
+        ToggleTickets,
     ]
 );
 
@@ -111,6 +113,7 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("New agent from a ticket", "square-plus", Box::new(OpenTicketPicker)),
         ("Show or hide the sidebar", "panel-left", Box::new(ToggleSidebar)),
         ("Show or hide the editor", "panel-top", Box::new(ToggleEditor)),
+        ("Show or hide your tickets", "panel-right", Box::new(ToggleTickets)),
         ("History", "git-branch", Box::new(ShowHistory)),
         ("Impact of the changes", "waypoints", Box::new(ShowImpact)),
         ("Database diagram", "database", Box::new(ShowSchema)),
@@ -120,6 +123,17 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("Settings", "settings", Box::new(OpenSettings)),
         ("Check for updates", "square-arrow-right", Box::new(crate::CheckForUpdates)),
     ]
+}
+
+/// The window's panels around the grid, and whether each is showing.
+#[derive(Clone, Copy)]
+struct Panels {
+    /// The files and changes, on the left (⌘B).
+    sidebar: bool,
+    /// The editor, above the grid (⌘J).
+    editor: bool,
+    /// The ClickUp tickets, on the right (⌘⌥B).
+    tickets: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -193,8 +207,8 @@ pub struct Workspace {
     renaming: Option<(TabId, Entity<InputState>)>,
     next_tab: u64,
     focus: FocusHandle,
-    sidebar_open: bool,
-    editor_open: bool,
+    /// Which of the window's panels are showing.
+    panels: Panels,
     settings: Settings,
     /// Where the Saturn plugin's hooks reach this window; `None` if it could not start.
     bridge: Option<Bridge>,
@@ -215,6 +229,8 @@ pub struct Workspace {
     editor: Entity<EditorView>,
     /// Along the window's foot: problems, the language server, the cursor, the branch.
     status_bar: Entity<StatusBar>,
+    /// Your ClickUp tickets, on the right (made the first time it opens).
+    tickets_view: Option<Entity<TicketsView>>,
     /// What the sidebar shows.
     sidebar_tab: SidebarTab,
     /// The Claude session running in each tab, from its hooks, so a restart can offer to resume it.
@@ -527,6 +543,7 @@ impl Workspace {
         };
         Self {
             status_bar,
+            tickets_view: None,
             sidebar_tab: SidebarTab::Files,
             claude_sessions: HashMap::new(),
             clickup: ClickUpState::default(),
@@ -548,8 +565,7 @@ impl Workspace {
             renaming: None,
             next_tab: 0,
             focus: cx.focus_handle(),
-            sidebar_open: true,
-            editor_open: true,
+            panels: Panels { sidebar: true, editor: true, tickets: false },
             settings: settings::load(),
             bridge,
             session_names: HashMap::new(),
@@ -561,7 +577,7 @@ impl Workspace {
     /// Opens `path` in the editor, showing the editor if it was hidden.
     pub fn open_file(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
         self.editor.update(cx, |editor, cx| editor.open(path, window, cx));
-        self.editor_open = true;
+        self.panels.editor = true;
         cx.notify();
     }
 
@@ -645,7 +661,7 @@ impl Workspace {
         cx.subscribe(changes, |this, _, event: &ChangesEvent, cx| match event {
             ChangesEvent::Open { files, scope, path } => {
                 this.editor.update(cx, |editor, cx| editor.review(files.clone(), *scope, path, cx));
-                this.editor_open = true;
+                this.panels.editor = true;
                 cx.notify();
             }
             ChangesEvent::Updated { files, scope } => {
@@ -653,7 +669,7 @@ impl Workspace {
             }
             ChangesEvent::History { repo } => {
                 this.editor.update(cx, |editor, cx| editor.show_history(repo, cx));
-                this.editor_open = true;
+                this.panels.editor = true;
                 cx.notify();
             }
             ChangesEvent::Impact { repo } => {
@@ -865,6 +881,25 @@ impl Workspace {
         .detach();
     }
 
+    /// Opens or closes the Tickets panel, reading the tickets again as it opens.
+    pub fn toggle_tickets(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.panels.tickets = !self.panels.tickets;
+        if self.panels.tickets {
+            if self.tickets_view.is_none() {
+                let workspace = cx.weak_entity();
+                let view = cx.new(|cx| TicketsView::new(workspace, window, cx));
+                self.tickets_view = Some(view);
+            }
+            self.refresh_tickets(cx);
+        }
+        cx.notify();
+    }
+
+    /// The tickets that have a pane working on them, by key.
+    pub fn tickets_with_agents(&self, cx: &gpui_kit::App) -> HashSet<String> {
+        self.layout.tabs().filter_map(|tab| self.ticket_of(tab, cx).map(|ticket| ticket.key().to_owned())).collect()
+    }
+
     /// The pull request for the branch a tab is on.
     fn pull_request_of(&self, tab: TabId) -> Option<&PullRequest> {
         self.pull_requests.get(self.checkouts.get(&tab)?)
@@ -907,7 +942,7 @@ impl Workspace {
                 editor.maximize(cx);
             }
         });
-        self.editor_open = true;
+        self.panels.editor = true;
         cx.notify();
     }
 
@@ -934,7 +969,7 @@ impl Workspace {
                 editor.maximize(cx);
             }
         });
-        self.editor_open = true;
+        self.panels.editor = true;
         cx.notify();
     }
 
@@ -947,7 +982,34 @@ impl Workspace {
                 editor.maximize(cx);
             }
         });
-        self.editor_open = true;
+        self.panels.editor = true;
+        cx.notify();
+    }
+
+    /// Made-up ClickUp tickets, and the Tickets panel open (spikes and screenshots).
+    pub fn fake_tickets(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let ticket = |id: &str, key: &str, title: &str, status: &str, colour: &str| Ticket {
+            id: id.to_owned(),
+            custom_id: Some(key.to_owned()),
+            title: title.to_owned(),
+            status: status.to_owned(),
+            status_color: Some(colour.to_owned()),
+            url: format!("https://app.clickup.com/t/{id}"),
+            list: Some("Web".to_owned()),
+        };
+        self.clickup.token = Some("spike".to_owned());
+        self.clickup.tickets = vec![
+            ticket("a1", "ABC-240", "Filter on every list page", "in progress", "#5f55ee"),
+            ticket("a2", "ABC-236", "Round VAT half up on invoices", "in progress", "#5f55ee"),
+            ticket("a3", "ABC-251", "Retry failed webhooks with backoff", "review", "#f8ae00"),
+            ticket("a4", "ABC-224", "Name sessions after their ticket", "to do", "#87909e"),
+            ticket("a5", "ABC-258", "Show refunds on the order page", "to do", "#87909e"),
+            ticket("a6", "ABC-262", "Export the customer list as CSV", "to do", "#87909e"),
+        ];
+        // Opened directly, not through toggle_tickets: that would send the made-up token to ClickUp.
+        let workspace = cx.weak_entity();
+        self.tickets_view = Some(cx.new(|cx| TicketsView::new(workspace, window, cx)));
+        self.panels.tickets = true;
         cx.notify();
     }
 
@@ -1734,6 +1796,48 @@ impl Workspace {
         grid.into_any_element()
     }
 
+    /// The panel toggles (raised while the panel is open) and Settings, in the title bar.
+    fn render_panel_toggles(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let toggle = |id: &'static str, icon: &str, on: bool| {
+            chrome::track_item(id, on).child(chrome::icon(
+                icon,
+                16.,
+                theme::color(if on { color::INK } else { color::INK_MUTED }),
+            ))
+        };
+        chrome::track()
+            .child(
+                toggle("toggle-sidebar", "panel-left", self.panels.sidebar)
+                    .tooltip(chrome::tip_for("Show or hide the sidebar", ToggleSidebar))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.panels.sidebar = !this.panels.sidebar;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                toggle("toggle-editor", "panel-top", self.panels.editor)
+                    .tooltip(chrome::tip_for("Show or hide the editor", ToggleEditor))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.panels.editor = !this.panels.editor;
+                        cx.notify();
+                    })),
+            )
+            // Only with ClickUp connected: without it there's nothing to show.
+            .when(self.clickup.connected(), |track| {
+                track.child(
+                    toggle("toggle-tickets", "panel-right", self.panels.tickets)
+                        .tooltip(chrome::tip_for("Show or hide your tickets", ToggleTickets))
+                        .on_click(cx.listener(|this, _, window, cx| this.toggle_tickets(window, cx))),
+                )
+            })
+            .child(chrome::track_separator())
+            .child(
+                toggle("open-settings", "settings", false)
+                    .tooltip(chrome::tip_for("Settings", OpenSettings))
+                    .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx))),
+            )
+    }
+
     fn render_titlebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let states: Vec<AgentState> = self.terminals.values().map(|view| view.read(cx).state).collect();
         let count = |wanted: &[AgentState]| states.iter().filter(|state| wanted.contains(state)).count();
@@ -1751,15 +1855,8 @@ impl Workspace {
                 }
             })
         };
-        // Controls live in tracks, as everywhere: the panel toggles on the left (raised while the
-        // panel is open), what the agents are doing on the right, then the one primary action.
-        let toggle = |id: &'static str, icon: &str, on: bool| {
-            chrome::track_item(id, on).child(chrome::icon(
-                icon,
-                16.,
-                theme::color(if on { color::INK } else { color::INK_MUTED }),
-            ))
-        };
+        // Controls live in tracks, as everywhere: the panel toggles on the left, what the agents
+        // are doing on the right, then the one primary action.
         let live: Vec<(usize, AgentState, &str)> = summary.into_iter().filter(|(n, _, _)| *n > 0).collect();
         let activity = (!live.is_empty()).then(|| {
             let mut track = chrome::track();
@@ -1789,31 +1886,7 @@ impl Workspace {
             .h(len(TITLEBAR_HEIGHT))
             .pr(len(space::SPACE_1))
             .child(empty("titlebar-lights").flex_none().w(len(TRAFFIC_LIGHTS_WIDTH)))
-            .child(
-                chrome::track()
-                    .child(
-                        toggle("toggle-sidebar", "panel-left", self.sidebar_open)
-                            .tooltip(chrome::tip_for("Show or hide the sidebar", ToggleSidebar))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.sidebar_open = !this.sidebar_open;
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        toggle("toggle-editor", "panel-top", self.editor_open)
-                            .tooltip(chrome::tip_for("Show or hide the editor", ToggleEditor))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.editor_open = !this.editor_open;
-                                cx.notify();
-                            })),
-                    )
-                    .child(chrome::track_separator())
-                    .child(
-                        toggle("open-settings", "settings", false)
-                            .tooltip(chrome::tip_for("Settings", OpenSettings))
-                            .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx))),
-                    ),
-            )
+            .child(self.render_panel_toggles(cx))
             .child(self.render_repo_tabs(cx))
             .child(empty("titlebar-middle").flex_1())
             .children(activity)
@@ -1958,33 +2031,44 @@ impl Workspace {
                     resizable_panel()
                         .size(px(270.))
                         .size_range(px(200.)..px(480.))
-                        .visible(self.sidebar_open)
+                        .visible(self.panels.sidebar)
                         .child(div().size_full().pr(half_gap).child(sidebar)),
                 )
                 .child(
                     resizable_panel().child(
-                        div().size_full().when(self.sidebar_open, |main| main.pl(half_gap)).child(
-                            v_resizable("main")
-                                .with_handle_appearance(chrome::quiet_resize_handle())
-                                .child(
-                                    resizable_panel()
-                                        .size(px(260.))
-                                        .size_range(px(120.)..px(4000.))
-                                        .visible(self.editor_open)
-                                        .child(div().size_full().pb(half_gap).child(self.editor.clone())),
-                                )
-                                .child(
-                                    resizable_panel().visible(!(self.editor_open && editor_maximized)).child(
-                                        div()
-                                            .size_full()
-                                            .flex()
-                                            .flex_col()
-                                            .when(self.editor_open, |grid| grid.pt(half_gap))
-                                            .child(grid),
+                        div()
+                            .size_full()
+                            .when(self.panels.sidebar, |main| main.pl(half_gap))
+                            .when(self.panels.tickets, |main| main.pr(half_gap))
+                            .child(
+                                v_resizable("main")
+                                    .with_handle_appearance(chrome::quiet_resize_handle())
+                                    .child(
+                                        resizable_panel()
+                                            .size(px(260.))
+                                            .size_range(px(120.)..px(4000.))
+                                            .visible(self.panels.editor)
+                                            .child(div().size_full().pb(half_gap).child(self.editor.clone())),
+                                    )
+                                    .child(
+                                        resizable_panel().visible(!(self.panels.editor && editor_maximized)).child(
+                                            div()
+                                                .size_full()
+                                                .flex()
+                                                .flex_col()
+                                                .when(self.panels.editor, |grid| grid.pt(half_gap))
+                                                .child(grid),
+                                        ),
                                     ),
-                                ),
-                        ),
+                            ),
                     ),
+                )
+                .child(
+                    resizable_panel()
+                        .size(px(300.))
+                        .size_range(px(240.)..px(520.))
+                        .visible(self.panels.tickets && self.tickets_view.is_some())
+                        .child(div().size_full().pl(half_gap).children(self.tickets_view.clone())),
                 ),
         )
     }
@@ -2029,6 +2113,7 @@ impl Workspace {
     /// The palettes, and the views the command palette opens by name.
     fn palette_actions(element: gpui_kit::Div, cx: &mut Context<Self>) -> gpui_kit::Div {
         element
+            .on_action(cx.listener(|this, _: &ToggleTickets, window, cx| this.toggle_tickets(window, cx)))
             .on_action(cx.listener(|this, _: &GoToFile, window, cx| {
                 palette::go_to_file(cx.weak_entity(), this.root.clone(), window, cx);
             }))
@@ -2106,11 +2191,11 @@ impl Render for Workspace {
             }))
             .on_action(cx.listener(|this, _: &NextAttention, window, cx| this.next_attention(window, cx)))
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| {
-                this.sidebar_open = !this.sidebar_open;
+                this.panels.sidebar = !this.panels.sidebar;
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &ToggleEditor, _, cx| {
-                this.editor_open = !this.editor_open;
+                this.panels.editor = !this.panels.editor;
                 cx.notify();
             }))
             .on_action(cx.listener(|_, _: &OpenProject, window, cx| Self::open_project(window, cx)))

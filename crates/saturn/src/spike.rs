@@ -88,6 +88,9 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
     if std::env::var_os("SATURN_HISTORY").is_some() {
         cx.defer_in(window, |workspace, _, cx| workspace.show_history(cx));
     }
+    if std::env::var_os("SATURN_FAKE_TICKETS").is_some() {
+        cx.defer_in(window, Workspace::fake_tickets);
+    }
     if std::env::var_os("SATURN_FAKE_AGENTS").is_some() {
         cx.defer_in(window, |workspace, _, cx| workspace.fake_agents(cx));
     }
