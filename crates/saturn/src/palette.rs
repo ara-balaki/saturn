@@ -1,10 +1,14 @@
 //! The palettes: Go to file (⌘P) and the command palette (⌘⇧P). One search field over a list,
-//! fuzzy-matched as you type; ↑↓ move, Enter picks, Esc closes.
+//! fuzzy-matched as you type; ↑↓ move, Enter picks, Esc closes. With nothing typed, a palette
+//! shows what was picked in it lately, so it opens at once and at a steady size.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use gpui_kit::component::WindowExt as _;
+use gpui_kit::component::dialog::DialogEntrance;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::kbd::Kbd;
 use gpui_kit::{
@@ -22,6 +26,27 @@ use crate::workspace::{self, Workspace};
 /// How many matches a palette lists: enough to scroll, few enough to draw at once.
 const SHOWN: usize = 60;
 
+/// How many recent picks a palette remembers and shows before you type.
+const RECENT: usize = 8;
+
+thread_local! {
+    /// Each palette's recent picks (their search texts), newest first, for this run of Saturn.
+    static RECENTS: RefCell<HashMap<&'static str, Vec<String>>> = RefCell::new(HashMap::new());
+}
+
+fn recents(kind: &'static str) -> Vec<String> {
+    RECENTS.with_borrow(|recents| recents.get(kind).cloned().unwrap_or_default())
+}
+
+fn remember(kind: &'static str, text: &str) {
+    RECENTS.with_borrow_mut(|recents| {
+        let list = recents.entry(kind).or_default();
+        list.retain(|seen| seen != text);
+        list.insert(0, text.to_owned());
+        list.truncate(RECENT);
+    });
+}
+
 /// A line in a palette.
 struct Entry {
     /// What the search matches: a file's path, a command's name.
@@ -36,23 +61,36 @@ struct Entry {
 
 type Pick = Rc<dyn Fn(usize, &mut Window, &mut App)>;
 
+/// What a palette says when it has nothing to list.
+struct Words {
+    /// With nothing typed and nothing picked lately.
+    hint: &'static str,
+    /// While the entries are still being read.
+    loading: &'static str,
+    /// When nothing matches what's typed.
+    none: &'static str,
+}
+
 pub struct Palette {
+    /// Which palette: its recent picks are kept under this.
+    kind: &'static str,
     search: Entity<InputState>,
     entries: Vec<Entry>,
-    /// The entries that match the search, best first.
+    loaded: bool,
+    /// The entries listed: the recent picks, or what matches the search, best first.
     shown: Vec<usize>,
     selected: usize,
-    /// What's said while there's nothing to list.
-    empty: &'static str,
+    words: Words,
     pick: Pick,
     _search_events: Subscription,
 }
 
 impl Palette {
     fn new(
+        kind: &'static str,
         placeholder: &'static str,
-        empty: &'static str,
-        entries: Vec<Entry>,
+        words: Words,
+        entries: Option<Vec<Entry>>,
         pick: Pick,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -66,26 +104,50 @@ impl Palette {
             InputEvent::PressEnter { .. } => this.choose(window, cx),
             _ => {}
         });
-        let mut palette =
-            Self { search, entries, shown: Vec::new(), selected: 0, empty, pick, _search_events: search_events };
+        let loaded = entries.is_some();
+        let mut palette = Self {
+            kind,
+            search,
+            entries: entries.unwrap_or_default(),
+            loaded,
+            shown: Vec::new(),
+            selected: 0,
+            words,
+            pick,
+            _search_events: search_events,
+        };
         palette.filter(cx);
         palette
     }
 
     fn set_entries(&mut self, entries: Vec<Entry>, cx: &mut Context<Self>) {
         self.entries = entries;
+        self.loaded = true;
         self.filter(cx);
     }
 
+    fn query(&self, cx: &Context<Self>) -> String {
+        self.search.read(cx).value().trim().to_owned()
+    }
+
+    /// Lists the recent picks while nothing is typed, else what matches.
     fn filter(&mut self, cx: &mut Context<Self>) {
-        let query = self.search.read(cx).value().to_string();
-        self.shown = fuzzy::rank(&query, self.entries.iter().map(|entry| entry.text.as_str()), SHOWN);
+        let query = self.query(cx);
+        self.shown = if query.is_empty() {
+            recents(self.kind)
+                .iter()
+                .filter_map(|text| self.entries.iter().position(|entry| entry.text == *text))
+                .collect()
+        } else {
+            fuzzy::rank(&query, self.entries.iter().map(|entry| entry.text.as_str()), SHOWN)
+        };
         self.selected = 0;
         cx.notify();
     }
 
     fn choose(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(&index) = self.shown.get(self.selected) else { return };
+        remember(self.kind, &self.entries[index].text);
         let pick = self.pick.clone();
         window.close_dialog(cx);
         // After the dialog has handed the focus back, so a command reaches the pane it's for.
@@ -161,14 +223,33 @@ impl Render for Palette {
                 }
                 _ => {}
             }))
-            .child(Input::new(&self.search))
-            .child(if rows.is_empty() {
+            // A quiet field: a fill, no focus ring; the caret says where typing goes.
+            .child(
                 div()
-                    .py(len(space::SPACE_4))
+                    .flex()
+                    .items_center()
+                    .gap(len(space::SPACE_2))
+                    .h(px(36.))
                     .px(len(space::SPACE_3))
-                    .text_size(px(14.))
-                    .text_color(theme::color(color::INK_MUTED))
-                    .child(self.empty)
+                    .rounded(len(radius::RADIUS_SM))
+                    .bg(theme::fill_control())
+                    .child(chrome::icon("search", 14., theme::color(color::INK_FAINT)))
+                    .child(div().flex_1().child(Input::new(&self.search).appearance(false))),
+            )
+            .child(if rows.is_empty() {
+                let words = if self.query(cx).is_empty() {
+                    self.words.hint
+                } else if self.loaded {
+                    self.words.none
+                } else {
+                    self.words.loading
+                };
+                div()
+                    .py(len(space::SPACE_3))
+                    .px(len(space::SPACE_3))
+                    .text_size(px(13.))
+                    .text_color(theme::color(color::INK_FAINT))
+                    .child(words)
                     .into_any_element()
             } else {
                 div()
@@ -185,7 +266,12 @@ impl Render for Palette {
 
 fn open(title: &'static str, palette: Entity<Palette>, window: &mut Window, cx: &mut App) {
     window.open_dialog(cx, move |dialog, _, _| {
-        dialog.title(title).bg(chrome::dialog_surface()).w(px(640.)).child(palette.clone())
+        dialog
+            .title(title)
+            .entrance(DialogEntrance::None)
+            .bg(chrome::dialog_surface())
+            .w(px(640.))
+            .child(palette.clone())
     });
 }
 
@@ -199,17 +285,17 @@ pub fn go_to_file(workspace: WeakEntity<Workspace>, root: PathBuf, window: &mut 
             let _ = workspace.update(cx, |workspace, cx| workspace.open_file(&root.join(file), window, cx));
         })
     };
-    let palette =
-        cx.new(|cx| Palette::new("Search files by name or path", "Reading the files…", Vec::new(), pick, window, cx));
+    let words =
+        Words {
+            hint: "Type part of a file's name or path.", loading: "Reading the files…", none: "No file matches."
+        };
+    let palette = cx.new(|cx| Palette::new("files", "Search files", words, None, pick, window, cx));
     let weak = palette.downgrade();
     cx.spawn(async move |cx| {
         let found = cx.background_spawn(async move { list_files(&root) }).await;
         let entries = found.iter().map(|file| file_entry(file)).collect();
         *files.borrow_mut() = found;
-        let _ = weak.update(cx, |palette, cx| {
-            palette.empty = "No file matches.";
-            palette.set_entries(entries, cx);
-        });
+        let _ = weak.update(cx, |palette, cx| palette.set_entries(entries, cx));
     })
     .detach();
     open("Go to file", palette, window, cx);
@@ -255,6 +341,7 @@ pub fn commands(window: &mut Window, cx: &mut App) {
             window.dispatch_action(action.boxed_clone(), cx);
         }
     });
-    let palette = cx.new(|cx| Palette::new("Type a command", "No command matches.", entries, pick, window, cx));
+    let words = Words { hint: "Type what you want to do.", loading: "", none: "No command matches." };
+    let palette = cx.new(|cx| Palette::new("commands", "Search commands", words, Some(entries), pick, window, cx));
     open("Commands", palette, window, cx);
 }

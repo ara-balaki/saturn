@@ -37,6 +37,7 @@ pub fn open(workspace: WeakEntity<Workspace>, window: &mut Window, cx: &mut App)
         };
         dialog
             .title("New agent")
+            .entrance(gpui_kit::component::dialog::DialogEntrance::None)
             .bg(crate::chrome::dialog_surface())
             .w(px(600.))
             .child(Input::new(&search))

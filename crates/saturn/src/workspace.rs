@@ -76,6 +76,25 @@ actions!(
     ]
 );
 
+thread_local! {
+    /// Every window's workspace, so app-wide shortcuts can find the one in front.
+    static OPEN: std::cell::RefCell<Vec<(gpui_kit::AnyWindowHandle, gpui_kit::WeakEntity<Workspace>)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Runs `act` on the workspace of the window in front, if it has one: for shortcuts that arrive
+/// while nothing in the window has the keyboard.
+pub fn in_front(cx: &mut gpui_kit::App, act: impl FnOnce(&mut Workspace, &mut Window, &mut Context<Workspace>)) {
+    let Some(front) = cx.active_window() else { return };
+    let workspace = OPEN.with_borrow_mut(|open| {
+        open.retain(|(_, workspace)| workspace.upgrade().is_some());
+        open.iter().find(|(window, _)| *window == front).map(|(_, workspace)| workspace.clone())
+    });
+    if let Some(workspace) = workspace.and_then(|workspace| workspace.upgrade()) {
+        let _ = front.update(cx, |_, window, cx| workspace.update(cx, |workspace, cx| act(workspace, window, cx)));
+    }
+}
+
 /// Every command the command palette offers: its name, its icon, and the action it runs (whose
 /// shortcut the palette shows).
 pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)> {
@@ -499,6 +518,9 @@ impl Workspace {
         // The editor panel can take the grid's room; the workbench follows its changes.
         let editor = cx.new(|_| EditorView::default());
         cx.observe(&editor, |_, _, cx| cx.notify()).detach();
+        let handle = window.window_handle();
+        let weak = cx.weak_entity();
+        OPEN.with_borrow_mut(|open| open.push((handle, weak)));
         let status_bar = {
             let (editor, workspace) = (editor.clone(), cx.weak_entity());
             cx.new(|cx| StatusBar::new(editor, workspace, &project, cx))
@@ -2018,6 +2040,16 @@ impl Workspace {
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.report_attention(window, cx);
+        // With nothing holding the keyboard (Saturn just came forward, a dialog just closed),
+        // shortcuts would reach nothing: the workspace takes it.
+        if window.focused(cx).is_none() {
+            let focus = self.focus.clone();
+            cx.defer_in(window, move |_, window, cx| {
+                if window.focused(cx).is_none() {
+                    window.focus(&focus, cx);
+                }
+            });
+        }
         div()
             .size_full()
             .flex()

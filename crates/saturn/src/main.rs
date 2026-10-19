@@ -165,6 +165,15 @@ fn main() {
         bind_keys(cx);
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.on_action(|_: &CheckForUpdates, _| updates::check());
+        // Only when the window's own handlers didn't get them: nothing had the keyboard.
+        cx.on_action(|_: &GoToFile, cx| {
+            workspace::in_front(cx, |workspace, window, cx| {
+                palette::go_to_file(cx.weak_entity(), workspace.root().to_owned(), window, cx);
+            });
+        });
+        cx.on_action(|_: &CommandPalette, cx| {
+            workspace::in_front(cx, |_, window, cx| palette::commands(window, cx));
+        });
         set_menus(cx);
 
         open_main_window(project, cx);
