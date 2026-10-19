@@ -99,6 +99,7 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("Save the file", "file-code", Box::new(SaveFile)),
         ("Add a repo", "folder", Box::new(OpenProject)),
         ("Settings", "settings", Box::new(OpenSettings)),
+        ("Check for updates", "square-arrow-right", Box::new(crate::CheckForUpdates)),
     ]
 }
 
