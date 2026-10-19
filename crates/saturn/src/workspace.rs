@@ -31,6 +31,7 @@ use crate::editor_view::EditorView;
 use crate::files_view::{FilesEvent, FilesView};
 use crate::session::{self, SavedGrid, SavedTab};
 use crate::settings::{self, AppearanceSetting, Settings};
+use crate::status_bar::StatusBar;
 use crate::theme::{self, len};
 use crate::{agents_view, dock, github, menu_bar, notify, palette, settings_view, ticket_picker};
 
@@ -192,6 +193,8 @@ pub struct Workspace {
     follow_pane: bool,
     /// Open files, in the top panel.
     editor: Entity<EditorView>,
+    /// Along the window's foot: problems, the language server, the cursor, the branch.
+    status_bar: Entity<StatusBar>,
     /// What the sidebar shows.
     sidebar_tab: SidebarTab,
     /// The Claude session running in each tab, from its hooks, so a restart can offer to resume it.
@@ -495,7 +498,12 @@ impl Workspace {
         // The editor panel can take the grid's room; the workbench follows its changes.
         let editor = cx.new(|_| EditorView::default());
         cx.observe(&editor, |_, _, cx| cx.notify()).detach();
+        let status_bar = {
+            let (editor, workspace) = (editor.clone(), cx.weak_entity());
+            cx.new(|cx| StatusBar::new(editor, workspace, &project, cx))
+        };
         Self {
+            status_bar,
             sidebar_tab: SidebarTab::Files,
             claude_sessions: HashMap::new(),
             clickup: ClickUpState::default(),
@@ -543,7 +551,10 @@ impl Workspace {
             let changes = changes.clone();
             cx.subscribe_in(&files, window, move |this, _, event: &FilesEvent, window, cx| match event {
                 FilesEvent::Open(path) => this.open_file(path, window, cx),
-                FilesEvent::GitChanged => changes.update(cx, ChangesView::reload),
+                FilesEvent::GitChanged => {
+                    changes.update(cx, ChangesView::reload);
+                    this.status_bar.update(cx, StatusBar::refresh);
+                }
                 FilesEvent::Changed(paths) => {
                     this.editor.update(cx, |editor, cx| editor.files_changed(paths, window, cx));
                 }
@@ -601,6 +612,8 @@ impl Workspace {
             self.roots.insert(target.clone(), views);
         }
         self.root = target;
+        let root = self.root.clone();
+        self.status_bar.update(cx, |bar, cx| bar.set_root(&root, cx));
         cx.notify();
     }
 
@@ -661,6 +674,8 @@ impl Workspace {
             self.roots.insert(self.project.clone(), views);
         }
         self.root = self.project.clone();
+        let root = self.root.clone();
+        self.status_bar.update(cx, |bar, cx| bar.set_root(&root, cx));
         cx.notify();
     }
 
@@ -2007,8 +2022,8 @@ impl Render for Workspace {
             .flex()
             .flex_col()
             .px(len(space::SPACE_2))
-            .pb(len(space::SPACE_2))
-            // No fill: the title bar, sidebar and gaps are the window's glass (theme::overlay).
+            // No fill: the title bar, sidebar and gaps are the window's glass (theme::overlay). The
+            // status bar is the foot, so no padding below.
             .text_color(theme::color(color::INK))
             .font_family(saturn_design::font::SANS)
             .track_focus(&self.focus)
@@ -2094,6 +2109,7 @@ impl Render for Workspace {
             )
             .child(self.render_titlebar(cx))
             .child(self.render_workbench(cx))
+            .child(self.status_bar.clone())
     }
 }
 

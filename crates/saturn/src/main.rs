@@ -24,6 +24,7 @@ mod session;
 mod settings;
 mod settings_view;
 mod spike;
+mod status_bar;
 mod theme;
 mod ticket_picker;
 mod updates;

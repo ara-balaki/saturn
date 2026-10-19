@@ -190,6 +190,18 @@ pub fn branch(repo: &Path) -> Option<String> {
     run(repo, &["symbolic-ref", "--quiet", "--short", "HEAD"]).map(|name| name.trim().to_owned())
 }
 
+/// How many commits the current branch has that its upstream doesn't, and the other way round:
+/// what a push would send and a pull would bring. `None` without an upstream.
+pub fn ahead_behind(repo: &Path) -> Option<(usize, usize)> {
+    let counts = run(repo, &["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])?;
+    parse_counts(&counts)
+}
+
+fn parse_counts(counts: &str) -> Option<(usize, usize)> {
+    let mut parts = counts.split_whitespace().map(str::parse::<usize>);
+    Some((parts.next()?.ok()?, parts.next()?.ok()?))
+}
+
 /// Where the current branch left the default branch (`origin/HEAD`, else `main` or `master`).
 pub fn merge_base(repo: &Path) -> Option<String> {
     let default_branch = run(repo, &["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"])
@@ -257,6 +269,12 @@ pub fn has_changes_under<S: std::hash::BuildHasher>(changes: &HashMap<PathBuf, F
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_ahead_and_behind() {
+        assert_eq!(parse_counts("2\t5\n"), Some((2, 5)));
+        assert_eq!(parse_counts(""), None);
+    }
 
     #[test]
     fn reads_each_kind_of_change() {

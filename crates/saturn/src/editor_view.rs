@@ -73,6 +73,27 @@ struct Review {
     label: String,
 }
 
+/// What the editor panel tells the status bar.
+#[derive(Default)]
+pub struct EditorStatus {
+    pub errors: usize,
+    pub warnings: usize,
+    /// The cursor in the file in front, 1-based: line and column.
+    pub cursor: Option<(u32, u32)>,
+    /// The file in front's language, as people call it.
+    pub language: Option<String>,
+    /// Its language server: the server's name and how it's doing.
+    pub server: Option<(String, ServerState)>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ServerState {
+    Starting,
+    Ready,
+    /// Not installed, being installed, or stopped: the strip says which.
+    Absent,
+}
+
 /// Renaming a symbol: the field in the strip, and where the symbol is.
 struct Rename {
     input: Entity<InputState>,
@@ -205,6 +226,30 @@ impl EditorView {
             let uri = document.uri.clone();
             let _ = this.update(cx, |this, cx| this.server_event(lsp::Event::Diagnostics { uri, diagnostics }, cx));
         }));
+    }
+
+    /// The text of the file in front, when a file is.
+    pub fn front_state(&self) -> Option<Entity<EditorState>> {
+        self.files.get(self.active).filter(|_| self.front == Front::File).map(|file| file.state.clone())
+    }
+
+    /// What the status bar shows about the panel.
+    pub fn status(&self, cx: &gpui_kit::App) -> EditorStatus {
+        let (errors, warnings) = problems_view::counts(&self.problems);
+        let mut status = EditorStatus { errors, warnings, ..EditorStatus::default() };
+        let Some(file) = self.files.get(self.active).filter(|_| self.front == Front::File) else { return status };
+        let position = file.state.read(cx).cursor_position();
+        status.cursor = Some((position.line + 1, position.character + 1));
+        status.language = Some(language_name(language_for(&file.path)));
+        status.server = file.language.as_ref().map(|language| match language {
+            Status::Running(document) => {
+                let state = if document.server.is_ready() { ServerState::Ready } else { ServerState::Starting };
+                (document.server.name.to_owned(), state)
+            }
+            Status::Missing(spec) | Status::Installing(spec) => (spec.name.to_owned(), ServerState::Absent),
+            Status::Failed(_) => (String::new(), ServerState::Absent),
+        });
+        status
     }
 
     /// Opens `path` with the cursor at `position` (go to definition, a reference).
@@ -1317,6 +1362,35 @@ fn first_sentence(reason: &str) -> String {
     let reason = reason.rsplit("message: ").next().unwrap_or(reason);
     let end = reason.find(". ").map_or(reason.len(), |end| end + 1);
     reason[..end].to_owned()
+}
+
+/// A grammar's name as people say it: `typescript` is TypeScript, `tsx` TypeScript JSX.
+fn language_name(grammar: &str) -> String {
+    let known = match grammar {
+        "typescript" => "TypeScript",
+        "tsx" => "TypeScript JSX",
+        "javascript" => "JavaScript",
+        "json" => "JSON",
+        "yaml" => "YAML",
+        "toml" => "TOML",
+        "html" => "HTML",
+        "css" => "CSS",
+        "scss" => "SCSS",
+        "sql" => "SQL",
+        "bash" => "Shell",
+        "cpp" => "C++",
+        "csharp" => "C#",
+        "objc" => "Objective-C",
+        "graphql" => "GraphQL",
+        "xml" => "XML",
+        "text" | "" => "Plain text",
+        _ => "",
+    };
+    if !known.is_empty() {
+        return known.to_owned();
+    }
+    let mut chars = grammar.chars();
+    chars.next().map(|first| first.to_uppercase().chain(chars).collect()).unwrap_or_default()
 }
 
 fn display_name(path: &Path) -> String {

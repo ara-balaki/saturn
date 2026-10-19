@@ -56,6 +56,8 @@ It isn't an IDE and doesn't try to replace yours. It's the place the agents live
   click a table to see what it's connected to.
 - **Pull requests on the panes.** A pane whose branch has a pull request shows its number and
   state, from the `gh` CLI.
+- **A status bar.** Errors and warnings, the language server, the cursor, the file's language, and
+  the branch with how many commits are waiting to be pushed and pulled.
 - **Follows the agent you're looking at.** Focus a pane that works in another git worktree, and the
   sidebar switches to that worktree.
 - **Opens where you left off.** The window's repos and grid come back as they were, and Saturn
