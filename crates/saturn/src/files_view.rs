@@ -131,9 +131,11 @@ impl FilesView {
         let state = self.changes.get(&row.path).copied();
         // A closed folder with changes beneath it gets a quiet dot, so nothing hides in it.
         let changed_inside = row.is_dir && !row.expanded && git::has_changes_under(&self.changes, &row.path);
+        // What git ignores (build output, node_modules, local env files) is listed, but faint.
         let name_color = match state {
-            Some(FileState::Deleted) => color::INK_FAINT,
             _ if selected => color::INK,
+            Some(FileState::Deleted) => color::INK_FAINT,
+            _ if row.ignored => color::INK_FAINT,
             _ => color::INK_MUTED,
         };
         let icon = match (row.is_dir, row.expanded) {
@@ -163,7 +165,7 @@ impl FilesView {
                     theme::color(color::INK_FAINT),
                 ))
             }))
-            .child(chrome::icon(icon, 14., theme::color(color::INK_MUTED)))
+            .child(chrome::icon(icon, 14., theme::color(if row.ignored { color::INK_FAINT } else { color::INK_MUTED })))
             .child(div().flex_1().min_w_0().truncate().child(row.name.clone()))
             .children(state.map(|state| {
                 div()
