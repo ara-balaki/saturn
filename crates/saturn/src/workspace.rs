@@ -540,7 +540,7 @@ fn process_name(pid: i32) -> Option<String> {
 
 impl Workspace {
     pub fn new(project: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        // A saved ClickUp token turns the ticket picker on; the Keychain is read off the main thread.
+        // A saved ClickUp token turns the ticket picker on; it's read off the main thread.
         cx.spawn(async move |this, cx| {
             let token = cx.background_spawn(async { clickup::token() }).await;
             if let Some(token) = token {
@@ -818,7 +818,7 @@ impl Workspace {
         &self.clickup
     }
 
-    /// Checks `token` with ClickUp and, if it works, keeps it in the Keychain.
+    /// Checks `token` with ClickUp and, if it works, saves it.
     pub fn connect_clickup(&mut self, token: String, cx: &mut Context<Self>) {
         self.clickup.problem = None;
         self.clickup.loading = true;

@@ -117,9 +117,8 @@ Releasing needs the Sparkle signing key in the publisher's keychain; updates sig
 key are refused by every installed Saturn.
 
 The app is code-signed with the publisher's self-signed "Saturn Code Signing" certificate when
-it's in the keychain (`scripts/bundle.sh` finds it), so every version has the same identity and
-macOS keeps Saturn's "Always Allow" for its Keychain items across updates. Without it, builds are
-signed ad hoc and each update asks again.
+it's in the keychain (`scripts/bundle.sh` finds it), so every version has the same identity. Without it, builds are
+signed ad hoc.
 
 Saturn isn't notarised (there's no Apple Developer ID), so a downloaded copy is opened once with
 Open Anyway; the disk image explains how.

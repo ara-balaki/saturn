@@ -531,7 +531,7 @@ impl SettingsView {
                     Section::ClickUp,
                     "Connect ClickUp",
                     format!(
-                        "Start agents from your tickets and see them in the Tickets panel. Paste a personal API token (ClickUp → Settings → Apps); Saturn keeps it in the macOS Keychain. {status}"
+                        "Start agents from your tickets and see them in the Tickets panel. Paste a personal API token (ClickUp → Settings → Apps); Saturn keeps it in a file only you can read. {status}"
                     ),
                     div()
                         .flex()

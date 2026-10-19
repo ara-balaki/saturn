@@ -213,7 +213,7 @@ them. They're stored in `~/Library/Application Support/Saturn/settings.json`.
   would. Tickets mentioned in normal prompts never rename anything.
 - **Keyboard shortcuts**: click one and press the keys you want; a shortcut that had them gives them
   up.
-- **ClickUp** (optional): your API token, kept in the macOS Keychain, plus, for each project, the
+- **ClickUp** (optional): your API token, kept in a file only you can read, plus, for each project, the
   command a ticket starts (`claude -n {ticket}` by default) and whether it gets its own worktree.
 
 ## FAQ
@@ -230,7 +230,7 @@ needs you, done) come from Claude Code's hooks, so only Claude Code reports how 
 
 **What leaves my Mac?** Saturn has no server and collects nothing. It asks GitHub for new
 versions and, through your own `gh`, for pull requests; Claude Code for your plan's usage; and
-ClickUp only if you connect a token, which stays in the macOS Keychain.
+ClickUp only if you connect a token, which stays in a file only you can read.
 
 **Why does macOS warn me the first time?** Saturn isn't notarised, because that needs a paid Apple
 Developer ID. It's built from this repo, and updates are signed, so an installed Saturn only accepts
