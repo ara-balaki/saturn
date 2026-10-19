@@ -162,21 +162,53 @@ fn menu(summary: &str, waiting: bool, target: &ClickTarget, main_thread: MainThr
     menu
 }
 
-/// Saturn's mark at menu bar size: a planet and a tilted ring, as a template image, so macOS
-/// draws it black or white to match the menu bar.
+/// Saturn's mark at menu bar size, as the app icon draws it: a tilted ring rising to the right,
+/// its far half behind the planet and its near half in front. A template image, so macOS draws
+/// it black or white to match the menu bar.
 fn glyph() -> Retained<NSImage> {
     let draw = RcBlock::new(|_rect: NSRect| -> Bool {
         NSColor::blackColor().set();
-        NSBezierPath::bezierPathWithOvalInRect(NSRect::new(NSPoint::new(5.5, 5.5), NSSize::new(7., 7.))).fill();
-        let ring =
-            NSBezierPath::bezierPathWithOvalInRect(NSRect::new(NSPoint::new(1.25, 6.25), NSSize::new(15.5, 5.5)));
-        ring.setLineWidth(1.4);
-        let tilt = NSAffineTransform::new();
-        tilt.translateXBy_yBy(9., 9.);
-        tilt.rotateByDegrees(-20.);
-        tilt.translateXBy_yBy(-9., -9.);
-        ring.transformUsingAffineTransform(&tilt);
-        ring.stroke();
+        // The ring in halves around (9, 9): the far half above the centre line, the near below.
+        let (centre, across, deep) = (9.0_f64, 7.75_f64, 2.6_f64);
+        let half = |sign: f64| {
+            const K: f64 = 0.552_284_75;
+            let path = NSBezierPath::bezierPath();
+            path.moveToPoint(NSPoint::new(centre + across, centre));
+            path.curveToPoint_controlPoint1_controlPoint2(
+                NSPoint::new(centre, centre + sign * deep),
+                NSPoint::new(centre + across, centre + sign * K * deep),
+                NSPoint::new(centre + K * across, centre + sign * deep),
+            );
+            path.curveToPoint_controlPoint1_controlPoint2(
+                NSPoint::new(centre - across, centre),
+                NSPoint::new(centre - K * across, centre + sign * deep),
+                NSPoint::new(centre - across, centre + sign * K * deep),
+            );
+            path.setLineWidth(1.3);
+            path.setLineCapStyle(objc2_app_kit::NSLineCapStyle::Round);
+            // Rising to the right, as on the icon (AppKit's y points up, so counter-clockwise).
+            let tilt = NSAffineTransform::new();
+            tilt.translateXBy_yBy(centre, centre);
+            tilt.rotateByDegrees(20.);
+            tilt.translateXBy_yBy(-centre, -centre);
+            path.transformUsingAffineTransform(&tilt);
+            path
+        };
+        half(1.).stroke();
+        NSBezierPath::bezierPathWithOvalInRect(NSRect::new(NSPoint::new(5., 5.), NSSize::new(8., 8.))).fill();
+        // One colour can't put a ring in front of a planet, so the near half cuts a thin gap into
+        // the planet first, then is drawn in it.
+        let near = half(-1.);
+        if let Some(context) = objc2_app_kit::NSGraphicsContext::currentContext() {
+            context.setCompositingOperation(objc2_app_kit::NSCompositingOperation::Clear);
+            near.setLineWidth(3.);
+            near.stroke();
+            context.setCompositingOperation(objc2_app_kit::NSCompositingOperation::SourceOver);
+            near.setLineWidth(1.3);
+            // Where the halves meet at the ring's ends, the gap bit into the far half: mend it.
+            half(1.).stroke();
+        }
+        near.stroke();
         Bool::YES
     });
     let image = NSImage::imageWithSize_flipped_drawingHandler(NSSize::new(18., 18.), false, &draw);
