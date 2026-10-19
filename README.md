@@ -161,6 +161,7 @@ Node is only used for commit hooks and for formatting Markdown and JSON. Commits
 | `crates/saturn-bridge`   | Where the plugin's hooks reach Saturn: a small HTTP server on a Unix socket  |
 
 More reading: [the design system](docs/04-design-system.md) and [the Rust stack](docs/05-rust-stack.md).
+Want to change something? [AGENTS.md](AGENTS.md) has the rules, for people and coding agents alike.
 
 ### Spikes and screenshots
 
