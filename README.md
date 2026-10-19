@@ -35,7 +35,8 @@ It isn't an IDE and doesn't try to replace yours. It's the place the agents live
   in: its step, how much context it holds, and its progress.
 - **Several repos in one window.** Repos sit as tabs in the title bar (⌘O adds one); agents from
   different repos share one grid, and new tabs open in the repo you've selected.
-- **Files and a light editor.** A gitignore-aware file tree with git badges, and an editor with
+- **Files and a light editor.** ⌘P finds any file by a few letters of its name or path; ⌘⇧P
+  finds any command. A file tree with git badges (what git ignores shown faint), and an editor with
   syntax highlighting for about 60 languages that saves with your project's own formatter
   (Prettier, Biome, oxfmt or rustfmt). Files an agent changes reload by themselves; if you have
   unsaved edits, Saturn asks first.
@@ -101,6 +102,8 @@ image carries a note that says so. They need [Claude Code](https://claude.com/cl
 
 | Keys        | Does                                   |
 | ----------- | -------------------------------------- |
+| ⌘P          | Go to a file, by name or path          |
+| ⌘⇧P         | Command palette: every command by name |
 | ⌘T          | New tab in the focused pane            |
 | ⌘D / ⌘⇧D    | Split right / down                     |
 | ⌘W          | Close tab                              |

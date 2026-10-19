@@ -7,6 +7,7 @@ pub mod agent_state;
 pub mod clickup;
 pub mod files;
 pub mod format;
+pub mod fuzzy;
 pub mod git;
 pub mod git_graph;
 pub mod imports;

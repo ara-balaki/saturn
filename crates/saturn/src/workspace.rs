@@ -32,7 +32,7 @@ use crate::files_view::{FilesEvent, FilesView};
 use crate::session::{self, SavedGrid, SavedTab};
 use crate::settings::{self, AppearanceSetting, Settings};
 use crate::theme::{self, len};
-use crate::{agents_view, dock, github, menu_bar, notify, settings_view, ticket_picker};
+use crate::{agents_view, dock, github, menu_bar, notify, palette, settings_view, ticket_picker};
 
 actions!(
     saturn,
@@ -66,8 +66,40 @@ actions!(
         FocusPane7,
         FocusPane8,
         FocusPane9,
+        GoToFile,
+        CommandPalette,
+        ShowHistory,
+        ShowImpact,
+        ShowSchema,
+        ShowProblems,
     ]
 );
+
+/// Every command the command palette offers: its name, its icon, and the action it runs (whose
+/// shortcut the palette shows).
+pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)> {
+    vec![
+        ("Go to file", "search", Box::new(GoToFile)),
+        ("New terminal", "plus", Box::new(NewTab)),
+        ("Split right", "columns-2", Box::new(SplitRight)),
+        ("Split down", "rows-2", Box::new(SplitDown)),
+        ("Close terminal", "x", Box::new(CloseTab)),
+        ("Next tab", "square-arrow-right", Box::new(NextTab)),
+        ("Previous tab", "arrow-left", Box::new(PreviousTab)),
+        ("Maximise the pane", "maximize-2", Box::new(ToggleMaximize)),
+        ("Go to the next agent that needs you", "bot", Box::new(NextAttention)),
+        ("New agent from a ticket", "square-plus", Box::new(OpenTicketPicker)),
+        ("Show or hide the sidebar", "panel-left", Box::new(ToggleSidebar)),
+        ("Show or hide the editor", "panel-top", Box::new(ToggleEditor)),
+        ("History", "git-branch", Box::new(ShowHistory)),
+        ("Impact of the changes", "waypoints", Box::new(ShowImpact)),
+        ("Database diagram", "database", Box::new(ShowSchema)),
+        ("Problems", "circle-x", Box::new(ShowProblems)),
+        ("Save the file", "file-code", Box::new(SaveFile)),
+        ("Add a repo", "folder", Box::new(OpenProject)),
+        ("Settings", "settings", Box::new(OpenSettings)),
+    ]
+}
 
 #[derive(Clone, Copy)]
 pub enum Placement {
@@ -846,7 +878,7 @@ impl Workspace {
         self.editor.update(cx, EditorView::maximize);
     }
 
-    /// Lists the language servers' errors and warnings (spikes).
+    /// Lists the language servers' errors and warnings.
     pub fn show_problems(&mut self, cx: &mut Context<Self>) {
         self.editor.update(cx, EditorView::show_problems);
     }
@@ -868,12 +900,14 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Opens the History tab for the folder the sidebar shows (for spikes and screenshots).
+    /// Opens the History tab for the folder the sidebar shows.
     pub fn show_history(&mut self, cx: &mut Context<Self>) {
         let root = self.root.clone();
         self.editor.update(cx, |editor, cx| {
             editor.show_history(&root, cx);
-            editor.maximize(cx);
+            if std::env::var_os("SATURN_HISTORY").is_some() {
+                editor.maximize(cx);
+            }
         });
         self.editor_open = true;
         cx.notify();
@@ -1932,6 +1966,39 @@ impl Workspace {
     }
 }
 
+impl Workspace {
+    /// Copy and paste in the focused terminal.
+    fn clipboard_actions(element: gpui_kit::Div, cx: &mut Context<Self>) -> gpui_kit::Div {
+        element
+            .on_action(cx.listener(|this, _: &Copy, _, cx| {
+                if let Some(view) = this.focused_view() {
+                    view.update(cx, |view, cx| view.copy_selection(cx));
+                }
+            }))
+            .on_action(cx.listener(|this, _: &Paste, _, cx| {
+                if let Some(view) = this.focused_view() {
+                    view.update(cx, TerminalView::paste_from_clipboard);
+                }
+            }))
+    }
+
+    /// The palettes, and the views the command palette opens by name.
+    fn palette_actions(element: gpui_kit::Div, cx: &mut Context<Self>) -> gpui_kit::Div {
+        element
+            .on_action(cx.listener(|this, _: &GoToFile, window, cx| {
+                palette::go_to_file(cx.weak_entity(), this.root.clone(), window, cx);
+            }))
+            .on_action(cx.listener(|_, _: &CommandPalette, window, cx| palette::commands(window, cx)))
+            .on_action(cx.listener(|this, _: &ShowHistory, _, cx| this.show_history(cx)))
+            .on_action(cx.listener(|this, _: &ShowImpact, _, cx| {
+                let root = this.root.clone();
+                this.show_impact(&root, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ShowSchema, _, cx| this.show_schema(cx)))
+            .on_action(cx.listener(|this, _: &ShowProblems, _, cx| this.show_problems(cx)))
+    }
+}
+
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.report_attention(window, cx);
@@ -1946,6 +2013,8 @@ impl Render for Workspace {
             .font_family(saturn_design::font::SANS)
             .track_focus(&self.focus)
             .key_context("Workspace")
+            .map(|element| Self::palette_actions(element, cx))
+            .map(|element| Self::clipboard_actions(element, cx))
             .on_action(cx.listener(|this, _: &NewTab, window, cx| {
                 this.open_terminal(Placement::Tab, window, cx);
             }))
@@ -1995,16 +2064,6 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &SaveFile, _, cx| this.save_file(cx)))
             .on_action(cx.listener(|_, _: &OpenTicketPicker, window, cx| {
                 ticket_picker::open(cx.weak_entity(), window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &Copy, _, cx| {
-                if let Some(view) = this.focused_view() {
-                    view.update(cx, |view, cx| view.copy_selection(cx));
-                }
-            }))
-            .on_action(cx.listener(|this, _: &Paste, _, cx| {
-                if let Some(view) = this.focused_view() {
-                    view.update(cx, TerminalView::paste_from_clipboard);
-                }
             }))
             .on_action(
                 cx.listener(|this, _: &FocusPane1, window, cx| this.update_layout(window, cx, |l| l.focus_nth(1))),

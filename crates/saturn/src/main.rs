@@ -16,6 +16,7 @@ mod languages;
 mod lsp;
 mod menu_bar;
 mod notify;
+mod palette;
 mod problems_view;
 mod references_view;
 mod schema_view;
@@ -36,9 +37,10 @@ use gpui_kit::{
 
 use crate::app_view::AppView;
 use crate::workspace::{
-    CloseTab, Copy, FocusDown, FocusLeft, FocusPane1, FocusPane2, FocusPane3, FocusPane4, FocusPane5, FocusPane6,
-    FocusPane7, FocusPane8, FocusPane9, FocusRight, FocusUp, NewTab, NextAttention, NextTab, OpenProject, OpenSettings,
-    OpenTicketPicker, Paste, PreviousTab, SaveFile, SplitDown, SplitRight, ToggleEditor, ToggleMaximize, ToggleSidebar,
+    CloseTab, CommandPalette, Copy, FocusDown, FocusLeft, FocusPane1, FocusPane2, FocusPane3, FocusPane4, FocusPane5,
+    FocusPane6, FocusPane7, FocusPane8, FocusPane9, FocusRight, FocusUp, GoToFile, NewTab, NextAttention, NextTab,
+    OpenProject, OpenSettings, OpenTicketPicker, Paste, PreviousTab, SaveFile, SplitDown, SplitRight, ToggleEditor,
+    ToggleMaximize, ToggleSidebar,
 };
 
 actions!(saturn, [Quit]);
@@ -81,6 +83,8 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-s", SaveFile, None),
         KeyBinding::new("cmd-shift-t", OpenTicketPicker, None),
         KeyBinding::new("cmd-j", ToggleEditor, None),
+        KeyBinding::new("cmd-p", GoToFile, None),
+        KeyBinding::new("cmd-shift-p", CommandPalette, None),
         KeyBinding::new("cmd-1", FocusPane1, None),
         KeyBinding::new("cmd-2", FocusPane2, None),
         KeyBinding::new("cmd-3", FocusPane3, None),
@@ -100,7 +104,11 @@ fn set_menus(cx: &mut App) {
             MenuItem::separator(),
             MenuItem::action("Quit Saturn", Quit),
         ]),
-        Menu::new("File").items([MenuItem::action("Open Project…", OpenProject), MenuItem::action("Save", SaveFile)]),
+        Menu::new("File").items([
+            MenuItem::action("Go to File…", GoToFile),
+            MenuItem::action("Open Project…", OpenProject),
+            MenuItem::action("Save", SaveFile),
+        ]),
         Menu::new("Terminal").items([
             MenuItem::action("New Tab", NewTab),
             MenuItem::action("New Agent from Ticket…", OpenTicketPicker),
@@ -114,6 +122,8 @@ fn set_menus(cx: &mut App) {
             MenuItem::action("Next Agent Needing You", NextAttention),
         ]),
         Menu::new("View").items([
+            MenuItem::action("Command Palette…", CommandPalette),
+            MenuItem::separator(),
             MenuItem::action("Toggle Sidebar", ToggleSidebar),
             MenuItem::action("Toggle Editor", ToggleEditor),
         ]),
