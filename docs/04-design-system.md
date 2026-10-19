@@ -22,8 +22,8 @@ Orange and green split "come back" in two: orange is waiting on you, green is do
 
 Saturn layers its window the way macOS apps do (Finder, Xcode, Mail):
 
-- **Chrome is glass.** The title bar, the sidebar and the gaps between panes draw nothing, so the window's own macOS sidebar material shows: blur, saturation, a fill and a brightness clamp. Saturn keeps the material's blur and saturation, thins its fill to 60% so a little more of the desktop shows through, and drops the tint macOS takes from the wallpaper, so the glass stays neutral grey (a patch in `vendor/gpui-pre-macos`).
-- **Content is a card.** A terminal pane or the editor is an opaque **card** (`surface`, radius 10) holding a **strip** of controls and, under one hairline, its content, edge to edge. No well inside a card, so no double outline.
+- **Chrome is glass.** The title bar and the gaps between cards draw nothing, so the window's own macOS sidebar material shows: blur, saturation, a fill and a brightness clamp. Saturn keeps the material's blur and saturation, thins its fill to 60% so a little more of the desktop shows through, and drops the tint macOS takes from the wallpaper, so the glass stays neutral grey (a patch in `vendor/gpui-pre-macos`).
+- **Content is a card.** The sidebar, a terminal pane or the editor is an opaque **card** (`surface`, radius 10) holding a **strip** of controls and, under one hairline, its content, edge to edge. No well inside a card, so no double outline.
 - **Edges and fills are relative.** Black in light mode, white in dark, at a low alpha (`theme::overlay`): a 10% separator, 6–11% control fills, a card ring of 7–8%. A fixed grey would read as a sticker on glass; a relative one darkens or lightens whatever is under it. In light mode a card also has a soft shadow; in dark mode a highlight along its top edge.
 - **Dialogs** float over a light dim, with the window sharp behind them: no blur.
 - **Dark cards are grey, not black** (`surface` is `#1e1e1e`, macOS's own content grey), so they sit on the glass rather than cutting holes in it.

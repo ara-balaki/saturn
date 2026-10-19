@@ -63,7 +63,8 @@ fn tint(state: AgentState) -> (u32, u32, u32) {
     }
 }
 
-/// The gradient card for the agent in the focused pane.
+/// The gradient card for the agent in the focused pane. It sits 4px inside the sidebar's card
+/// (radius 10), so its corners are 6.
 pub fn card(id: impl Into<ElementId>, agent: &Agent) -> gpui_kit::Stateful<gpui_kit::Div> {
     let (bright, deep, end) = tint(agent.state);
     let white = |alpha: f32| gpui_kit::hsla(0., 0., 1., alpha);
@@ -74,7 +75,7 @@ pub fn card(id: impl Into<ElementId>, agent: &Agent) -> gpui_kit::Stateful<gpui_
         .flex_col()
         .gap(len(space::SPACE_1))
         .p(len(space::SPACE_3))
-        .rounded(len(radius::RADIUS_LG))
+        .rounded(len(radius::RADIUS_SM))
         .overflow_hidden()
         .cursor_pointer()
         .bg(linear_gradient(155., linear_color_stop(rgb(deep), 0.), linear_color_stop(rgb(end), 1.))
@@ -82,7 +83,7 @@ pub fn card(id: impl Into<ElementId>, agent: &Agent) -> gpui_kit::Stateful<gpui_
         // The light pooling in from the lower left, as in the design system's gradient card. Rounded
         // like the card: GPUI clips children to a rectangle, not to rounded corners.
         .child(
-            div().absolute().top_0().left_0().size_full().rounded(len(radius::RADIUS_LG)).bg(linear_gradient(
+            div().absolute().top_0().left_0().size_full().rounded(len(radius::RADIUS_SM)).bg(linear_gradient(
                 30.,
                 linear_color_stop(Hsla::from(rgb(bright)).opacity(0.7), 0.),
                 linear_color_stop(Hsla::from(rgb(bright)).opacity(0.), 0.85),

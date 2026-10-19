@@ -254,22 +254,18 @@ pub fn dot_grid() -> impl IntoElement {
 }
 
 /// The sidebar: its header (the folder it shows), the Files/Changes switch, the tab's content, and
-/// an optional footer (the focused agent's card). It's chrome, so it sits straight on the glass, as
-/// Finder's sidebar does, with no card of its own.
+/// an optional footer (the focused agent's card), all on a card like the panes': on glass, a
+/// busy desktop would show through behind the file names.
 pub fn sidebar(
     header: impl IntoElement,
     switch: impl IntoElement,
     content: impl IntoElement,
     footer: Option<AnyElement>,
 ) -> AnyElement {
-    div()
-        .flex()
-        .flex_col()
+    // A card like the panes, so the file names sit on a solid surface whatever the desktop is.
+    panel()
         .gap(len(space::SPACE_1))
-        .size_full()
-        .min_w_0()
-        .min_h_0()
-        .p(len(space::SPACE_1))
+        .pb(len(space::SPACE_1))
         .child(header)
         .child(switch)
         .child(div().relative().flex_1().min_h_0().overflow_hidden().child(content))
