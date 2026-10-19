@@ -23,6 +23,7 @@ use gpui_kit::component::tooltip::Tooltip;
 use crate::chrome;
 use crate::history_view::{HistoryEvent, HistoryView};
 use crate::impact_view::ImpactView;
+use crate::lineage_view::LineageView;
 use crate::lsp::{self, Provider, Servers, Status};
 use crate::problems_view::{self, ProblemsView};
 use crate::references_view::ReferencesView;
@@ -110,6 +111,7 @@ enum Front {
     Review,
     History,
     Schema,
+    Lineage,
     Impact,
     References,
     Problems,
@@ -129,6 +131,8 @@ pub struct EditorView {
     history_events: Option<Subscription>,
     /// The database diagram, once opened.
     schema: Option<Entity<SchemaView>>,
+    /// The dbt project's lineage graph, once opened.
+    lineage: Option<Entity<LineageView>>,
     /// What the changes reach, once opened.
     impact: Option<Entity<ImpactView>>,
     /// Where a symbol is used, once asked.
@@ -839,6 +843,24 @@ impl EditorView {
         cx.notify();
     }
 
+    /// Opens the Lineage tab for the dbt project in `project`, reading it afresh, focused on the
+    /// model in front in the editor if there is one.
+    pub fn show_lineage(&mut self, project: &Path, cx: &mut Context<Self>) {
+        match &self.lineage {
+            Some(lineage) if lineage.read(cx).project() == project => lineage.update(cx, LineageView::reload),
+            _ => {
+                let editor = cx.weak_entity();
+                self.lineage = Some(cx.new(|cx| LineageView::new(project, editor, cx)));
+            }
+        }
+        if let (Some(lineage), Some(file)) = (&self.lineage, self.files.get(self.active).map(|file| file.path.clone()))
+        {
+            lineage.update(cx, |lineage, cx| lineage.focus_file(&file, cx));
+        }
+        self.front = Front::Lineage;
+        cx.notify();
+    }
+
     /// Opens the Impact tab for `repo`, reading the imports afresh, focused on `file` if given.
     pub fn show_impact(&mut self, repo: &Path, file: Option<PathBuf>, cx: &mut Context<Self>) {
         match &self.impact {
@@ -1044,6 +1066,43 @@ impl EditorView {
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.front = Front::Schema;
+                    cx.notify();
+                }))
+                .into_any_element(),
+        )
+    }
+
+    fn render_lineage_tab(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.lineage.as_ref()?;
+        let in_front = self.front == Front::Lineage;
+        Some(
+            chrome::track_item("lineage-tab", in_front)
+                .group("lineage-tab")
+                .pl(len(space::SPACE_3))
+                .pr(len(space::SPACE_1))
+                .child(chrome::icon("workflow", 13., theme::color(color::INK_MUTED)))
+                .child("Lineage")
+                .child(
+                    div()
+                        .id("lineage-close")
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .size(px(20.))
+                        .rounded(len(radius::RADIUS_XS))
+                        .hover(|s| s.bg(theme::fill_control()))
+                        .child(chrome::icon("x", 11., theme::color(color::INK_MUTED)))
+                        .tooltip(chrome::tip("Close"))
+                        .when(!in_front, |slot| slot.invisible().group_hover("lineage-tab", gpui_kit::Styled::visible))
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.lineage = None;
+                            this.front = if this.review.is_some() { Front::Review } else { Front::File };
+                            cx.notify();
+                        })),
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.front = Front::Lineage;
                     cx.notify();
                 }))
                 .into_any_element(),
@@ -1295,6 +1354,8 @@ impl Render for EditorView {
             self.history.clone().map(gpui_kit::IntoElement::into_any_element)
         } else if self.front == Front::Schema {
             self.schema.clone().map(gpui_kit::IntoElement::into_any_element)
+        } else if self.front == Front::Lineage {
+            self.lineage.clone().map(gpui_kit::IntoElement::into_any_element)
         } else if self.front == Front::Impact {
             self.impact.clone().map(gpui_kit::IntoElement::into_any_element)
         } else if self.front == Front::References {
@@ -1342,6 +1403,7 @@ impl Render for EditorView {
                     .gap(px(2.))
                     .h(len(chrome::CONTROL_HEIGHT))
                     .children(self.render_schema_tab(cx))
+                    .children(self.render_lineage_tab(cx))
                     .children(self.render_history_tab(cx))
                     .children(self.render_impact_tab(cx))
                     .children(self.render_references_tab(cx))

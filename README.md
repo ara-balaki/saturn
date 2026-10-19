@@ -34,6 +34,10 @@ It isn't an IDE and doesn't try to replace yours. It's the place the agents live
 - **Your Claude plan's limits.** The bottom of the sidebar shows what `/usage` does: the current
   session, the week, and a model's own week, with when each resets. Saturn asks Claude Code for
   them every few minutes and after an agent's turn; click to read them again.
+- **dbt lineage.** In a repo with a dbt project, the workflow button in the sidebar's header draws
+  its lineage graph: sources and seeds on the left, then each model past what it reads. Click a
+  model to light up everything upstream and downstream of it, double-click to open its SQL. Read
+  from the project's `ref()` and `source()` calls; dbt itself isn't needed.
 - **Several repos in one window.** Repos sit as tabs in the title bar (⌘O adds one); agents from
   different repos share one grid, and new tabs open in the repo you've selected.
 - **Files and a light editor.** ⌘P finds any file by a few letters of its name or path; ⌘⇧P

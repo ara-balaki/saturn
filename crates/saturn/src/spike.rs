@@ -7,7 +7,7 @@
 //!   in the editor (`SATURN_SAVE=1` saves it after a moment); `SATURN_REVIEW=1` shows the Changes tab and reviews the first change.
 //! - `SATURN_MORE_REPOS=a:b` adds more repos to the window, as ⌘O would; `SATURN_FAKE_AGENTS=1`
 //!   gives the panes made-up agents; `SATURN_HISTORY=1` opens the History tab, `SATURN_IMPACT=1` the Impact tab (focused on `SATURN_IMPACT_FOCUS`), `SATURN_SCHEMA=1`
-//!   the database diagram; `SATURN_LSP_PROBE=line:col` asks the open file's language server about
+//!   the database diagram, `SATURN_LINEAGE=1` the dbt lineage graph; `SATURN_LSP_PROBE=line:col` asks the open file's language server about
 //!   that place (0-based) and prints its answers; `SATURN_PROBLEMS=1` lists the
 //!   servers' errors and warnings; `SATURN_PALETTE=files|commands` opens a palette, with
 //!   `SATURN_PALETTE_QUERY` typed in it; `SATURN_TICKET_PICKER=1` opens New agent.
@@ -78,6 +78,9 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
     if std::env::var_os("SATURN_OPEN_SETTINGS").is_some() {
         // After the window (and the Root that hosts dialogs) exists.
         cx.defer_in(window, Workspace::open_settings);
+    }
+    if std::env::var_os("SATURN_LINEAGE").is_some() {
+        open_lineage(cx);
     }
     if std::env::var_os("SATURN_SCHEMA").is_some() {
         cx.defer_in(window, |workspace, _, cx| workspace.show_schema(cx));
@@ -171,6 +174,15 @@ fn rebind_from_env(workspace: &Workspace, cx: &mut Context<Workspace>) {
         after.insert(id, keys);
         crate::keymap::rebind(shortcut, &before, &after, cx);
     }
+}
+
+/// Opens the lineage graph once the folder's walk has found the dbt project.
+fn open_lineage(cx: &mut Context<Workspace>) {
+    cx.spawn(async move |workspace, cx| {
+        cx.background_executor().timer(Duration::from_millis(1500)).await;
+        let _ = workspace.update(cx, Workspace::show_lineage);
+    })
+    .detach();
 }
 
 /// Presses keys in the focused pane as a person would, through the window (`SATURN_KEYS`,

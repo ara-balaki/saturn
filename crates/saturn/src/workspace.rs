@@ -72,6 +72,7 @@ actions!(
         ShowHistory,
         ShowImpact,
         ShowSchema,
+        ShowLineage,
         ShowProblems,
         ToggleTickets,
         TextBigger,
@@ -122,6 +123,7 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("History", "git-branch", Box::new(ShowHistory)),
         ("Impact of the changes", "waypoints", Box::new(ShowImpact)),
         ("Database diagram", "database", Box::new(ShowSchema)),
+        ("dbt lineage", "workflow", Box::new(ShowLineage)),
         ("Problems", "circle-x", Box::new(ShowProblems)),
         ("Save the file", "file-code", Box::new(SaveFile)),
         ("Add a repo", "folder", Box::new(OpenProject)),
@@ -297,6 +299,8 @@ struct RootViews {
     branch: Option<String>,
     /// Whether it describes a database (Prisma or SQL migrations), for the diagram's button.
     has_schema: bool,
+    /// The dbt project in it, for the lineage graph's button.
+    dbt_project: Option<PathBuf>,
     _events: [Subscription; 2],
 }
 
@@ -612,12 +616,15 @@ impl Workspace {
             let found = cx
                 .background_spawn({
                     let folder = folder.clone();
-                    async move { !saturn_core::schema::find_sources(&folder).is_empty() }
+                    async move {
+                        let schema = !saturn_core::schema::find_sources(&folder).is_empty();
+                        (schema, saturn_core::dbt::find_projects(&folder).into_iter().next())
+                    }
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 if let Some(views) = this.roots.get_mut(&folder) {
-                    views.has_schema = found;
+                    (views.has_schema, views.dbt_project) = found;
                     cx.notify();
                 }
             });
@@ -628,6 +635,7 @@ impl Workspace {
             changes,
             branch: git::branch(root),
             has_schema: false,
+            dbt_project: None,
             _events: [files_events, changes_events],
         }
     }
@@ -968,6 +976,19 @@ impl Workspace {
         self.editor.update(cx, |editor, cx| {
             editor.show_schema(&root, cx);
             if std::env::var_os("SATURN_SCHEMA").is_some() {
+                editor.maximize(cx);
+            }
+        });
+        self.panels.editor = true;
+        cx.notify();
+    }
+
+    /// Opens the lineage graph of the dbt project in the folder the sidebar shows, if it has one.
+    pub fn show_lineage(&mut self, cx: &mut Context<Self>) {
+        let Some(project) = self.roots.get(&self.root).and_then(|views| views.dbt_project.clone()) else { return };
+        self.editor.update(cx, |editor, cx| {
+            editor.show_lineage(&project, cx);
+            if std::env::var_os("SATURN_LINEAGE").is_some() {
                 editor.maximize(cx);
             }
         });
@@ -1920,8 +1941,18 @@ impl Workspace {
                 .tooltip(chrome::tip("Database diagram: the tables and how they connect"))
                 .on_click(cx.listener(|this, _, _, cx| this.show_schema(cx)))
         });
-        chrome::sidebar_header(&name, &detail, div().flex().items_center().children(schema).child(follow))
-            .into_any_element()
+        // The dbt lineage graph, when this folder holds a dbt project.
+        let lineage = self.roots.get(&self.root).is_some_and(|views| views.dbt_project.is_some()).then(|| {
+            chrome::icon_button("show-lineage", "workflow", true)
+                .tooltip(chrome::tip_for("dbt lineage: which models build on which", ShowLineage))
+                .on_click(cx.listener(|this, _, _, cx| this.show_lineage(cx)))
+        });
+        chrome::sidebar_header(
+            &name,
+            &detail,
+            div().flex().items_center().children(lineage).children(schema).child(follow),
+        )
+        .into_any_element()
     }
 
     /// The window's repos, in the title bar: the selected one raised, ✕ on hover to take one out
@@ -2110,6 +2141,7 @@ impl Workspace {
                 this.show_impact(&root, cx);
             }))
             .on_action(cx.listener(|this, _: &ShowSchema, _, cx| this.show_schema(cx)))
+            .on_action(cx.listener(|this, _: &ShowLineage, _, cx| this.show_lineage(cx)))
             .on_action(cx.listener(|this, _: &ShowProblems, _, cx| this.show_problems(cx)))
     }
 }

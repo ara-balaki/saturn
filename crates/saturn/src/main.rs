@@ -14,6 +14,7 @@ mod history_view;
 mod impact_view;
 mod keymap;
 mod languages;
+mod lineage_view;
 mod lsp;
 mod menu_bar;
 mod notify;
