@@ -7,7 +7,6 @@
 **A native macOS workbench for running many Claude Code agents side by side.**
 
 A grid of terminals, a light editor, a diff review, and a clear signal when an agent needs you.
-Native Rust on GPUI: no browser, no Electron.
 
 </div>
 
@@ -44,9 +43,9 @@ It isn't an IDE and doesn't try to replace yours. It's the place the agents live
 - **Several repos in one window.** Repos sit as tabs in the title bar (⌘O adds one); agents from
   different repos share one grid, and new tabs open in the repo you've selected.
 - **Files and a light editor.** ⌘P finds any file by a few letters of its name or path; ⌘⇧P
-  finds any command. A file tree with git badges (what git ignores shown faint), and an editor with
-  syntax highlighting for about 60 languages that saves with your project's own formatter
-  (Prettier, Biome, oxfmt or rustfmt). Files an agent changes reload by themselves; if you have
+  finds any command. A file tree with an icon for each kind of file and git badges (what git
+  ignores shown faint), and an editor with syntax highlighting for about 60 languages that saves
+  with your project's own formatter (Prettier, Biome, oxfmt or rustfmt). Files an agent changes reload by themselves; if you have
   unsaved edits, Saturn asks first.
 - **Language servers.** TypeScript and JavaScript, Rust, Python and Go get completions, hover, go
   to definition (⌘-click), quick fixes, Find references and Rename across files (⌘.), and errors
@@ -71,9 +70,9 @@ It isn't an IDE and doesn't try to replace yours. It's the place the agents live
 - **Opens where you left off.** The window's repos and grid come back as they were, and Saturn
   offers to resume the Claude sessions that were running: the resume command is typed for you,
   never run.
-- **Glass, light and dark.** The title bar and sidebar are macOS's frosted glass over your desktop;
-  panes are cards on it. It follows macOS's appearance, or you pick one. Every icon button says what
-  it does, and its shortcut, when you hover it.
+- **Light and dark.** Panes, the sidebar and the editor are cards on Saturn's own blue backdrop:
+  deep navy in dark mode, soft periwinkle in light. It follows macOS's appearance, or you pick one.
+  Every icon button says what it does, and its shortcut, when you hover it.
 - **Optional: tickets from ClickUp.** Connect a token and ⌘⇧N lists the tickets assigned to you,
   and ⌘⌥B opens them as a panel on the right, by status, marking the ones an agent is on, with
   filters for status, priority, due date, space, list and tag that Saturn remembers. Pick
