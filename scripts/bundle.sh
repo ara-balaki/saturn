@@ -18,10 +18,13 @@ else
   binary=target/release/saturn
 fi
 
-app=target/release/Saturn.app
+# A `.noindex` folder, so Spotlight doesn't list the build next to the installed app.
+out=target/bundle.noindex
+app=$out/Saturn.app
+rm -rf target/release/Saturn.app target/release/dmg
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 rm -rf "$app"
-mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+mkdir -p "$out" "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$binary" "$app/Contents/MacOS/saturn"
 cp crates/saturn/assets/app/Saturn.icns "$app/Contents/Resources/Saturn.icns"
 cp -R plugin "$app/Contents/Resources/plugin"
@@ -53,15 +56,16 @@ codesign --force --deep --sign - "$app"
 echo "Built $app ($version)"
 
 if [ "$mode" = "--dmg" ]; then
-  stage=target/release/dmg
+  stage=$out/dmg
   rm -rf "$stage"
   mkdir -p "$stage"
   cp -R "$app" "$stage/Saturn.app"
   ln -s /Applications "$stage/Applications"
   cp scripts/how-to-open.txt "$stage/How to open Saturn.txt"
-  dmg="target/release/Saturn-$version.dmg"
+  dmg="target/Saturn-$version.dmg"
   rm -f "$dmg"
   hdiutil create -quiet -volname "Saturn $version" -srcfolder "$stage" -format UDZO "$dmg"
+  rm -rf "$stage"
   echo "Built $dmg"
 fi
 

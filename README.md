@@ -92,7 +92,7 @@ Rust's version is pinned in `rust-toolchain.toml`, and rustup installs it on the
 
 ### Share it
 
-`pnpm dist:dmg` builds `target/release/Saturn-<version>.dmg`, for Apple Silicon and Intel Macs.
+`pnpm dist:dmg` builds `target/Saturn-<version>.dmg`, for Apple Silicon and Intel Macs.
 Saturn isn't signed with an Apple Developer ID, so the first time someone opens it, macOS can't
 check it: they click Done, then **Open Anyway** in System Settings → Privacy & Security. The disk
 image carries a note that says so. They need [Claude Code](https://claude.com/claude-code) too.
@@ -147,7 +147,7 @@ Open them with ⌘, or the gear in the title bar. They're stored in
 ```sh
 pnpm dev              # build and run Saturn (cargo run -p saturn)
 pnpm health           # format check, clippy, tests, unused deps, licences
-pnpm dist             # build Saturn.app in target/release
+pnpm dist             # build Saturn.app in target/bundle.noindex
 ```
 
 Node is only used for commit hooks and for formatting Markdown and JSON. Commits follow
