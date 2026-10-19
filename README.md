@@ -83,71 +83,80 @@ It isn't an IDE and doesn't try to replace yours. It's the place the agents live
 
 ## Features
 
-- **A grid of terminals.** Split right (⌘D) and down (⌘⇧D), or drag a tab onto a pane's edge to
-  split it there. Tabs in every pane, dividers you drag, one pane maximised with ⌘⇧↩. A real
-  terminal underneath (alacritty's engine), so TUIs, colours and the mouse work as they should.
-- **Agents that tell you how they're doing.** Each tab shows whether its agent is working, waiting
-  for you, done, or failed. A pane that needs you rings orange, one that's done rings green,
-  until you type or click in it. The title bar
-  counts them, ⌘⇧A jumps to the next one that needs you, macOS notifies you while Saturn is in the
-  background, and a small Saturn in the menu bar shows how many are waiting even while it's hidden; its menu
-  takes you to the next one.
-- **Your Claude plan's limits.** The bottom of the sidebar shows what `/usage` does: the current
-  session, the week, and a model's own week, with when each resets. Saturn asks Claude Code for
-  them every few minutes and after an agent's turn; click to read them again.
-- **dbt lineage.** In a repo with a dbt project, the workflow button in the sidebar's header draws
-  its lineage graph: sources and seeds on the left, then each model past what it reads. Click a
-  model to light up everything upstream and downstream of it, double-click to open its SQL. A big
-  project (more than 150 nodes) shows one model at a time with what's 1, 2 or 3 steps around it:
-  the one open in the editor, or one you search for, and a click moves to another. Read
-  from the project's `ref()` and `source()` calls; dbt itself isn't needed.
-- **Several repos in one window.** Repos sit as tabs in the title bar (⌘O adds one); agents from
-  different repos share one grid, and new tabs open in the repo you've selected.
-- **Files and a light editor.** ⌘P finds any file by a few letters of its name or path; ⌘⇧P
-  finds any command. A file tree with an icon for each kind of file and git badges (what git
-  ignores shown faint), and an editor with syntax highlighting for about 60 languages that saves
-  with your project's own formatter (Prettier, Biome, oxfmt or rustfmt). Files an agent changes reload by themselves; if you have
-  unsaved edits, Saturn asks first.
-- **Language servers.** TypeScript and JavaScript, Rust, Python and Go get completions, hover, go
-  to definition (⌘-click), quick fixes, Find references and Rename across files (⌘.), and errors
-  underlined as you type and listed in Problems, from the server your project already uses. For
+### Agents
+
+Each tab shows whether its agent is working, waiting for you, done or failed.
+
+- A pane that needs you rings **orange**, one that's done rings **green**, until you type or click
+  in it.
+- The title bar counts them, and ⌘⇧A jumps to the next one that needs you.
+- macOS notifies you while Saturn is in the background, and a small Saturn in the menu bar shows how
+  many are waiting.
+- Your Claude plan's limits at the foot of the sidebar: the session, the week, and a model's own
+  week, with when each resets.
+- Saturn opens where you left off and offers to resume the Claude sessions that were running (the
+  command is typed for you, never run).
+
+### Terminals
+
+- Split right (⌘D) or down (⌘⇧D), or drag a tab onto a pane's edge to split it there. Tabs in every
+  pane, dividers you drag, one pane maximised with ⌘⇧↩.
+- A real terminal underneath (alacritty's engine), so TUIs, colours and the mouse work as they should.
+- Drop a file, a screenshot say, on a terminal to type its path, so Claude attaches it.
+- Several repos in one window, as tabs in the title bar (⌘O adds one). Their agents share one grid.
+- Focus a pane that works in another git worktree, and the sidebar follows it there.
+
+### Files and editor
+
+- ⌘P finds any file by a few letters of its name or path; ⌘⇧P finds any command.
+- A file tree with an icon for each kind of file and git badges; what git ignores is shown faint.
+- Syntax highlighting for about 60 languages, saved with your project's own formatter (Prettier,
+  Biome, oxfmt or rustfmt).
+- Files an agent changes reload by themselves; if you have unsaved edits, Saturn asks first.
+- Language servers for TypeScript and JavaScript, Rust, Python and Go: completions, hover, go to
+  definition (⌘-click), quick fixes, Find references and Rename (⌘.), and errors as you type. For
   TypeScript, Saturn installs one with a click when there's none.
-- **Review what changed.** The Changes tab lists every changed file with checkboxes to stage them,
-  for your uncommitted work or the whole branch, with a diff for each. History draws every branch
-  as a graph, with tags, authors and dates; click a commit to see its diff.
-- **See what a change reaches.** Impact follows imports (JavaScript and TypeScript with `tsconfig`
-  aliases and a monorepo's own packages, Rust modules and crates, Python packages) to every file
-  that depends on what changed, nearest first, grouped by folder. Click a file to see what it uses
-  and what uses it.
-- **A diagram of the database.** From a Prisma schema or SQL migrations: every table with its
-  columns and keys, a line for each foreign key, grouped by schema file. Pinch to zoom, search,
-  click a table to see what it's connected to.
-- **Pull requests on the panes.** A pane shows the pull request it works on, with its number and
-  state, from the `gh` CLI: an open one that names the ticket the pane is called after (`ABC-123`),
-  else the last one linked in it (the one its agent opened, or a link you pasted), else its
-  branch's. Click it to open it on GitHub.
-- **A status bar.** Errors and warnings, the language server, the cursor, the file's language, and
-  the branch with how many commits are waiting to be pushed and pulled.
-- **Follows the agent you're looking at.** Focus a pane that works in another git worktree, and the
-  sidebar switches to that worktree.
-- **Opens where you left off.** The window's repos and grid come back as they were, and Saturn
-  offers to resume the Claude sessions that were running: the resume command is typed for you,
-  never run.
-- **Light and dark.** Panes, the sidebar and the editor are cards on Saturn's own blue backdrop:
-  deep navy in dark mode, soft periwinkle in light. It follows macOS's appearance, or you pick one.
-  Every icon button says what it does, and its shortcut, when you hover it.
-- **Optional: tickets from ClickUp.** Connect a token and ⌘⇧N lists the tickets assigned to you,
-  and ⌘⌥B opens them as a panel on the right, by status, marking the ones an agent is on, with
-  filters for status, priority, due date, space, list and tag that Saturn remembers. Pick
-  one, and Saturn opens a pane (in its own worktree if you like) and starts your agent on it.
-  If you don't connect anything, none of this shows up.
 
-## A closer look
+![A type error underlined in the editor](docs/images/language-servers.png)
 
-|                                                                                                                                   |                                                                                                                                         |
-| --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| ![History: every branch as a graph](docs/images/history.png) **History**: every branch as a graph; click a commit for its diff.   | ![Impact: what the uncommitted changes reach](docs/images/impact.png) **Impact**: what your changes reach, nearest first.               |
-| ![The database diagram, grouped by schema file](docs/images/database.png) **Database**: the schema as a diagram, grouped by file. | ![A type error underlined in the editor](docs/images/language-servers.png) **Language servers**: errors as you type, and the rest on ⌘. |
+### Review
+
+- **Changes**: every changed file, for your uncommitted work or the whole branch, with a diff for
+  each and checkboxes to stage them.
+- **History**: every branch as a graph, with tags, authors and dates; click a commit for its diff.
+- **Impact**: every file that depends on what changed, nearest first. It follows imports in
+  JavaScript and TypeScript (with `tsconfig` aliases and a monorepo's packages), Rust and Python.
+- **Pull requests**: each pane shows the one it works on, with its state, from the `gh` CLI: an open
+  one that names the pane's ticket (`ABC-123`), else the last one linked in it, else its branch's.
+- **Status bar**: errors and warnings, the cursor, the language, and the branch with how many
+  commits wait to be pushed and pulled.
+
+| ![History: every branch as a graph](docs/images/history.png) | ![Impact: what the uncommitted changes reach](docs/images/impact.png) |
+| :----------------------------------------------------------: | :-------------------------------------------------------------------: |
+|                         **History**                          |                              **Impact**                               |
+
+### Data
+
+- **Database**: a Prisma schema or SQL migrations drawn as a diagram, every table with its columns
+  and keys and a line for each foreign key. Pinch to zoom, search, click a table to see what it's
+  connected to.
+- **dbt lineage**: sources and seeds on the left, then each model past what it reads. Click a model
+  to light up what's upstream and downstream, double-click to open its SQL. A big project shows one
+  model at a time with what's 1, 2 or 3 steps around it. dbt itself isn't needed.
+
+<img src="docs/images/database.png" alt="The database diagram, grouped by schema file" width="640" />
+
+### Tickets (optional)
+
+Connect a ClickUp token, and ⌘⇧N lists the tickets assigned to you; ⌘⌥B shows them as a panel on
+the right, with filters for status, priority, due date, space, list and tag. Pick one, and Saturn
+opens a pane (in its own worktree if you like) and starts your agent on it. If you don't connect
+anything, none of this shows up.
+
+### Looks
+
+Panes, the sidebar and the editor are cards on Saturn's own blue backdrop: deep navy in dark mode,
+soft periwinkle in light. It follows macOS's appearance, or you pick one.
 
 ## Shortcuts
 
