@@ -72,8 +72,8 @@ It isn't an IDE and doesn't try to replace yours. It's the place the agents live
   offers to resume the Claude sessions that were running: the resume command is typed for you,
   never run.
 - **Glass, light and dark.** The title bar and sidebar are macOS's frosted glass over your desktop;
-  panes are cards on it. It follows macOS's appearance, or you pick one. Every button says what it
-  does, and its shortcut, when you hover it.
+  panes are cards on it. It follows macOS's appearance, or you pick one. Every icon button says what
+  it does, and its shortcut, when you hover it.
 - **Optional: tickets from ClickUp.** Connect a token and ⌘⇧N lists the tickets assigned to you,
   and ⌘⌥B opens them as a panel on the right, by status, marking the ones an agent is on, with
   filters for status, priority, due date, space, list and tag that Saturn remembers. Pick
