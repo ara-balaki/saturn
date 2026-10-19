@@ -1498,10 +1498,10 @@ impl Workspace {
         } else {
             gpui_kit::white()
         };
-        let (background, foreground) = match (calling, selected) {
-            (true, _) => (theme::color(color::STATUS_NEEDS_YOU), on_orange),
-            (false, true) => (theme::fill_pressed(), theme::color(color::INK)),
-            (false, false) => (gpui_kit::transparent_black(), theme::color(color::INK_MUTED)),
+        let foreground = match (calling, selected) {
+            (true, _) => on_orange,
+            (false, true) => theme::color(color::INK),
+            (false, false) => theme::color(color::INK_MUTED),
         };
         let renaming = self.renaming.as_ref().filter(|(renaming, _)| *renaming == tab).map(|(_, input)| input.clone());
 
@@ -1531,7 +1531,9 @@ impl Workspace {
             .pr(len(space::SPACE_1))
             .max_w(px(220.))
             .rounded(len(radius::RADIUS_SM))
-            .bg(background)
+            // Selected the way every tab is (chrome::raised); a hidden tab that needs you, orange.
+            .map(|tab| chrome::raised(tab, selected && !calling))
+            .when(calling, |tab| tab.bg(theme::color(color::STATUS_NEEDS_YOU)))
             .when(!selected && !calling, |tab| tab.hover(|s| s.bg(theme::fill_hover())))
             .text_color(foreground)
             .text_size(px(13.))

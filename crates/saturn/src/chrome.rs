@@ -109,10 +109,31 @@ pub fn track() -> gpui_kit::Div {
         .bg(theme::overlay(if saturn_design::appearance() == saturn_design::Appearance::Dark { 0.07 } else { 0.05 }))
 }
 
-/// An item in a track. A pressed item is raised: in light mode a white pill with a small
-/// shadow, in dark mode a lighter one. Selection is tone, not colour.
-pub fn track_item(id: impl Into<ElementId>, pressed: bool) -> gpui_kit::Stateful<gpui_kit::Div> {
+/// The selected look of every tab and track item: raised, in light mode a white pill with a
+/// faint edge and a small shadow, in dark mode a lighter fill. Selection is tone, not colour.
+/// Every item keeps its 1px edge (clear unless raised), so selecting one never changes its size
+/// and nothing beside it moves.
+pub fn raised<E: gpui_kit::Styled>(item: E, pressed: bool) -> E {
     let dark = saturn_design::appearance() == saturn_design::Appearance::Dark;
+    let item = item.border_1();
+    if pressed && dark {
+        item.bg(theme::overlay(0.14)).border_color(gpui_kit::transparent_black())
+    } else if pressed {
+        item.bg(gpui_kit::white()).border_color(theme::overlay(0.06)).shadow(vec![shadow(
+            0.,
+            1.,
+            2.,
+            0.,
+            gpui_kit::hsla(0., 0., 0., 0.14),
+            false,
+        )])
+    } else {
+        item.border_color(gpui_kit::transparent_black())
+    }
+}
+
+/// An item in a track: raised when pressed (see `raised`), else quiet until hovered.
+pub fn track_item(id: impl Into<ElementId>, pressed: bool) -> gpui_kit::Stateful<gpui_kit::Div> {
     div()
         .id(id)
         .flex()
@@ -126,15 +147,10 @@ pub fn track_item(id: impl Into<ElementId>, pressed: bool) -> gpui_kit::Stateful
         .text_size(px(13.))
         .font_weight(FontWeight::MEDIUM)
         .cursor_pointer()
+        .map(|item| raised(item, pressed))
         .map(|item| {
-            if pressed && dark {
-                item.bg(theme::overlay(0.14)).text_color(theme::color(color::INK))
-            } else if pressed {
-                item.bg(gpui_kit::white())
-                    .text_color(theme::color(color::INK))
-                    .border_1()
-                    .border_color(theme::overlay(0.06))
-                    .shadow(vec![shadow(0., 1., 2., 0., gpui_kit::hsla(0., 0., 0., 0.14), false)])
+            if pressed {
+                item.text_color(theme::color(color::INK))
             } else {
                 item.text_color(theme::color(color::INK_MUTED)).hover(|s| s.bg(theme::fill_hover()))
             }
