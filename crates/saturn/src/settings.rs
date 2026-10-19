@@ -25,6 +25,8 @@ pub struct Settings {
     /// Saturn's item in the menu bar, with how many agents are waiting for you.
     pub menu_bar: bool,
     pub appearance: AppearanceSetting,
+    /// The text size of terminals and files, in points (⌘+, ⌘−, ⌘0).
+    pub text_size: u16,
     /// What starting an agent on a ticket does, per project folder.
     pub projects: std::collections::HashMap<PathBuf, ProjectSettings>,
 }
@@ -84,6 +86,12 @@ impl AppearanceSetting {
     }
 }
 
+/// The text size terminals and files start at, and go back to with ⌘0.
+pub const TEXT_SIZE: u16 = 13;
+
+/// The smallest and largest text sizes ⌘− and ⌘+ go to.
+pub const TEXT_SIZES: std::ops::RangeInclusive<u16> = 9..=24;
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -95,6 +103,7 @@ impl Default for Settings {
             notifications: true,
             menu_bar: true,
             appearance: AppearanceSetting::System,
+            text_size: TEXT_SIZE,
             projects: std::collections::HashMap::new(),
         }
     }

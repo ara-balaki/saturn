@@ -75,6 +75,9 @@ actions!(
         ShowSchema,
         ShowProblems,
         ToggleTickets,
+        TextBigger,
+        TextSmaller,
+        TextReset,
     ]
 );
 
@@ -114,6 +117,9 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("Show or hide the sidebar", "panel-left", Box::new(ToggleSidebar)),
         ("Show or hide the editor", "panel-top", Box::new(ToggleEditor)),
         ("Show or hide your tickets", "panel-right", Box::new(ToggleTickets)),
+        ("Bigger text in terminals and files", "zoom-in", Box::new(TextBigger)),
+        ("Smaller text in terminals and files", "zoom-out", Box::new(TextSmaller)),
+        ("Usual text size", "scan", Box::new(TextReset)),
         ("History", "git-branch", Box::new(ShowHistory)),
         ("Impact of the changes", "waypoints", Box::new(ShowImpact)),
         ("Database diagram", "database", Box::new(ShowSchema)),
@@ -881,6 +887,26 @@ impl Workspace {
         .detach();
     }
 
+    /// Makes the text of terminals and files bigger (`by` 1), smaller (−1), or its usual size
+    /// (`None`), and remembers it.
+    pub fn change_text_size(&mut self, by: Option<i16>, cx: &mut Context<Self>) {
+        let size = match by {
+            None => settings::TEXT_SIZE,
+            Some(by) => {
+                let next = i32::from(self.settings.text_size) + i32::from(by);
+                let next = u16::try_from(next).unwrap_or(settings::TEXT_SIZE);
+                next.clamp(*settings::TEXT_SIZES.start(), *settings::TEXT_SIZES.end())
+            }
+        };
+        if size != self.settings.text_size {
+            self.change_settings(|settings| settings.text_size = size, cx);
+        }
+        theme::set_text_size(size, cx);
+        for view in self.terminals.values() {
+            view.update(cx, |_, cx| cx.notify());
+        }
+    }
+
     /// Opens or closes the Tickets panel, reading the tickets again as it opens.
     pub fn toggle_tickets(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.panels.tickets = !self.panels.tickets;
@@ -1083,6 +1109,7 @@ impl Workspace {
         settings::save(&self.settings);
         if self.settings.appearance != appearance {
             theme::apply(self.settings.appearance, cx);
+            theme::set_text_size(self.settings.text_size, cx);
         }
         if self.settings.menu_bar != menu_bar {
             menu_bar::set_shown(self.settings.menu_bar);
@@ -2114,6 +2141,9 @@ impl Workspace {
     fn palette_actions(element: gpui_kit::Div, cx: &mut Context<Self>) -> gpui_kit::Div {
         element
             .on_action(cx.listener(|this, _: &ToggleTickets, window, cx| this.toggle_tickets(window, cx)))
+            .on_action(cx.listener(|this, _: &TextBigger, _, cx| this.change_text_size(Some(1), cx)))
+            .on_action(cx.listener(|this, _: &TextSmaller, _, cx| this.change_text_size(Some(-1), cx)))
+            .on_action(cx.listener(|this, _: &TextReset, _, cx| this.change_text_size(None, cx)))
             .on_action(cx.listener(|this, _: &GoToFile, window, cx| {
                 palette::go_to_file(cx.weak_entity(), this.root.clone(), window, cx);
             }))

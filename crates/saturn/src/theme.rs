@@ -227,6 +227,15 @@ pub fn apply(setting: AppearanceSetting, cx: &mut gpui_kit::App) {
     cx.refresh_windows();
 }
 
+/// The text size of terminals and files (⌘+, ⌘−, ⌘0): the terminals' cells, and the editor and
+/// diff views' monospace text. The rest of the interface keeps its sizes.
+pub fn set_text_size(points: u16, cx: &mut gpui_kit::App) {
+    let size = f32::from(points);
+    saturn_terminal::element::set_font_size(size);
+    gpui_kit::component::Theme::update(cx, |theme| theme.mono_font_size = px(size));
+    cx.refresh_windows();
+}
+
 /// The appearance macOS is in.
 fn system_appearance(appearance: gpui_kit::WindowAppearance) -> Appearance {
     match appearance {

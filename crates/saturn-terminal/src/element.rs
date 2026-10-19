@@ -23,7 +23,21 @@ use crate::palette;
 use crate::terminal::GridSize;
 use crate::view::{Geometry, TerminalView};
 
-pub const FONT_SIZE: f32 = 13.0;
+/// The text size terminals start at, and go back to with ⌘0.
+pub const DEFAULT_FONT_SIZE: f32 = 13.0;
+
+/// The text size every terminal draws at now (⌘+ and ⌘−), as `f32` bits.
+static FONT_SIZE_BITS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x4150_0000);
+
+/// The text size terminals draw at.
+pub fn font_size() -> f32 {
+    f32::from_bits(FONT_SIZE_BITS.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// Sets the text size every terminal draws at; each lays itself out again on its next frame.
+pub fn set_font_size(size: f32) {
+    FONT_SIZE_BITS.store(size.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
 
 /// Time spent laying out terminal frames, for the performance spike (`SATURN_PERF=1`).
 pub mod stats {
@@ -195,10 +209,11 @@ impl TerminalElement {
         reason = "cell counts and pixel sizes are small"
     )]
     fn layout(&mut self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) -> Frame {
-        let font_size = px(FONT_SIZE);
+        let points = font_size();
+        let font_size = px(points);
         let font_id = window.text_system().resolve_font(&font(fonts::MONO));
-        let cell_width = window.text_system().em_advance(font_id, font_size).unwrap_or(px(FONT_SIZE * 0.6));
-        let line_height = px((FONT_SIZE * LINE_HEIGHT).round());
+        let cell_width = window.text_system().em_advance(font_id, font_size).unwrap_or(px(points * 0.6));
+        let line_height = px((points * LINE_HEIGHT).round());
 
         let cols = (f32::from(bounds.size.width) / f32::from(cell_width)).floor().max(2.0) as u16;
         let rows = (f32::from(bounds.size.height) / f32::from(line_height)).floor().max(1.0) as u16;

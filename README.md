@@ -108,26 +108,27 @@ keychain, and puts it on GitHub with the feed.
 
 ## Shortcuts
 
-| Keys        | Does                                   |
-| ----------- | -------------------------------------- |
-| ⌘P          | Go to a file, by name or path          |
-| ⌘⇧P         | Command palette: every command by name |
-| ⌘T          | New tab in the focused pane            |
-| ⌘D / ⌘⇧D    | Split right / down                     |
-| ⌘W          | Close tab                              |
-| ⌘1 … ⌘9     | Focus pane 1 to 9                      |
-| ⌘⌥ + arrows | Move focus between panes               |
-| ⌘⇧[ / ⌘⇧]   | Previous / next tab                    |
-| ⌘⇧↩         | Maximise the focused pane              |
-| ⌘⇧A         | Jump to the next agent that needs you  |
-| ⌘B / ⌘J     | Toggle the sidebar / the editor        |
-| ⌘O          | Add a repo                             |
-| ⌘S          | Save the open file                     |
-| ⌘-click     | Go to definition                       |
-| ⌘.          | Quick fixes, Find references, Rename   |
-| ⌘,          | Settings                               |
-| ⌘⇧T         | New agent from a ticket (with ClickUp) |
-| ⌘⌥B         | Show or hide your tickets (ClickUp)    |
+| Keys         | Does                                                 |
+| ------------ | ---------------------------------------------------- |
+| ⌘P           | Go to a file, by name or path                        |
+| ⌘⇧P          | Command palette: every command by name               |
+| ⌘T           | New tab in the focused pane                          |
+| ⌘D / ⌘⇧D     | Split right / down                                   |
+| ⌘W           | Close tab                                            |
+| ⌘1 … ⌘9      | Focus pane 1 to 9                                    |
+| ⌘⌥ + arrows  | Move focus between panes                             |
+| ⌘⇧[ / ⌘⇧]    | Previous / next tab                                  |
+| ⌘⇧↩          | Maximise the focused pane                            |
+| ⌘⇧A          | Jump to the next agent that needs you                |
+| ⌘B / ⌘J      | Toggle the sidebar / the editor                      |
+| ⌘O           | Add a repo                                           |
+| ⌘S           | Save the open file                                   |
+| ⌘+ / ⌘− / ⌘0 | Text in terminals and files bigger / smaller / usual |
+| ⌘-click      | Go to definition                                     |
+| ⌘.           | Quick fixes, Find references, Rename                 |
+| ⌘,           | Settings                                             |
+| ⌘⇧T          | New agent from a ticket (with ClickUp)               |
+| ⌘⌥B          | Show or hide your tickets (ClickUp)                  |
 
 ## How it talks to Claude Code
 

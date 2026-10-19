@@ -42,8 +42,8 @@ use crate::app_view::AppView;
 use crate::workspace::{
     CloseTab, CommandPalette, Copy, FocusDown, FocusLeft, FocusPane1, FocusPane2, FocusPane3, FocusPane4, FocusPane5,
     FocusPane6, FocusPane7, FocusPane8, FocusPane9, FocusRight, FocusUp, GoToFile, NewTab, NextAttention, NextTab,
-    OpenProject, OpenSettings, OpenTicketPicker, Paste, PreviousTab, SaveFile, SplitDown, SplitRight, ToggleEditor,
-    ToggleMaximize, ToggleSidebar, ToggleTickets,
+    OpenProject, OpenSettings, OpenTicketPicker, Paste, PreviousTab, SaveFile, SplitDown, SplitRight, TextBigger,
+    TextReset, TextSmaller, ToggleEditor, ToggleMaximize, ToggleSidebar, ToggleTickets,
 };
 
 actions!(saturn, [Quit, CheckForUpdates]);
@@ -88,6 +88,11 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-j", ToggleEditor, None),
         KeyBinding::new("cmd-p", GoToFile, None),
         KeyBinding::new("cmd-alt-b", ToggleTickets, None),
+        // ⌘+ is ⌘= without shift on most keyboards; both make text bigger.
+        KeyBinding::new("cmd-=", TextBigger, None),
+        KeyBinding::new("cmd-+", TextBigger, None),
+        KeyBinding::new("cmd--", TextSmaller, None),
+        KeyBinding::new("cmd-0", TextReset, None),
         KeyBinding::new("cmd-shift-p", CommandPalette, None),
         KeyBinding::new("cmd-1", FocusPane1, None),
         KeyBinding::new("cmd-2", FocusPane2, None),
@@ -132,6 +137,10 @@ fn set_menus(cx: &mut App) {
             MenuItem::action("Toggle Sidebar", ToggleSidebar),
             MenuItem::action("Toggle Editor", ToggleEditor),
             MenuItem::action("Toggle Tickets", ToggleTickets),
+            MenuItem::separator(),
+            MenuItem::action("Bigger Text", TextBigger),
+            MenuItem::action("Smaller Text", TextSmaller),
+            MenuItem::action("Actual Size", TextReset),
         ]),
         Menu::new("Edit").items([MenuItem::action("Copy", Copy), MenuItem::action("Paste", Paste)]),
     ]);
@@ -159,6 +168,7 @@ fn main() {
         gpui_kit::init(cx);
         languages::register();
         theme::apply(settings::load().appearance, cx);
+        theme::set_text_size(settings::load().text_size, cx);
         if settings::load().notifications && !spike::is_automated() {
             notify::request_permission();
         }
