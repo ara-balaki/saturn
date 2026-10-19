@@ -229,7 +229,6 @@ impl SettingsView {
                 "Updates",
                 version,
                 chrome::button("check-updates", "Check now", None, false)
-                    .tooltip(chrome::tip("Look for a new version of Saturn now"))
                     .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::CheckForUpdates), cx)),
             ),
         ]

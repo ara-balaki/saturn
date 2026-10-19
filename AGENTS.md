@@ -65,9 +65,10 @@ Saturn has a design system, and the code follows it. Full rules in
   Cards 10, controls 6, chips 4. Nothing is rounder than what holds it.
 - **Density:** controls are 28px tall (`chrome::CONTROL_HEIGHT`), cards 6px apart, padded 4px.
   Weights 400 for text, 500 for controls and names; semibold only in headlines.
-- **Every button has a tooltip** saying what it does: `chrome::tip(..)`, or `chrome::tip_for(..,
-Action)` when a shortcut does the same, so the shortcut shows. One tooltip per element (GPUI
-  panics on two).
+- **Icon buttons have a tooltip** saying what they do: `chrome::tip(..)`, or `chrome::tip_for(..,
+Action)` when a shortcut does the same, so the shortcut shows. A button that says what it does
+  in words (and shows its shortcut) needs none. One tooltip per element (GPUI panics on two).
+- **Only what can be clicked reacts to the pointer.** A mark or a label gets no hover.
 - **Words:** sentence case, no emoji, buttons say what happens ("Add repo", not "OK").
 - Both themes, always: check light and dark.
 

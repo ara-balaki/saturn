@@ -1951,7 +1951,6 @@ impl Workspace {
         let add_repo = chrome::button("add-repo", "Add repo", Some("⌘O"), add_repo_primary)
             .h(len(chrome::TRACK_HEIGHT))
             .rounded(len(radius::RADIUS_MD))
-            .tooltip(chrome::tip("Open another repository in this window"))
             .on_click(cx.listener(|_, _, window, cx| Self::open_project(window, cx)));
         div()
             .flex()
@@ -1972,7 +1971,6 @@ impl Workspace {
                 chrome::button("new-agent", "New agent", Some("⌘⇧N"), true)
                     .h(len(chrome::TRACK_HEIGHT))
                     .rounded(len(radius::RADIUS_MD))
-                    .tooltip(chrome::tip("Start an agent on a ClickUp ticket, in its own worktree"))
                     .on_click(cx.listener(|_, _, window, cx| ticket_picker::open(cx.weak_entity(), window, cx)))
             }))
     }

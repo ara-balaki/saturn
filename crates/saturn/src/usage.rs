@@ -12,7 +12,6 @@ use saturn_core::agent_state::AgentState;
 use saturn_core::usage::{self, Limit};
 use saturn_design::space;
 
-use crate::chrome;
 use crate::theme::len;
 
 /// How often the usage is read while nothing happens.
@@ -118,7 +117,6 @@ pub fn render(cx: &App) -> Option<impl IntoElement> {
     let card = crate::agents_view::surface("usage", AgentState::Working)
         .gap(len(space::SPACE_3))
         .cursor_pointer()
-        .tooltip(chrome::tip("Your Claude plan's limits, as /usage shows them. Click to read them again"))
         .on_click(|_, _, cx| refresh(true, cx));
     let mut rows = div().relative().flex().flex_col().gap(len(space::SPACE_3));
     for limit in &limits {

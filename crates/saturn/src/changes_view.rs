@@ -336,17 +336,14 @@ impl ChangesView {
             )
             .child(
                 chrome::button("impact", "Impact", None, false)
-                    .tooltip(chrome::tip("Every file these changes reach, through its imports"))
                     .on_click(cx.listener(|this, _, _, cx| cx.emit(ChangesEvent::Impact { repo: this.repo.clone() }))),
             )
             .child(
                 chrome::button("history", "History", None, false)
-                    .tooltip(chrome::tip("Every branch's commits, as a graph"))
                     .on_click(cx.listener(|this, _, _, cx| cx.emit(ChangesEvent::History { repo: this.repo.clone() }))),
             )
             .child(
                 chrome::button("branch-diff", "Branch diff", None, false)
-                    .tooltip(chrome::tip("Everything this branch changed since it left the default branch"))
                     .on_click(cx.listener(|this, _, _, cx| this.review_branch(cx))),
             )
     }

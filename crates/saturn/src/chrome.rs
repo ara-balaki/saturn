@@ -331,7 +331,18 @@ pub fn sidebar_header(name: &str, detail: &str, action: impl IntoElement) -> imp
         .items_center()
         .gap(len(space::SPACE_3))
         .pl(len(space::SPACE_1))
-        .child(icon_button("project", "folder", false))
+        // The folder's mark, not a button: nothing happens on a click, so nothing on hover either.
+        .child(
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .justify_center()
+                .size(len(CONTROL_HEIGHT))
+                .rounded(len(radius::RADIUS_SM))
+                .bg(theme::fill_control())
+                .child(icon("folder", 14., theme::color(color::INK))),
+        )
         .child(
             div()
                 .flex_1()
