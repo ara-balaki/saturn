@@ -120,9 +120,6 @@ pub fn render(cx: &App) -> Option<impl IntoElement> {
         .cursor_pointer()
         .tooltip(chrome::tip("Your Claude plan's limits, as /usage shows them. Click to read them again"))
         .on_click(|_, _, cx| refresh(true, cx));
-    let title = |left: String, right: String| {
-        div().relative().flex().justify_between().text_size(px(12.)).text_color(white(0.62)).child(left).child(right)
-    };
     let mut rows = div().relative().flex().flex_col().gap(len(space::SPACE_3));
     for limit in &limits {
         rows = rows.child(
@@ -152,5 +149,6 @@ pub fn render(cx: &App) -> Option<impl IntoElement> {
                 .child(meter(limit.percent)),
         );
     }
-    Some(card.child(title("Claude plan".to_owned(), "/usage".to_owned())).child(rows))
+    let title = div().relative().text_size(px(12.)).text_color(white(0.62)).child("Usage");
+    Some(card.child(title).child(rows))
 }
