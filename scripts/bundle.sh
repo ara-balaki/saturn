@@ -59,10 +59,17 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Ad-hoc signature: enough to run it and to allow notifications. Without an Apple Developer ID
-# it isn't notarised, so a Mac that downloaded it asks once (System Settings → Privacy &
-# Security → Open Anyway).
-codesign --force --deep --sign - "$app"
+# Without an Apple Developer ID it isn't notarised, so a Mac that downloaded it asks once
+# (System Settings → Privacy & Security → Open Anyway).
+#
+# Signed with the publisher's own "Saturn Code Signing" certificate when it's in the keychain
+# (self-signed: it needn't be trusted, so it's named by its fingerprint). Every version then
+# carries the same identity, and macOS keeps "Always Allow" for Saturn's Keychain items across
+# updates; an ad-hoc signature changes with every build, so each update asked again. Anyone
+# building without it gets the ad-hoc signature.
+identity=$(security find-identity -p codesigning 2>/dev/null | awk '/"Saturn Code Signing"/ { print $2; exit }')
+codesign --force --deep --sign "${identity:--}" "$app"
+if [ -n "$identity" ]; then echo "Signed with Saturn Code Signing ($identity)"; fi
 echo "Built $app ($version)"
 
 if [ "$mode" = "--dmg" ]; then
