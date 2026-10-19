@@ -168,6 +168,14 @@ impl Render for AppView {
             Some(workspace) => workspace.clone().into_any_element(),
             None => self.render_welcome(cx).into_any_element(),
         };
-        div().relative().size_full().child(content)
+        // Saturn's own background, not the desktop: a deep blue in dark mode, a soft periwinkle in
+        // light, the same over any wallpaper. The cards stand on it.
+        let backdrop = gpui_kit::linear_gradient(
+            155.,
+            gpui_kit::linear_color_stop(theme::color(color::BACKDROP), 0.),
+            gpui_kit::linear_color_stop(theme::color(color::BACKDROP_DEEP), 1.),
+        )
+        .color_space(gpui_kit::ColorSpace::Oklab);
+        div().relative().size_full().bg(backdrop).child(content)
     }
 }
