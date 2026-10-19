@@ -248,8 +248,8 @@ pub struct Workspace {
     drop_target: Option<(CellId, Option<Direction>)>,
     /// The repository and branch each tab is in, read in the background.
     checkouts: HashMap<TabId, Checkout>,
-    /// The pull request each tab works on, from `gh`: the one last linked in it, else its branch's,
-    /// else one naming its ticket.
+    /// The pull request each tab works on, from `gh`: an open one naming its ticket, else the one last
+    /// linked in it, else its branch's, else a merged or closed one naming its ticket.
     pull_requests: HashMap<TabId, PullRequest>,
     /// Whether the two above are being read, so refreshes don't pile up.
     checkout_refresh: Refresh,
@@ -289,9 +289,9 @@ enum PrLookup {
     Ticket(PathBuf, String),
 }
 
-/// The branch each tab is on, and the pull request each works on: the one last linked in it (the
-/// agent opened it, or you pasted it), else its branch's, else one that names its ticket. Slow:
-/// runs `git` and `gh`.
+/// The branch each tab is on, and the pull request each works on: an open one that names its
+/// ticket, else the one last linked in it (the agent opened it, or you pasted it), else its branch's,
+/// else a merged or closed one for the ticket. Slow: runs `git` and `gh`.
 fn read_checkouts(tabs: Vec<TabSources>) -> (HashMap<TabId, Checkout>, HashMap<TabId, PullRequest>) {
     let mut checkouts = HashMap::new();
     let mut pull_requests = HashMap::new();
@@ -300,12 +300,7 @@ fn read_checkouts(tabs: Vec<TabSources>) -> (HashMap<TabId, Checkout>, HashMap<T
         let checkout =
             git::toplevel(&sources.dir).and_then(|root| git::branch(&root).map(|branch| Checkout { root, branch }));
         let root = checkout.as_ref().map_or(&sources.dir, |checkout| &checkout.root).clone();
-        let lookups = [
-            sources.link.map(PrLookup::Link),
-            checkout.clone().map(PrLookup::Branch),
-            sources.ticket.filter(|_| checkout.is_some()).map(|ticket| PrLookup::Ticket(root.clone(), ticket)),
-        ];
-        let pull_request = lookups.into_iter().flatten().find_map(|lookup| {
+        let mut look = |lookup: PrLookup| {
             found
                 .entry(lookup.clone())
                 .or_insert_with(|| match &lookup {
@@ -314,7 +309,19 @@ fn read_checkouts(tabs: Vec<TabSources>) -> (HashMap<TabId, Checkout>, HashMap<T
                     PrLookup::Ticket(root, ticket) => github::pull_request_for_ticket(root, ticket),
                 })
                 .clone()
-        });
+        };
+        // An open pull request for the tab's ticket wins even over a link, so a link to some other
+        // pull request the agent mentions in passing doesn't take the tab's chip. A merged or closed
+        // one for the ticket only counts when nothing else is found.
+        let for_ticket = sources
+            .ticket
+            .filter(|_| checkout.is_some())
+            .and_then(|ticket| look(PrLookup::Ticket(root.clone(), ticket)));
+        let open_for_ticket = for_ticket.clone().filter(|pr| matches!(pr.state, PrState::Open | PrState::Draft));
+        let pull_request = open_for_ticket
+            .or_else(|| sources.link.and_then(|link| look(PrLookup::Link(link))))
+            .or_else(|| checkout.clone().and_then(|checkout| look(PrLookup::Branch(checkout))))
+            .or(for_ticket);
         if let Some(checkout) = checkout {
             checkouts.insert(sources.tab, checkout);
         }

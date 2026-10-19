@@ -62,9 +62,9 @@ It isn't an IDE and doesn't try to replace yours. It's the place the agents live
   columns and keys, a line for each foreign key, grouped by schema file. Pinch to zoom, search,
   click a table to see what it's connected to.
 - **Pull requests on the panes.** A pane shows the pull request it works on, with its number and
-  state, from the `gh` CLI: the last one linked in it (the one its agent opened, or a link you
-  pasted), else its branch's, else one that names the ticket the pane is called after (`ABC-123`).
-  Click it to open it on GitHub.
+  state, from the `gh` CLI: an open one that names the ticket the pane is called after (`ABC-123`),
+  else the last one linked in it (the one its agent opened, or a link you pasted), else its
+  branch's. Click it to open it on GitHub.
 - **A status bar.** Errors and warnings, the language server, the cursor, the file's language, and
   the branch with how many commits are waiting to be pushed and pulled.
 - **Follows the agent you're looking at.** Focus a pane that works in another git worktree, and the
