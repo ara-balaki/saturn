@@ -1,4 +1,8 @@
 #![cfg(target_os = "macos")]
+// Saturn's patch: upstream still calls the deprecated `cocoa` crate everywhere (over a thousand
+// warnings on every clean build), and `remove_layer_background` is kept though Saturn's material
+// patch no longer calls it. Quiet both, so a build shows only Saturn's own warnings.
+#![allow(deprecated, dead_code)]
 //! macOS platform implementation for GPUI.
 //!
 //! macOS screens have a y axis that goes up from the bottom of the screen and
