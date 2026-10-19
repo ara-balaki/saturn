@@ -1,4 +1,4 @@
-//! The ticket picker (⌘⇧T): your open ClickUp tickets, searchable and grouped by status. Picking
+//! The ticket picker (⌘⇧N): your open ClickUp tickets, searchable and grouped by status. Picking
 //! one starts an agent on it in a new pane, the way the project's ticket settings say.
 
 use gpui_kit::component::WindowExt as _;
@@ -16,9 +16,12 @@ use crate::workspace::Workspace;
 pub fn open(workspace: WeakEntity<Workspace>, window: &mut Window, cx: &mut App) {
     let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search tickets by id, title or status"));
     search.update(cx, |search, cx| search.focus(window, cx));
-    if let Some(workspace) = workspace.upgrade() {
-        workspace.update(cx, Workspace::refresh_tickets);
-    }
+    // Later: the button and the shortcut that open this run inside the workspace's own update, and
+    // updating it again from there aborts.
+    let refresh = workspace.clone();
+    cx.defer(move |cx| {
+        let _ = refresh.update(cx, Workspace::refresh_tickets);
+    });
     window.open_dialog(cx, move |dialog, _, cx| {
         let Some(workspace) = workspace.upgrade() else { return dialog };
         let state = workspace.read(cx).clickup();

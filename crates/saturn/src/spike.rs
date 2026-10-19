@@ -129,6 +129,13 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
     if let Ok(which) = std::env::var("SATURN_PALETTE") {
         open_palette(which, window, cx);
     }
+    if std::env::var_os("SATURN_TICKET_PICKER").is_some() {
+        cx.spawn_in(window, async move |_, cx| {
+            cx.background_executor().timer(Duration::from_millis(800)).await;
+            let _ = cx.update(|window, cx| window.dispatch_action(Box::new(crate::workspace::OpenTicketPicker), cx));
+        })
+        .detach();
+    }
     if std::env::var_os("SATURN_MAXIMIZE_EDITOR").is_some() {
         cx.defer_in(window, |workspace, _, cx| workspace.maximize_editor(cx));
     }
