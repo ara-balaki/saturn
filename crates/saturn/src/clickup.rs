@@ -15,6 +15,11 @@ const MAX_PAGES: usize = 5;
 
 /// The saved token, if one was set.
 pub fn token() -> Option<String> {
+    // A run with its own settings folder (the demo, a spike) is a test: it leaves your real token
+    // alone, and doesn't make the Keychain ask about it.
+    if std::env::var_os("SATURN_USER_DATA").is_some() {
+        return None;
+    }
     security_framework::passwords::get_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
         .ok()
         .and_then(|bytes| String::from_utf8(bytes).ok())

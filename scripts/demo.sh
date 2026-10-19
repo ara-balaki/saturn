@@ -11,6 +11,7 @@ cd "$(dirname "$0")/.."
 home="${TMPDIR:-/tmp}/saturn-demo"
 sh scripts/demo/make-project.sh "$home"
 cargo build --release -p saturn
+sh scripts/sign-local.sh target/release/saturn
 
 SATURN_DEMO_SHELL="${SHELL:-/bin/zsh}" \
 SHELL="$PWD/scripts/demo/shell.sh" \
