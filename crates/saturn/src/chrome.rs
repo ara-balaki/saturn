@@ -66,8 +66,8 @@ pub fn panel() -> gpui_kit::Div {
         .px(len(space::SPACE_1))
         .pt(len(space::SPACE_1))
         .rounded(len(radius::RADIUS_MD))
-        // Nearly opaque: a hint of the glass behind, never enough to fight the text.
-        .bg(theme::color(color::SURFACE).opacity(if dark { 0.86 } else { 0.88 }))
+        // Mostly opaque: the glass shows through, never enough to fight the text.
+        .bg(theme::color(color::SURFACE).opacity(if dark { 0.75 } else { 0.78 }))
         .border_1()
         .border_color(theme::overlay(if dark { 0.07 } else { 0.08 }))
         .shadow(edge)
