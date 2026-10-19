@@ -100,7 +100,10 @@ SATURN_SCREENSHOT=/tmp/shot.png SATURN_SCREENSHOT_AFTER=5 SATURN_QUIT_AFTER=7
 
 A change people can see updates the [README](README.md) in the same commit: its feature list,
 shortcuts and settings. Screenshots in `docs/images` come from spikes over a made-up project, never
-a real one.
+a real one. The README's animation, `docs/images/agents.gif`, is four
+such screenshots with `SATURN_FAKE_AGENTS=1` and `SATURN_FAKE_STATES` set to the panes' states, joined
+with ffmpeg; `docs/images/social-preview.png` is the card GitHub shows when the repo is linked (set in
+the repo's settings).
 
 ## Building the app
 

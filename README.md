@@ -4,13 +4,74 @@
 
 # Saturn
 
-**A native macOS workbench for running many Claude Code agents side by side.**
+**Run many Claude Code agents side by side, and see which one needs you.**
 
-A grid of terminals, a light editor, a diff review, and a clear signal when an agent needs you.
+A native macOS workbench: a grid of terminals, a light editor, a diff review, and a clear signal
+when an agent needs you.
+
+<a href="https://github.com/itsjonasarden/saturn/releases/latest/download/Saturn.dmg"><b>Download for macOS</b></a>
+·
+<a href="#features">Features</a>
+·
+<a href="#shortcuts">Shortcuts</a>
+·
+<a href="#faq">FAQ</a>
+·
+<a href="https://github.com/itsjonasarden/saturn/releases">Releases</a>
+
+<a href="https://github.com/itsjonasarden/saturn/releases/latest"><img src="https://img.shields.io/github/v/release/itsjonasarden/saturn?label=release&color=2f6bff" alt="Latest release" /></a>
+<img src="https://img.shields.io/badge/macOS-13%2B-555" alt="macOS 13 or newer" />
+<a href="LICENSE"><img src="https://img.shields.io/github/license/itsjonasarden/saturn?color=555" alt="MIT licence" /></a>
 
 </div>
 
-![Saturn with three agents, an open file and the project's file tree](docs/images/saturn-window.png)
+<picture>
+  <source media="(prefers-reduced-motion: reduce)" srcset="docs/images/saturn-window.png" />
+  <img src="docs/images/agents.gif" alt="Saturn with four agents: one by one they stop working, one rings orange because it needs you, two ring green because they're done, and the title bar counts them" />
+</picture>
+
+## Highlights
+
+- **See which agent needs you.** A pane rings orange when its agent waits for you and green when
+  it's done; the title bar counts them, and ⌘⇧A jumps to the next one.
+- **A grid of real terminals.** Splits, tabs and drag to rearrange, on alacritty's engine.
+- **Files, diffs and history beside them.** A light editor with language servers, the changes to
+  review, a branch graph, and everything a change reaches.
+- **Your plan's limits in view.** The session's and the week's usage at the foot of the sidebar.
+- **Pull requests and tickets.** Each pane shows the pull request it works on; optional ClickUp
+  tickets start agents in their own worktrees.
+
+## Install
+
+[Download Saturn](https://github.com/itsjonasarden/saturn/releases/latest/download/Saturn.dmg),
+open the disk image and drag Saturn to Applications. It runs on macOS 13 or newer, on Apple
+Silicon and Intel, and needs [Claude Code](https://claude.com/claude-code).
+
+> [!NOTE]
+> Saturn isn't notarised by Apple (it has no Apple Developer ID), so the first time you open it,
+> macOS can't check it. Click **Done**, then **Open Anyway** in System Settings → Privacy &
+> Security. You only do this once.
+
+Saturn updates itself with [Sparkle](https://sparkle-project.org): every hour it checks the newest
+GitHub release and offers what's new (Saturn → Check for Updates… checks now).
+
+Then pick a folder and run `claude` in any pane.
+
+### Build from source
+
+You need [rustup](https://rustup.rs) and [pnpm](https://pnpm.io) as well.
+
+```sh
+git clone https://github.com/itsjonasarden/saturn.git
+cd saturn
+pnpm install
+pnpm install-app      # builds Saturn.app and puts it in /Applications
+```
+
+Rust's version is pinned in `rust-toolchain.toml`, and rustup installs it on the first build.
+`pnpm dist:dmg` builds a disk image for Apple Silicon and Intel to share, and
+`pnpm release 0.2.0` publishes a version: it tags it, builds the disk image, signs it with the
+Sparkle key in your keychain, and puts it on GitHub with the feed.
 
 ## Why
 
@@ -20,7 +81,7 @@ screen and tells you where to look, with the files and diffs they touch one clic
 
 It isn't an IDE and doesn't try to replace yours. It's the place the agents live.
 
-## What it does
+## Features
 
 - **A grid of terminals.** Split right (⌘D) and down (⌘⇧D), or drag a tab onto a pane's edge to
   split it there. Tabs in every pane, dividers you drag, one pane maximised with ⌘⇧↩. A real
@@ -88,34 +149,6 @@ It isn't an IDE and doesn't try to replace yours. It's the place the agents live
 | ![History: every branch as a graph](docs/images/history.png) **History**: every branch as a graph; click a commit for its diff.   | ![Impact: what the uncommitted changes reach](docs/images/impact.png) **Impact**: what your changes reach, nearest first.               |
 | ![The database diagram, grouped by schema file](docs/images/database.png) **Database**: the schema as a diagram, grouped by file. | ![A type error underlined in the editor](docs/images/language-servers.png) **Language servers**: errors as you type, and the rest on ⌘. |
 
-## Install
-
-Saturn builds from source and needs macOS, [rustup](https://rustup.rs),
-[pnpm](https://pnpm.io) and [Claude Code](https://claude.com/claude-code).
-
-```sh
-git clone https://github.com/itsjonasarden/saturn.git
-cd saturn
-pnpm install
-pnpm install-app      # builds Saturn.app and puts it in /Applications
-```
-
-Then open Saturn from Spotlight and pick a folder. Run `claude` in any pane.
-
-Rust's version is pinned in `rust-toolchain.toml`, and rustup installs it on the first build.
-
-### Share it
-
-`pnpm dist:dmg` builds `target/Saturn-<version>.dmg`, for Apple Silicon and Intel Macs.
-Saturn isn't signed with an Apple Developer ID, so the first time someone opens it, macOS can't
-check it: they click Done, then **Open Anyway** in System Settings → Privacy & Security. The disk
-image carries a note that says so. They need [Claude Code](https://claude.com/claude-code) too.
-
-Saturn updates itself with [Sparkle](https://sparkle-project.org): every hour it checks the newest
-GitHub release and offers what's new (Saturn → Check for Updates… checks now). `pnpm release 0.2.0`
-publishes a version: it tags it, builds the disk image, signs it with the Sparkle key in your
-keychain, and puts it on GitHub with the feed.
-
 ## Shortcuts
 
 | Keys         | Does                                                 |
@@ -173,6 +206,30 @@ them. They're stored in `~/Library/Application Support/Saturn/settings.json`.
   up.
 - **ClickUp** (optional): your API token, kept in the macOS Keychain, plus, for each project, the
   command a ticket starts (`claude -n {ticket}` by default) and whether it gets its own worktree.
+
+## FAQ
+
+**Is Saturn an IDE?** No. It's where the agents run, with enough of an editor to read and fix what
+they touch. Keep your own editor for the rest.
+
+**Does it change my Claude Code setup?** No. Saturn loads its small plugin only for the `claude`
+sessions started inside it (see [How it talks to Claude Code](#how-it-talks-to-claude-code)). The
+status line in Settings is the one thing that reaches other terminals, and only if you turn it on.
+
+**Does it work with other agents?** Any program runs in its terminals. The signals (working,
+needs you, done) come from Claude Code's hooks, so only Claude Code reports how it's doing.
+
+**What leaves my Mac?** Saturn has no server and collects nothing. It asks GitHub for new
+versions and, through your own `gh`, for pull requests; Claude Code for your plan's usage; and
+ClickUp only if you connect a token, which stays in the macOS Keychain.
+
+**Why does macOS warn me the first time?** Saturn isn't notarised, because that needs a paid Apple
+Developer ID. It's built from this repo, and updates are signed, so an installed Saturn only accepts
+versions published here.
+
+**Is it free?** Yes, under the MIT licence. Claude Code needs your own Claude plan.
+
+**Windows or Linux?** No, Saturn is made for macOS.
 
 ## Develop
 
