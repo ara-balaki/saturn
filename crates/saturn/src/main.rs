@@ -180,21 +180,28 @@ fn open_main_window(project: Option<std::path::PathBuf>, cx: &mut App) {
         .expect("the window opens");
 }
 
-/// Saturn's menu bar item. A click brings Saturn forward on the next agent that needs you.
+/// Saturn's menu bar item: its menu brings Saturn forward, on the next agent that needs you when
+/// that's what was picked, or quits it.
 fn show_menu_bar(cx: &mut App) {
     let (clicks, clicked) = async_channel::unbounded();
     menu_bar::on_click(clicks);
     menu_bar::set_shown(settings::load().menu_bar);
     cx.spawn(async move |cx| {
-        while clicked.recv().await.is_ok() {
+        while let Ok(choice) = clicked.recv().await {
             cx.update(|cx| {
+                if choice == menu_bar::Choice::Quit {
+                    cx.quit();
+                    return;
+                }
                 cx.activate(true);
                 if cx.windows().is_empty() {
                     open_main_window(settings::startup_project(), cx);
                 } else if let Some(window) = cx.windows().into_iter().next() {
                     let _ = window.update(cx, |_, window, cx| {
                         window.activate_window();
-                        window.dispatch_action(Box::new(NextAttention), cx);
+                        if choice == menu_bar::Choice::Next {
+                            window.dispatch_action(Box::new(NextAttention), cx);
+                        }
                     });
                 }
             });

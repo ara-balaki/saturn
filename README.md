@@ -29,7 +29,8 @@ It isn't an IDE and doesn't try to replace yours. It's the place the agents live
 - **Agents that tell you how they're doing.** Each tab shows whether its agent is working, waiting
   for you, done, or failed, and an agent that needs you rings its pane in orange. The title bar
   counts them, ⌘⇧A jumps to the next one that needs you, macOS notifies you while Saturn is in the
-  background, and a small Saturn in the menu bar shows how many are waiting even while it's hidden.
+  background, and a small Saturn in the menu bar shows how many are waiting even while it's hidden; its menu
+  takes you to the next one.
 - **The focused agent at a glance.** The bottom of the sidebar shows the agent in the pane you're
   in: its step, how much context it holds, and its progress.
 - **Several repos in one window.** Repos sit as tabs in the title bar (⌘O adds one); agents from
