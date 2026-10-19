@@ -6,6 +6,7 @@ pub mod agent_activity;
 pub mod agent_state;
 pub mod clickup;
 pub mod dbt;
+pub mod file_icon;
 pub mod files;
 pub mod format;
 pub mod fuzzy;

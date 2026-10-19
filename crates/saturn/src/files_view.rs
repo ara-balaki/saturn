@@ -10,6 +10,7 @@ use gpui_kit::{
     Render, StatefulInteractiveElement as _, Styled as _, Window, div, prelude::FluentBuilder as _, px, uniform_list,
 };
 use notify::Watcher as _;
+use saturn_core::file_icon::{FileIcon, file_icon};
 use saturn_core::files::{FileTree, Ignored, Row};
 use saturn_core::git::{self, FileState};
 use saturn_design::{color, radius, space};
@@ -131,17 +132,15 @@ impl FilesView {
         let state = self.changes.get(&row.path).copied();
         // A closed folder with changes beneath it gets a quiet dot, so nothing hides in it.
         let changed_inside = row.is_dir && !row.expanded && git::has_changes_under(&self.changes, &row.path);
-        // What git ignores (build output, node_modules, local env files) is listed, but faint.
         let name_color = match state {
             _ if selected => color::INK,
             Some(FileState::Deleted) => color::INK_FAINT,
-            _ if row.ignored => color::INK_FAINT,
             _ => color::INK_MUTED,
         };
         let icon = match (row.is_dir, row.expanded) {
-            (true, true) => "folder-open",
-            (true, false) => "folder",
-            (false, _) => "file",
+            (true, true) => FileIcon::Icon("folder-open"),
+            (true, false) => FileIcon::Icon("folder"),
+            (false, _) => file_icon(&row.name),
         };
         div()
             .id(("file", index))
@@ -156,6 +155,9 @@ impl FilesView {
             .cursor_pointer()
             .text_size(px(13.))
             .text_color(theme::color(name_color))
+            // What git ignores (build output, node_modules, local env files) is listed, but the
+            // whole row steps back, icon and all, so it reads as scenery.
+            .when(row.ignored && !selected, |row| row.opacity(0.45))
             .when(selected, |row| row.bg(theme::fill_pressed()))
             .when(!selected, |row| row.hover(|s| s.bg(theme::fill_hover())))
             .child(div().w(px(12.)).flex_none().when(row.is_dir, |slot| {
@@ -165,7 +167,7 @@ impl FilesView {
                     theme::color(color::INK_FAINT),
                 ))
             }))
-            .child(chrome::icon(icon, 14., theme::color(if row.ignored { color::INK_FAINT } else { color::INK_MUTED })))
+            .child(render_icon(icon))
             .child(div().flex_1().min_w_0().truncate().child(row.name.clone()))
             .children(state.map(|state| {
                 div()
@@ -180,6 +182,39 @@ impl FilesView {
             })
             .on_click(cx.listener(move |this, _, _, cx| this.click(&row, cx)))
             .into_any_element()
+    }
+}
+
+/// A file's mark: a Lucide icon, or a language's letters in a small square (filled for code,
+/// outlined for configuration formats), the icon's size and colour either way.
+fn render_icon(icon: FileIcon) -> AnyElement {
+    let tint = theme::color(color::INK_MUTED);
+    let letters = |text: &'static str, filled: bool| {
+        div()
+            .flex_none()
+            .size(px(14.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(3.))
+            .font_family(saturn_design::font::MONO)
+            .font_weight(gpui_kit::FontWeight::BOLD)
+            .text_size(px(if text.len() > 1 { 7. } else { 9. }))
+            .line_height(px(14.))
+            .map(|square| {
+                if filled {
+                    square.bg(tint).text_color(theme::color(color::SURFACE))
+                } else {
+                    square.border_1().border_color(tint).text_color(tint)
+                }
+            })
+            .child(text)
+            .into_any_element()
+    };
+    match icon {
+        FileIcon::Icon(name) => chrome::icon(name, 14., tint).into_any_element(),
+        FileIcon::Language(text) => letters(text, true),
+        FileIcon::Format(text) => letters(text, false),
     }
 }
 
