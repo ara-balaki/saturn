@@ -158,6 +158,7 @@ Open them with ⌘, or the gear in the title bar. They're stored in
 ## Develop
 
 ```sh
+pnpm demo             # Saturn on a made-up project, to look around or show it off
 pnpm dev              # build and run Saturn (cargo run -p saturn)
 pnpm health           # format check, clippy, tests, unused deps, licences
 pnpm dist             # build Saturn.app in target/bundle.noindex

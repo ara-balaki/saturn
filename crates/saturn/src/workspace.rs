@@ -282,6 +282,8 @@ pub struct ClickUpState {
     /// Open tickets assigned to the token's owner, refreshed every minute.
     pub tickets: Vec<Ticket>,
     pub loading: bool,
+    /// The demo's tickets: made up, so never refreshed from ClickUp.
+    made_up: bool,
 }
 
 impl ClickUpState {
@@ -791,6 +793,9 @@ impl Workspace {
 
     /// Reads the open tickets again, off the main thread.
     pub fn refresh_tickets(&mut self, cx: &mut Context<Self>) {
+        if self.clickup.made_up {
+            return;
+        }
         let Some(token) = self.clickup.token.clone() else { return };
         self.clickup.loading = self.clickup.tickets.is_empty();
         cx.spawn(async move |this, cx| {
@@ -1012,7 +1017,8 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Made-up ClickUp tickets, and the Tickets panel open (spikes and screenshots).
+    /// Made-up ClickUp tickets, and the Tickets panel open (`pnpm demo`, spikes, screenshots).
+    /// They're never refreshed, so the made-up token never reaches ClickUp.
     pub fn fake_tickets(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let ticket = |id: &str, key: &str, title: &str, status: &str, colour: &str| Ticket {
             id: id.to_owned(),
@@ -1023,7 +1029,8 @@ impl Workspace {
             url: format!("https://app.clickup.com/t/{id}"),
             list: Some("Web".to_owned()),
         };
-        self.clickup.token = Some("spike".to_owned());
+        self.clickup.token = Some("demo".to_owned());
+        self.clickup.made_up = true;
         self.clickup.tickets = vec![
             ticket("a1", "ABC-240", "Filter on every list page", "in progress", "#5f55ee"),
             ticket("a2", "ABC-236", "Round VAT half up on invoices", "in progress", "#5f55ee"),

@@ -17,7 +17,8 @@
     "dist": "sh scripts/bundle.sh",
     "install-app": "sh scripts/bundle.sh --install",
     "dist:dmg": "sh scripts/bundle.sh --dmg",
-    "release": "sh scripts/release.sh"
+    "release": "sh scripts/release.sh",
+    "demo": "sh scripts/demo.sh"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.3",
