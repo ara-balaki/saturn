@@ -103,7 +103,7 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   pane, dividers you drag, one pane maximised with ⌘⇧↩.
 - A real terminal underneath (alacritty's engine), so TUIs, colours and the mouse work as they should.
 - Drop a file, a screenshot say, on a terminal to type its path, so Claude attaches it.
-- Several repos in one window, as tabs in the title bar (⌘O adds one). Their agents share one grid.
+- Several repos in one window, as tabs in the title bar (the + after them, or ⌘O, adds one). Their agents share one grid.
 - Focus a pane that works in another git worktree, and the sidebar follows it there.
 
 ### Files and editor

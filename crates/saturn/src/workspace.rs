@@ -151,7 +151,11 @@ pub enum Placement {
 }
 
 /// Tall enough that the title bar's outer controls sit 10px from the window's edges: 48 = 28 + 2 × 10.
-const TITLEBAR_HEIGHT: f32 = 48.0;
+const TITLEBAR_HEIGHT: f32 = 40.0;
+/// The title bar's controls: smaller than the panes' (`chrome::CONTROL_HEIGHT`), so the bar stays a
+/// thin strip. Their tracks are this plus the track's padding, and macOS's buttons sit on the same
+/// middle line (see `traffic_light_position` in main.rs).
+const TITLEBAR_CONTROL: f32 = 24.0;
 const TRAFFIC_LIGHTS_WIDTH: f32 = 76.0;
 const TAB_HEIGHT: f32 = chrome::CONTROL_HEIGHT;
 /// No pane is dragged smaller than this share of its row or of the grid.
@@ -1947,9 +1951,9 @@ impl Workspace {
     /// The panel toggles (raised while the panel is open) and Settings, in the title bar.
     fn render_panel_toggles(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let toggle = |id: &'static str, icon: &str, on: bool| {
-            chrome::track_item(id, on).child(chrome::icon(
+            chrome::track_item(id, on).size(len(TITLEBAR_CONTROL)).child(chrome::icon(
                 icon,
-                16.,
+                15.,
                 theme::color(if on { color::INK } else { color::INK_MUTED }),
             ))
         };
@@ -2016,6 +2020,7 @@ impl Workspace {
                 }
                 track = track.child(
                     chrome::track_item(label, false)
+                        .h(len(TITLEBAR_CONTROL))
                         .px(len(space::SPACE_3))
                         .when(state == AgentState::Working, |item| {
                             item.bg(theme::color(color::BLUE_VIVID).opacity(0.14)).text_color(theme::color(color::BLUE))
@@ -2029,11 +2034,6 @@ impl Workspace {
             }
             chrome::on_glass(track)
         });
-        let add_repo_primary = !self.clickup.connected() && !self.layout.is_empty();
-        let add_repo = chrome::button("add-repo", "Add repo", Some("⌘O"), add_repo_primary)
-            .h(len(chrome::TRACK_HEIGHT))
-            .rounded(len(radius::RADIUS_MD))
-            .on_click(cx.listener(|_, _, window, cx| Self::open_project(window, cx)));
         div()
             .flex()
             .items_center()
@@ -2045,14 +2045,14 @@ impl Workspace {
             .child(self.render_repo_tabs(cx))
             .child(empty("titlebar-middle").flex_1())
             .children(activity)
-            // New terminals come from each pane's ＋ (and ⌘N); the title bar adds repos. One primary
-            // button per screen: New agent when ClickUp is connected, else this, unless the empty
-            // grid shows its own.
-            .map(|bar| if add_repo_primary { bar.child(add_repo) } else { bar.child(chrome::on_glass(add_repo)) })
+            // New terminals come from each pane's ＋ (and ⌘N), repos from the ＋ after them. With
+            // ClickUp, starting an agent from a ticket is the one primary action; its shortcut is in
+            // its tooltip, to keep the bar short.
             .children(self.clickup.connected().then(|| {
-                chrome::button("new-agent", "New agent", Some("⌘⇧N"), true)
-                    .h(len(chrome::TRACK_HEIGHT))
+                chrome::button("new-agent", "New agent", None, true)
+                    .h(len(TITLEBAR_CONTROL + 2. * space::SPACE_1))
                     .rounded(len(radius::RADIUS_MD))
+                    .tooltip(chrome::tip_for("New agent from a ticket", OpenTicketPicker))
                     .on_click(cx.listener(|_, _, window, cx| ticket_picker::open(cx.weak_entity(), window, cx)))
             }))
     }
@@ -2097,7 +2097,7 @@ impl Workspace {
     }
 
     /// The window's repos, in the title bar: the selected one raised, ✕ on hover to take one out
-    /// (its panes stay). Adding one is the title bar's button on the right.
+    /// (its panes stay). The ＋ after them adds one.
     fn render_repo_tabs(&self, cx: &mut Context<Self>) -> AnyElement {
         let removable = self.projects.len() > 1;
         let mut track = chrome::track();
@@ -2110,6 +2110,7 @@ impl Workspace {
             let group = gpui_kit::SharedString::from(format!("repo-{index}"));
             track = track.child(
                 chrome::track_item(("repo", index), selected)
+                    .h(len(TITLEBAR_CONTROL))
                     .relative()
                     .group(group.clone())
                     .px(len(space::SPACE_3))
@@ -2121,8 +2122,8 @@ impl Workspace {
                             div()
                                 .id(("remove-repo", index))
                                 .absolute()
-                                .top(px(5.))
-                                .right(px(5.))
+                                .top(px(3.))
+                                .right(px(3.))
                                 .flex()
                                 .items_center()
                                 .justify_center()
@@ -2149,6 +2150,14 @@ impl Workspace {
                     .on_click(cx.listener(move |this, _, window, cx| this.select_project(picked.clone(), window, cx))),
             );
         }
+        // Adding a repo belongs with the repos.
+        let track = track.child(
+            chrome::track_item("add-repo", false)
+                .size(len(TITLEBAR_CONTROL))
+                .child(chrome::icon("plus", 15., theme::color(color::INK_MUTED)))
+                .tooltip(chrome::tip_for("Add repo", OpenProject))
+                .on_click(cx.listener(|_, _, window, cx| Self::open_project(window, cx))),
+        );
         chrome::on_glass(track).into_any_element()
     }
 

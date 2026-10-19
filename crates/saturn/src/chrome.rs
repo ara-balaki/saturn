@@ -30,10 +30,6 @@ pub fn tip_for<A: Action + Clone>(
 /// Height of every control: tabs, buttons, track items, segments. Dense, as development tools are.
 pub const CONTROL_HEIGHT: f32 = 28.0;
 
-/// Height of a track: a control and its 4px padding above and below. A button standing beside
-/// tracks (the title bar's) takes this height too, so the row reads as one line of islands.
-pub const TRACK_HEIGHT: f32 = CONTROL_HEIGHT + 2. * space::SPACE_1;
-
 /// A Lucide icon from gpui-kit's bundled set, e.g. `panel-left`. SVGs don't inherit the text
 /// colour, so it is given here.
 pub fn icon(name: &str, size: f32, color: gpui_kit::Hsla) -> impl IntoElement {
