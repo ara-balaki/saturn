@@ -36,7 +36,9 @@ It isn't an IDE and doesn't try to replace yours. It's the place the agents live
   them every few minutes and after an agent's turn; click to read them again.
 - **dbt lineage.** In a repo with a dbt project, the workflow button in the sidebar's header draws
   its lineage graph: sources and seeds on the left, then each model past what it reads. Click a
-  model to light up everything upstream and downstream of it, double-click to open its SQL. Read
+  model to light up everything upstream and downstream of it, double-click to open its SQL. A big
+  project (more than 150 nodes) shows one model at a time with what's 1, 2 or 3 steps around it:
+  the one open in the editor, or one you search for, and a click moves to another. Read
   from the project's `ref()` and `source()` calls; dbt itself isn't needed.
 - **Several repos in one window.** Repos sit as tabs in the title bar (⌘O adds one); agents from
   different repos share one grid, and new tabs open in the repo you've selected.

@@ -52,7 +52,12 @@ pub struct Schema {
 pub fn find_sources(repo: &Path) -> Vec<PathBuf> {
     let mut prisma = Vec::new();
     let mut sql = Vec::new();
-    for entry in ignore::WalkBuilder::new(repo).max_depth(Some(8)).build().flatten() {
+    // A dbt project's SQL is models, not migrations: its folders are left out.
+    let walk = ignore::WalkBuilder::new(repo)
+        .max_depth(Some(8))
+        .filter_entry(|entry| !entry.path().join("dbt_project.yml").is_file())
+        .build();
+    for entry in walk.flatten() {
         let path = entry.path();
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else { continue };
         let extension = path.extension().map(|ext| ext.to_string_lossy().to_lowercase()).unwrap_or_default();

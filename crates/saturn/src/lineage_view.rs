@@ -10,8 +10,8 @@ use std::rc::Rc;
 
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Bounds, Context, Entity, Hsla, InteractiveElement as _, IntoElement, MouseButton,
-    MouseDownEvent, MouseMoveEvent, ParentElement as _, PathBuilder, PinchEvent, Pixels, Point, Render,
+    AnyElement, App, AppContext as _, Bounds, Context, ElementId, Entity, Hsla, InteractiveElement as _, IntoElement,
+    MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement as _, PathBuilder, PinchEvent, Pixels, Point, Render,
     ScrollWheelEvent, StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, canvas, div,
     point, prelude::FluentBuilder as _, px,
 };
@@ -32,7 +32,14 @@ pub struct LineageView {
     /// The folder holding `dbt_project.yml`.
     project: PathBuf,
     editor: WeakEntity<EditorView>,
+    /// The whole project, as read.
+    whole: Lineage,
+    /// What's drawn: the whole project when it's small, else the neighbourhood of `center`.
     lineage: Lineage,
+    /// The model a big project's graph is drawn around, by name.
+    center: Option<String>,
+    /// How many steps up and down from `center` are drawn (`None`: all of them).
+    depth: Option<usize>,
     placed: Vec<Placed>,
     loaded: bool,
     zoom: f32,
@@ -41,6 +48,10 @@ pub struct LineageView {
     /// The view's bounds on screen, from the last frame: events come in window coordinates.
     bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     fit_pending: bool,
+    /// The view's size when the graph was last fitted, and whether it's been panned or zoomed since:
+    /// until it has, a change of size (the panel opening wider) fits it again.
+    fitted_size: Option<gpui_kit::Size<Pixels>>,
+    moved: bool,
     dragging_from: Option<Point<Pixels>>,
     focused: Option<usize>,
     search: Option<Entity<InputState>>,
@@ -63,13 +74,18 @@ impl LineageView {
         let mut view = Self {
             project: project.to_owned(),
             editor,
+            whole: Lineage::default(),
             lineage: Lineage::default(),
+            center: None,
+            depth: Some(2),
             placed: Vec::new(),
             loaded: false,
             zoom: 1.,
             offset: point(px(MARGIN), px(MARGIN)),
             bounds: Rc::new(Cell::new(None)),
             fit_pending: true,
+            fitted_size: None,
+            moved: false,
             dragging_from: None,
             focused: None,
             search: None,
@@ -78,12 +94,16 @@ impl LineageView {
         };
         if std::env::var_os("SATURN_LINEAGE").is_some() {
             // Screenshots: the test window stops drawing before a background read would land.
-            view.lineage = dbt::load(project);
-            view.placed = dbt::layout(&view.lineage);
+            view.whole = dbt::load(project);
             view.loaded = true;
-            view.focused = std::env::var("SATURN_LINEAGE_FOCUS")
-                .ok()
-                .and_then(|name| view.lineage.nodes.iter().position(|node| node.name == name));
+            let focus = std::env::var("SATURN_LINEAGE_FOCUS").ok().filter(|name| !name.is_empty());
+            if view.big() {
+                view.center = focus;
+                view.show_scope();
+            } else {
+                view.show_scope();
+                view.focused = focus.and_then(|name| view.lineage.nodes.iter().position(|node| node.name == name));
+            }
         } else {
             view.reload(cx);
         }
@@ -98,30 +118,56 @@ impl LineageView {
     pub fn reload(&mut self, cx: &mut Context<Self>) {
         let project = self.project.clone();
         cx.spawn(async move |this, cx| {
-            let (lineage, placed) = cx
-                .background_spawn(async move {
-                    let lineage = dbt::load(&project);
-                    let placed = dbt::layout(&lineage);
-                    (lineage, placed)
-                })
-                .await;
+            let whole = cx.background_spawn(async move { dbt::load(&project) }).await;
             let _ = this.update(cx, |this, cx| {
-                this.lineage = lineage;
-                this.placed = placed;
+                this.whole = whole;
                 this.loaded = true;
-                this.fit_pending = true;
-                this.focused = None;
+                this.show_scope();
                 cx.notify();
             });
         })
         .detach();
     }
 
-    /// Focuses the node a file defines (a model's SQL open in the editor), if the graph has it.
+    /// Too many nodes to draw at once: the graph shows one model's neighbourhood instead.
+    fn big(&self) -> bool {
+        self.whole.nodes.len() > dbt::WHOLE_GRAPH_LIMIT
+    }
+
+    /// Picks what's drawn, and lays it out: the whole project when it's small, else the
+    /// neighbourhood of the model in the centre (nothing until one is picked).
+    fn show_scope(&mut self) {
+        let center = self.center.as_ref().and_then(|name| self.whole.nodes.iter().position(|node| &node.name == name));
+        self.lineage = match center {
+            Some(center) if self.big() => {
+                dbt::subgraph(&self.whole, &dbt::neighbourhood(&self.whole, center, self.depth))
+            }
+            _ if self.big() => Lineage { name: self.whole.name.clone(), ..Lineage::default() },
+            _ => self.whole.clone(),
+        };
+        self.placed = dbt::layout(&self.lineage);
+        // The neighbourhood lists its centre first.
+        self.focused = (center.is_some() && self.big()).then_some(0);
+        self.fit_pending = true;
+    }
+
+    /// Draws the graph around `name` (a big project), or focuses it (a small one).
+    fn center_on(&mut self, name: &str, cx: &mut Context<Self>) {
+        if self.big() {
+            self.center = Some(name.to_owned());
+            self.show_scope();
+            cx.notify();
+        } else if let Some(index) = self.lineage.nodes.iter().position(|node| node.name == name) {
+            self.zoom_to(index, cx);
+        }
+    }
+
+    /// Centres on the node a file defines (a model's SQL open in the editor), if the project has it.
     pub fn focus_file(&mut self, file: &Path, cx: &mut Context<Self>) {
         let relative = file.strip_prefix(&self.project).unwrap_or(file);
-        if let Some(index) = self.lineage.nodes.iter().position(|node| node.path.as_deref() == Some(relative)) {
-            self.zoom_to(index, cx);
+        if let Some(node) = self.whole.nodes.iter().find(|node| node.path.as_deref() == Some(relative)) {
+            let name = node.name.clone();
+            self.center_on(&name, cx);
         }
     }
 
@@ -138,12 +184,15 @@ impl LineageView {
         self.zoom = zoom;
         self.offset = point(px(x), px(y));
         self.fit_pending = false;
+        self.fitted_size = Some(bounds.size);
+        self.moved = false;
     }
 
     /// Zooms by `factor` keeping the point under `anchor` (window coordinates) in place.
     fn zoom_at(&mut self, factor: f32, anchor: Point<Pixels>, cx: &mut Context<Self>) {
         let origin = self.bounds.get().map_or(point(px(0.), px(0.)), |bounds| bounds.origin);
         let local = anchor - origin;
+        self.moved = true;
         let new_zoom = (self.zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
         let scale = new_zoom / self.zoom;
         self.offset = point(local.x - (local.x - self.offset.x) * scale, local.y - (local.y - self.offset.y) * scale);
@@ -205,9 +254,11 @@ impl LineageView {
                 cx.notify();
             }
             InputEvent::PressEnter { .. } => {
-                if let Some(&first) = this.matches().first() {
-                    this.query.clear();
-                    this.zoom_to(first, cx);
+                // A big project's search looks through all of it, not just what's drawn.
+                let query = this.query.trim().to_lowercase();
+                let first = this.whole.nodes.iter().find(|node| node.name.to_lowercase().contains(&query));
+                if let Some(name) = first.map(|node| node.name.clone()) {
+                    this.center_on(&name, cx);
                 }
             }
             _ => {}
@@ -288,6 +339,10 @@ impl LineageView {
             .on_click(cx.listener(move |this, event: &gpui_kit::ClickEvent, window, cx| {
                 if event.click_count() >= 2 {
                     this.open(index, window, cx);
+                } else if this.big() {
+                    // A big project's graph moves to the node clicked: its own neighbourhood.
+                    let name = this.lineage.nodes[index].name.clone();
+                    this.center_on(&name, cx);
                 } else {
                     this.focused = if this.focused == Some(index) { None } else { Some(index) };
                     cx.notify();
@@ -299,6 +354,29 @@ impl LineageView {
     fn render_controls(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div().absolute().top(len(space::SPACE_2)).right(len(space::SPACE_2)).child(
             chrome::floating(chrome::track())
+                .when(self.big() && self.center.is_some(), |track| {
+                    let depths = [("1", Some(1)), ("2", Some(2)), ("3", Some(3)), ("All", None)];
+                    track
+                        .children(depths.map(|(label, depth)| {
+                            chrome::track_item(
+                                ElementId::Name(format!("lineage-depth-{label}").into()),
+                                self.depth == depth,
+                            )
+                            .px(len(space::SPACE_2))
+                            .child(label)
+                            .tooltip(chrome::tip(match depth {
+                                Some(1) => "Only what it reads and what reads it",
+                                Some(_) => "That many steps up and down",
+                                None => "Everything upstream and downstream",
+                            }))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.depth = depth;
+                                this.show_scope();
+                                cx.notify();
+                            }))
+                        }))
+                        .child(chrome::track_separator())
+                })
                 .child(
                     chrome::icon_button("lineage-zoom-out", "zoom-out", true)
                         .tooltip(chrome::tip("Zoom out (or pinch, or ⌘-scroll)"))
@@ -334,10 +412,37 @@ impl LineageView {
         )
     }
 
+    /// A big project, and no model picked yet: what to do.
+    fn render_prompt(&self) -> impl IntoElement {
+        div()
+            .absolute()
+            .size_full()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap(len(space::SPACE_2))
+            .text_size(px(14.))
+            .text_color(theme::color(color::INK_MUTED))
+            .child(format!(
+                "{} has {} models: too many to draw at once.",
+                self.whole.name,
+                self.whole.nodes.iter().filter(|node| node.kind == Kind::Model).count()
+            ))
+            .child("Search for one and press Enter, or open its SQL in the editor, to see its lineage.")
+    }
+
     fn render_caption(&self) -> impl IntoElement {
         let count = |kind: Kind| {
-            let n = self.lineage.nodes.iter().filter(|node| node.kind == kind).count();
+            let n = self.whole.nodes.iter().filter(|node| node.kind == kind).count();
             format!("{n} {}{}", kind.name(), if n == 1 { "" } else { "s" })
+        };
+        let how = match &self.center {
+            Some(center) if self.big() => format!(
+                "{} of them around {center} · click a node to move there, double-click to open it",
+                self.lineage.nodes.len()
+            ),
+            _ => "click a node for its lineage, double-click to open it".to_owned(),
         };
         div()
             .absolute()
@@ -346,8 +451,8 @@ impl LineageView {
             .text_size(px(11.))
             .text_color(theme::color(color::INK_FAINT))
             .child(format!(
-                "{} · {} · {} · {} · {} · click a node for its lineage, double-click to open it",
-                self.lineage.name,
+                "{} · {} · {} · {} · {} · {how}",
+                self.whole.name,
                 count(Kind::Model),
                 count(Kind::Source),
                 count(Kind::Seed),
@@ -380,7 +485,13 @@ fn edges(view: &LineageView, lit: Option<&[bool]>) -> impl IntoElement {
         })
         .collect();
     canvas(
-        move |bounds, _, _| bounds_cell.set(Some(bounds)),
+        move |bounds, window, _| {
+            // A new size (the panel opening wider) gets another frame, which fits the graph to it.
+            if bounds_cell.get().map(|old| old.size) != Some(bounds.size) {
+                window.refresh();
+            }
+            bounds_cell.set(Some(bounds));
+        },
         move |bounds: Bounds<Pixels>, (), window: &mut Window, _: &mut App| {
             let at = |p: Point<f32>| {
                 point(bounds.origin.x + offset.x + px(p.x * z), bounds.origin.y + offset.y + px(p.y * z))
@@ -412,13 +523,17 @@ fn edges(view: &LineageView, lit: Option<&[bool]>) -> impl IntoElement {
 
 impl Render for LineageView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let resized = self.bounds.get().is_some_and(|bounds| Some(bounds.size) != self.fitted_size);
+        if resized && !self.moved && self.loaded {
+            self.fit_pending = true;
+        }
         if self.fit_pending && self.bounds.get().is_some() && self.loaded {
             self.fit();
         } else if self.fit_pending && self.loaded {
             // The view's size arrives with the first frame; fit on the next one.
             cx.on_next_frame(window, |_, _, cx| cx.notify());
         }
-        if self.loaded && self.lineage.nodes.is_empty() {
+        if self.loaded && self.whole.nodes.is_empty() {
             return div()
                 .size_full()
                 .flex()
@@ -446,6 +561,7 @@ impl Render for LineageView {
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
                 if let (Some(from), Some(MouseButton::Left)) = (this.dragging_from, event.pressed_button) {
                     this.offset += event.position - from;
+                    this.moved = true;
                     this.dragging_from = Some(event.position);
                     cx.notify();
                 } else {
@@ -460,12 +576,16 @@ impl Render for LineageView {
                     this.zoom_at(factor, event.position, cx);
                 } else {
                     this.offset += delta;
+                    this.moved = true;
                     cx.notify();
                 }
             }))
             .on_pinch(cx.listener(|this, event: &PinchEvent, _, cx| {
                 this.zoom_at(1. + event.delta, event.position, cx);
             }));
+        if self.lineage.nodes.is_empty() {
+            root = root.child(self.render_prompt());
+        }
         root = root.child(edges(self, lit.as_deref()));
         for index in 0..self.lineage.nodes.len() {
             let dimmed = lit.as_ref().is_some_and(|lit| !lit[index]);

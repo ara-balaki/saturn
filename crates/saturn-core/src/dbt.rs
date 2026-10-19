@@ -359,6 +359,51 @@ pub fn layout(lineage: &Lineage) -> Vec<Placed> {
     placed
 }
 
+/// How many nodes a graph can have and still be drawn whole; past it, one model's neighbourhood.
+pub const WHOLE_GRAPH_LIMIT: usize = 150;
+
+/// The nodes within `depth` steps of `center`, upstream and downstream (every step, for `None`),
+/// `center` first.
+pub fn neighbourhood(lineage: &Lineage, center: usize, depth: Option<usize>) -> Vec<usize> {
+    let mut found = vec![center];
+    let mut seen = vec![false; lineage.nodes.len()];
+    seen[center] = true;
+    for upstream in [true, false] {
+        let mut frontier = vec![center];
+        let mut step = 0;
+        while !frontier.is_empty() && depth.is_none_or(|depth| step < depth) {
+            let mut next = Vec::new();
+            for &at in &frontier {
+                for &(from, to) in &lineage.edges {
+                    let (here, other) = if upstream { (to, from) } else { (from, to) };
+                    if here == at && !seen[other] {
+                        seen[other] = true;
+                        found.push(other);
+                        next.push(other);
+                    }
+                }
+            }
+            frontier = next;
+            step += 1;
+        }
+    }
+    found
+}
+
+/// The part of the lineage made of `nodes`, with the edges between them; indices are `nodes`' order.
+pub fn subgraph(lineage: &Lineage, nodes: &[usize]) -> Lineage {
+    let mut position = vec![None; lineage.nodes.len()];
+    for (at, &node) in nodes.iter().enumerate() {
+        position[node] = Some(at);
+    }
+    Lineage {
+        root: lineage.root.clone(),
+        name: lineage.name.clone(),
+        nodes: nodes.iter().map(|&node| lineage.nodes[node].clone()).collect(),
+        edges: lineage.edges.iter().filter_map(|&(from, to)| Some((position[from]?, position[to]?))).collect(),
+    }
+}
+
 /// Everything upstream of `node` (what it's built from) and downstream (what's built from it).
 pub fn related(lineage: &Lineage, node: usize) -> Vec<bool> {
     let mut related = vec![false; lineage.nodes.len()];
@@ -430,6 +475,11 @@ mod tests {
         assert!(placed[at("fct_orders")].x < placed[at("report")].x);
         let related = related(&lineage, at("stg_orders"));
         assert!(related[at("raw.orders")] && related[at("report")] && !related[at("rates")]);
+        let near = neighbourhood(&lineage, at("stg_orders"), Some(1));
+        assert_eq!(near.len(), 3, "stg_orders, what it reads, what reads it");
+        assert_eq!(neighbourhood(&lineage, at("stg_orders"), None).len(), 4);
+        let part = subgraph(&lineage, &near);
+        assert_eq!((part.nodes[0].name.as_str(), part.edges.len()), ("stg_orders", 2));
         write("dbt_packages/utils/dbt_project.yml", "name: utils\n");
         assert_eq!(find_projects(root), [root.to_owned()]);
     }

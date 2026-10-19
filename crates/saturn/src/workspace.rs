@@ -617,7 +617,10 @@ impl Workspace {
                 .background_spawn({
                     let folder = folder.clone();
                     async move {
-                        let schema = !saturn_core::schema::find_sources(&folder).is_empty();
+                        // Only when there's something to draw: SQL files alone (a dbt project's
+                        // models) aren't a schema.
+                        let schema = !saturn_core::schema::find_sources(&folder).is_empty()
+                            && !saturn_core::schema::load(&folder).tables.is_empty();
                         (schema, saturn_core::dbt::find_projects(&folder).into_iter().next())
                     }
                 })

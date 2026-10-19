@@ -252,6 +252,9 @@ fn capture<T: 'static>(window: &mut Window, cx: &mut Context<T>) {
         // macOS stops sending frames to a window it considers hidden, so draw one now: what
         // arrived late (a shell's output, a server's answer) is then in the picture.
         let _ = handle.update(cx, |_, window, cx| window.draw(cx).clear(cx));
+        // Twice: a view that sizes itself to the first frame (a diagram fitting the view) settles
+        // on the second, as it would on screen.
+        let _ = handle.update(cx, |_, window, cx| window.draw(cx).clear(cx));
         let _ = handle.update(cx, |_, window, _| match window.render_to_image() {
             Ok(image) => match image.save(&path) {
                 Ok(()) => eprintln!("screenshot: {path}"),
