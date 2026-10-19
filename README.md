@@ -31,8 +31,9 @@ It isn't an IDE and doesn't try to replace yours. It's the place the agents live
   counts them, ⌘⇧A jumps to the next one that needs you, macOS notifies you while Saturn is in the
   background, and a small Saturn in the menu bar shows how many are waiting even while it's hidden; its menu
   takes you to the next one.
-- **The focused agent at a glance.** The bottom of the sidebar shows the agent in the pane you're
-  in: its step, how much context it holds, and its progress.
+- **Your Claude plan's limits.** The bottom of the sidebar shows what `/usage` does: the current
+  session, the week, and a model's own week, with when each resets. Saturn asks Claude Code for
+  them every few minutes and after an agent's turn; click to read them again.
 - **Several repos in one window.** Repos sit as tabs in the title bar (⌘O adds one); agents from
   different repos share one grid, and new tabs open in the repo you've selected.
 - **Files and a light editor.** ⌘P finds any file by a few letters of its name or path; ⌘⇧P

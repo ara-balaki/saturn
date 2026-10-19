@@ -29,6 +29,7 @@ mod theme;
 mod ticket_picker;
 mod tickets_view;
 mod updates;
+mod usage;
 mod workspace;
 
 use std::borrow::Cow;
@@ -170,6 +171,7 @@ fn main() {
         languages::register();
         theme::apply(settings::load().appearance, cx);
         theme::set_text_size(settings::load().text_size, cx);
+        usage::start(cx);
         if settings::load().notifications && !spike::is_automated() {
             notify::request_permission();
         }

@@ -14,7 +14,6 @@ use gpui_kit::{
     Styled as _, Subscription, Window, actions, bounce, div, ease_in_out, prelude::FluentBuilder as _, px, relative,
 };
 use saturn_bridge::{Bridge, HookCall};
-use saturn_core::agent_activity;
 use saturn_core::agent_state::{AgentState, tab_title};
 use saturn_core::clickup::Ticket;
 use saturn_core::git;
@@ -34,7 +33,7 @@ use crate::settings::{self, AppearanceSetting, Settings};
 use crate::status_bar::StatusBar;
 use crate::theme::{self, len};
 use crate::tickets_view::TicketsView;
-use crate::{agents_view, dock, github, menu_bar, notify, palette, settings_view, ticket_picker};
+use crate::{dock, github, menu_bar, notify, palette, settings_view, ticket_picker};
 
 actions!(
     saturn,
@@ -243,8 +242,6 @@ pub struct Workspace {
     claude_sessions: HashMap<TabId, String>,
     /// ClickUp, when a token is set; nothing about it shows otherwise.
     clickup: ClickUpState,
-    /// Each agent's steps and context, for the Agents tab.
-    activity: HashMap<TabId, Activity>,
     /// Where a dragged tab would land: a cell, and the side to split it on (`None`: into the cell).
     drop_target: Option<(CellId, Option<Direction>)>,
     /// The repository and branch each tab is in, read in the background.
@@ -307,14 +304,6 @@ struct RootViews {
 enum SidebarTab {
     Files,
     Changes,
-}
-
-/// What an agent is up to beyond its state, from its hooks and transcript, for the Agents tab.
-#[derive(Default)]
-struct Activity {
-    steps: Option<agent_activity::Steps>,
-    /// Tokens in the session's context after its latest reply.
-    context: Option<u64>,
 }
 
 /// The Saturn plugin that Claude sessions in Saturn's panes load: inside Saturn.app
@@ -556,7 +545,6 @@ impl Workspace {
             claude_sessions: HashMap::new(),
             clickup: ClickUpState::default(),
             checkouts: HashMap::new(),
-            activity: HashMap::new(),
             drop_target: None,
             pull_requests: HashMap::new(),
             checkout_refresh: Refresh::Idle,
@@ -1046,16 +1034,16 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Gives the panes made-up agents, so screenshots show the Agents tab without running Claude.
+    /// Gives the panes made-up agents, so screenshots show agents in every state without running Claude.
     pub fn fake_agents(&mut self, cx: &mut Context<Self>) {
         let samples = [
-            (AgentState::Working, Some(40), "Running the tests", 412_000),
-            (AgentState::NeedsYou, None, "Which branch should I deploy?", 168_000),
-            (AgentState::YourTurn, None, "Done: the filter is on every list page", 96_000),
-            (AgentState::Working, Some(72), "Writing the migration", 251_000),
+            (AgentState::Working, Some(40), "Running the tests"),
+            (AgentState::NeedsYou, None, "Which branch should I deploy?"),
+            (AgentState::YourTurn, None, "Done: the filter is on every list page"),
+            (AgentState::Working, Some(72), "Writing the migration"),
         ];
         let tabs: Vec<TabId> = self.layout.tabs().collect();
-        for (tab, (state, progress, message, context)) in tabs.into_iter().zip(samples) {
+        for (tab, (state, progress, message)) in tabs.into_iter().zip(samples) {
             if let Some(view) = self.terminals.get(&tab) {
                 view.update(cx, |view, _| {
                     view.state = state;
@@ -1063,12 +1051,6 @@ impl Workspace {
                     view.message = Some(message.to_owned());
                 });
             }
-            let steps = (state == AgentState::Working).then(|| agent_activity::Steps {
-                done: 1,
-                total: 3,
-                current: Some(message.to_owned()),
-            });
-            self.activity.insert(tab, Activity { steps, context: Some(context) });
             // Not looked at yet, so the panes ring as they would.
             if matches!(state, AgentState::NeedsYou | AgentState::YourTurn) {
                 self.unseen.insert(tab);
@@ -1141,7 +1123,10 @@ impl Workspace {
         if self.claude_sessions.get(&tab) != session_before.as_ref() {
             self.save_session(cx);
         }
-        self.track_activity(tab, &call, cx);
+        if call.event() == "Stop" {
+            // A turn used some of the plan.
+            crate::usage::refresh(false, cx);
+        }
         let state = match call.event() {
             "UserPromptSubmit" | "PostToolUse" => Some(AgentState::Working),
             "PermissionRequest" => Some(AgentState::NeedsYou),
@@ -1372,62 +1357,11 @@ impl Workspace {
     }
 
     /// Keeps an agent's steps (from its task list) and context (from its transcript) current.
-    fn track_activity(&mut self, tab: TabId, call: &HookCall, cx: &mut Context<Self>) {
-        if call.event() == "SessionEnd" {
-            self.activity.remove(&tab);
-            return;
-        }
-        if call.event() == "PostToolUse"
-            && let (Some(name), Some(input)) = (call.field("tool_name"), call.input.get("tool_input"))
-            && let Some(steps) = agent_activity::steps(name, input)
-        {
-            self.activity.entry(tab).or_default().steps = Some(steps);
-        }
-        if matches!(call.event(), "PostToolUse" | "Stop")
-            && let Some(transcript) = call.field("transcript_path").map(PathBuf::from)
-        {
-            cx.spawn(async move |this, cx| {
-                let context = cx
-                    .background_spawn(async move {
-                        read_tail(&transcript).and_then(|tail| agent_activity::context_tokens(&tail))
-                    })
-                    .await;
-                let _ = this.update(cx, |this, cx| {
-                    if let Some(context) = context {
-                        this.activity.entry(tab).or_default().context = Some(context);
-                        cx.notify();
-                    }
-                });
-            })
-            .detach();
-        }
-    }
-
-    /// The focused pane's agent as the gradient card, when that pane runs Claude.
-    fn render_focused_agent(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let tab = self.layout.focused_tab()?;
-        let view = self.terminals.get(&tab)?.read(cx);
-        if view.state == AgentState::Shell && !self.claude_sessions.contains_key(&tab) {
-            return None;
-        }
-        let activity = self.activity.get(&tab);
-        let agent = agents_view::Agent {
-            name: self.tab_name(tab, cx),
-            state: view.state,
-            message: view.message.clone(),
-            progress: view.progress,
-            steps: activity.and_then(|activity| activity.steps.clone()),
-            context: activity.and_then(|activity| activity.context),
-        };
-        Some(agents_view::card("focused-agent", &agent).into_any_element())
-    }
-
     fn forget(&mut self, tab: TabId, window: &mut Window, cx: &mut Context<Self>) {
         self.terminals.remove(&tab);
         self.unseen.remove(&tab);
         self.names.remove(&tab);
         self.checkouts.remove(&tab);
-        self.activity.remove(&tab);
         self.layout.remove_tab(tab);
         self.report_attention(window, cx);
         self.after_layout_change(window, cx);
@@ -2050,10 +1984,11 @@ impl Workspace {
         let root = self.current_root();
         let (files, changes) = (root.files.clone(), root.changes.clone());
         let header = self.render_sidebar_header(cx);
-        let agent = self.render_focused_agent(cx);
+        // The Claude plan's limits; what each agent is doing shows in its own pane.
+        let footer = crate::usage::render(cx).map(IntoElement::into_any_element);
         let sidebar = match self.sidebar_tab {
-            SidebarTab::Files => chrome::sidebar(header, switch, files, agent),
-            SidebarTab::Changes => chrome::sidebar(header, switch, changes, agent),
+            SidebarTab::Files => chrome::sidebar(header, switch, files, footer),
+            SidebarTab::Changes => chrome::sidebar(header, switch, changes, footer),
         };
         div().flex_1().min_h_0().child(
             h_resizable("workbench")
@@ -2269,17 +2204,6 @@ impl Render for Workspace {
             .child(self.render_workbench(cx))
             .child(self.status_bar.clone())
     }
-}
-
-/// The last 256 KB of a transcript: enough for its newest replies, without reading a long session whole.
-fn read_tail(path: &Path) -> Option<String> {
-    use std::io::{Read as _, Seek as _, SeekFrom};
-    let mut file = std::fs::File::open(path).ok()?;
-    let length = file.metadata().ok()?.len();
-    file.seek(SeekFrom::Start(length.saturating_sub(256 * 1024))).ok()?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).ok()?;
-    Some(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 #[cfg(test)]

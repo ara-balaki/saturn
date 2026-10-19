@@ -118,7 +118,7 @@ fn repository(path: &Path) -> PathBuf {
 }
 
 /// The login shell's PATH: started from Finder, Saturn's own lacks node, cargo and Homebrew.
-fn login_path() -> String {
+pub fn login_path() -> String {
     crate::LOGIN_PATH.get().cloned().unwrap_or_else(|| "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin".to_owned())
 }
 

@@ -20,5 +20,6 @@ SATURN_MORE_REPOS="$home/acme-docs" \
 SATURN_PANES=4 \
 SATURN_FAKE_AGENTS=1 \
 SATURN_FAKE_TICKETS=1 \
+SATURN_FAKE_USAGE=1 \
 SATURN_OPEN_FILE="$home/acme-shop/packages/money/src/tax.ts" \
   exec target/release/saturn
