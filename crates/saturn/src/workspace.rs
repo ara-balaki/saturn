@@ -1051,6 +1051,7 @@ impl Workspace {
         let ticket =
             |id: &str, key: &str, title: &str, status: &str, colour: &str, more: (&str, &str, &str, Option<i64>)| {
                 let (list, priority, tag, due) = more;
+                let space = if list == "API" { "Platform" } else { "Shop" };
                 Ticket {
                     id: id.to_owned(),
                     custom_id: Some(key.to_owned()),
@@ -1059,6 +1060,8 @@ impl Workspace {
                     status_color: Some(colour.to_owned()),
                     url: format!("https://app.clickup.com/t/{id}"),
                     list: Some(list.to_owned()),
+                    space_id: None,
+                    space: Some(space.to_owned()),
                     priority: Some(priority.to_owned()),
                     tags: vec![tag.to_owned()],
                     due: due.map(|days| now + days * day),

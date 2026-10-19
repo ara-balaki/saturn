@@ -73,7 +73,7 @@ It isn't an IDE and doesn't try to replace yours. It's the place the agents live
   does, and its shortcut, when you hover it.
 - **Optional: tickets from ClickUp.** Connect a token and ⌘⇧N lists the tickets assigned to you,
   and ⌘⌥B opens them as a panel on the right, by status, marking the ones an agent is on, with
-  filters for status, priority, due date, list and tag that Saturn remembers. Pick
+  filters for status, priority, due date, space, list and tag that Saturn remembers. Pick
   one, and Saturn opens a pane (in its own worktree if you like) and starts your agent on it.
   If you don't connect anything, none of this shows up.
 

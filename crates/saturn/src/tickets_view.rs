@@ -102,6 +102,7 @@ impl TicketsView {
                 filter.priorities.contains(priority) || tickets.iter().any(|t| t.priority.as_ref() == Some(priority))
             })
             .collect();
+        let spaces = present(&mut tickets.iter().filter_map(|ticket| ticket.space.as_ref()), &filter.spaces);
         let lists = present(&mut tickets.iter().filter_map(|ticket| ticket.list.as_ref()), &filter.lists);
         let tags = present(&mut tickets.iter().flat_map(|ticket| ticket.tags.iter()), &filter.tags);
         let group = |title: &'static str, chips: Vec<AnyElement>| {
@@ -163,6 +164,7 @@ impl TicketsView {
                 chips("priority", priorities, &filter.priorities, |filter| &mut filter.priorities),
             ))
             .children(group("Due", due))
+            .children(group("Space", chips("space", spaces, &filter.spaces, |filter| &mut filter.spaces)))
             .children(group("List", chips("list", lists, &filter.lists, |filter| &mut filter.lists)))
             .children(group("Tags", chips("tag", tags, &filter.tags, |filter| &mut filter.tags)))
             .when(count > 0, |filters| {
@@ -271,7 +273,7 @@ impl TicketsView {
                         .child(count.to_string()),
                 )
             })
-            .tooltip(chrome::tip("Filter by status, priority, due date, list or tag"))
+            .tooltip(chrome::tip("Filter by status, priority, due date, space, list or tag"))
             .on_click(cx.listener(|this, _, _, cx| {
                 this.filtering = !this.filtering;
                 cx.notify();

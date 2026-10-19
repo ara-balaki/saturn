@@ -73,6 +73,14 @@ pub fn my_tickets(token: &str) -> Result<Vec<Ticket>, String> {
     let workspaces = clickup::parse_workspaces(&get(&agent, token, "/team")?).map_err(|e| e.to_string())?;
     let mut tickets = Vec::new();
     for (workspace, _) in workspaces {
+        // Tasks name their space only by id; the names come from the space list, once.
+        let spaces: std::collections::HashMap<String, String> = get(&agent, token, &format!("/team/{workspace}/space"))
+            .ok()
+            .and_then(|json| clickup::parse_spaces(&json).ok())
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        let first = tickets.len();
         for page in 0..MAX_PAGES {
             let path = format!(
                 "/team/{workspace}/task?assignees[]={user}&include_closed=false&subtasks=true&order_by=updated&page={page}"
@@ -82,6 +90,9 @@ pub fn my_tickets(token: &str) -> Result<Vec<Ticket>, String> {
             if !more {
                 break;
             }
+        }
+        for ticket in &mut tickets[first..] {
+            ticket.space = ticket.space_id.as_ref().and_then(|id| spaces.get(id)).cloned();
         }
     }
     Ok(tickets)

@@ -19,6 +19,9 @@ pub struct Ticket {
     pub status_color: Option<String>,
     pub url: String,
     pub list: Option<String>,
+    /// The space it's in: its id from the task, its name once the space list is read.
+    pub space_id: Option<String>,
+    pub space: Option<String>,
     /// `urgent`, `high`, `normal` or `low`, when it has one.
     pub priority: Option<String>,
     pub tags: Vec<String>,
@@ -51,12 +54,19 @@ struct TaskJson {
     #[serde(default)]
     list: Option<NamedJson>,
     #[serde(default)]
+    space: Option<IdJson>,
+    #[serde(default)]
     priority: Option<PriorityJson>,
     #[serde(default)]
     tags: Vec<NamedJson>,
     /// ClickUp sends dates as strings of milliseconds.
     #[serde(default)]
     due_date: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct IdJson {
+    id: String,
 }
 
 #[derive(Deserialize)]
@@ -86,6 +96,8 @@ impl From<TaskJson> for Ticket {
             status_color: task.status.color.filter(|color| color.starts_with('#')),
             url: task.url,
             list: task.list.map(|list| list.name),
+            space_id: task.space.map(|space| space.id),
+            space: None,
             priority: task.priority.map(|priority| priority.priority),
             tags: task.tags.into_iter().map(|tag| tag.name).collect(),
             due: task.due_date.and_then(|due| due.parse().ok()),
@@ -184,6 +196,7 @@ impl Due {
 pub struct Filter {
     pub statuses: BTreeSet<String>,
     pub priorities: BTreeSet<String>,
+    pub spaces: BTreeSet<String>,
     pub lists: BTreeSet<String>,
     pub tags: BTreeSet<String>,
     pub due: BTreeSet<Due>,
@@ -192,7 +205,12 @@ pub struct Filter {
 impl Filter {
     /// How many values are chosen, for the filter button's badge.
     pub fn count(&self) -> usize {
-        self.statuses.len() + self.priorities.len() + self.lists.len() + self.tags.len() + self.due.len()
+        self.statuses.len()
+            + self.priorities.len()
+            + self.spaces.len()
+            + self.lists.len()
+            + self.tags.len()
+            + self.due.len()
     }
 
     pub fn keeps(&self, ticket: &Ticket, now: i64) -> bool {
@@ -201,6 +219,7 @@ impl Filter {
         };
         one_of(&self.statuses, Some(&ticket.status))
             && one_of(&self.priorities, ticket.priority.as_ref())
+            && one_of(&self.spaces, ticket.space.as_ref())
             && one_of(&self.lists, ticket.list.as_ref())
             && (self.tags.is_empty() || ticket.tags.iter().any(|tag| self.tags.contains(tag)))
             && (self.due.is_empty() || Due::of(ticket, now).is_some_and(|due| self.due.contains(&due)))
@@ -212,6 +231,20 @@ pub fn toggle<T: Ord>(set: &mut BTreeSet<T>, value: T) {
     if !set.remove(&value) {
         set.insert(value);
     }
+}
+
+/// A workspace's spaces, from `GET /team/{team_id}/space`, as (id, name).
+pub fn parse_spaces(json: &str) -> Result<Vec<(String, String)>, serde_json::Error> {
+    #[derive(Deserialize)]
+    struct Body {
+        spaces: Vec<Space>,
+    }
+    #[derive(Deserialize)]
+    struct Space {
+        id: String,
+        name: String,
+    }
+    serde_json::from_str::<Body>(json).map(|body| body.spaces.into_iter().map(|space| (space.id, space.name)).collect())
 }
 
 /// Groups tickets by status for the picker, keeping ClickUp's order of first appearance.
@@ -290,6 +323,16 @@ mod tests {
         let (tickets, _) = parse_task_page(PAGE).expect("parses");
         let groups = by_status(&tickets);
         assert_eq!(groups.iter().map(|(status, _)| *status).collect::<Vec<_>>(), ["building", "ready"]);
+    }
+
+    #[test]
+    fn a_tickets_space_is_named_from_the_space_list() {
+        let ticket =
+            parse_task(r#"{"id": "1", "name": "n", "status": {"status": "to do"}, "url": "u", "space": {"id": "77"}}"#)
+                .expect("parses");
+        assert_eq!(ticket.space_id.as_deref(), Some("77"));
+        let spaces = parse_spaces(r#"{"spaces": [{"id": "77", "name": "Shop", "private": false}]}"#).expect("parses");
+        assert_eq!(spaces, [("77".to_owned(), "Shop".to_owned())]);
     }
 
     #[test]
