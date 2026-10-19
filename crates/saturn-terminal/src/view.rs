@@ -10,8 +10,8 @@ use alacritty_terminal::index::Side;
 use alacritty_terminal::term::TermMode;
 use gpui_kit::{
     App, ClipboardItem, Context, EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement,
-    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render,
-    ScrollDelta, ScrollWheelEvent, Styled as _, Window, div,
+    KeyBinding, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels,
+    Point, Render, ScrollDelta, ScrollWheelEvent, Styled as _, Window, div,
 };
 use saturn_core::agent_state::AgentState;
 
@@ -19,6 +19,18 @@ use crate::element::TerminalElement;
 use crate::keys::{self, KeyPress};
 use crate::pty::PtyEvent;
 use crate::terminal::{GridSize, Terminal, TerminalEvent};
+
+gpui_kit::actions!(terminal, [SendTab, SendBackTab]);
+
+/// Tab and shift-tab belong to the shell (completion, Claude Code's suggestions). The window binds
+/// them to moving focus between controls, and bindings run before a view sees its keys, so the
+/// terminal binds them again, closer in: the nearer binding wins.
+pub fn bind_keys(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new("tab", SendTab, Some("Terminal")),
+        KeyBinding::new("shift-tab", SendBackTab, Some("Terminal")),
+    ]);
+}
 
 /// What a terminal tells the app.
 #[derive(Debug, Clone, PartialEq)]
@@ -303,6 +315,16 @@ impl TerminalView {
         }
     }
 
+    /// Sends a key a binding took on its way here, as `key_down` would have.
+    fn send_key(&mut self, key: &str, shift: bool, cx: &mut Context<Self>) {
+        let press = KeyPress { key, text: None, control: false, alt: false, shift, command: false };
+        if let Some(bytes) = keys::encode(&press, self.terminal.mode().contains(TermMode::APP_CURSOR)) {
+            self.terminal.clear_selection();
+            self.write(bytes);
+        }
+        cx.notify();
+    }
+
     fn scroll_wheel(&mut self, event: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
         let lines = match event.delta {
             ScrollDelta::Lines(delta) => delta.y,
@@ -338,6 +360,8 @@ impl Render for TerminalView {
             .track_focus(&self.focus)
             .key_context("Terminal")
             .on_key_down(cx.listener(Self::key_down))
+            .on_action(cx.listener(|this, _: &SendTab, _, cx| this.send_key("tab", false, cx)))
+            .on_action(cx.listener(|this, _: &SendBackTab, _, cx| this.send_key("tab", true, cx)))
             .on_scroll_wheel(cx.listener(Self::scroll_wheel))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_move(cx.listener(Self::mouse_move))

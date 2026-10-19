@@ -64,6 +64,7 @@ const FONTS: [&[u8]; 6] = [
 ];
 
 fn bind_keys(cx: &mut App) {
+    saturn_terminal::view::bind_keys(cx);
     cx.bind_keys([
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("cmd-n", NewTab, None),
