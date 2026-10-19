@@ -478,16 +478,6 @@ fn process_name(pid: i32) -> Option<String> {
 
 impl Workspace {
     pub fn new(project: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        // Coming back to the window counts as looking at the pane in front.
-        cx.observe_window_activation(window, |this, window, cx| {
-            if window.is_window_active()
-                && let Some(front) = this.layout.focused_tab()
-                && this.unseen.remove(&front)
-            {
-                cx.notify();
-            }
-        })
-        .detach();
         // A saved ClickUp token turns the ticket picker on; the Keychain is read off the main thread.
         cx.spawn(async move |this, cx| {
             let token = cx.background_spawn(async { clickup::token() }).await;
@@ -1411,6 +1401,14 @@ impl Workspace {
                 cx.notify();
             }
             TerminalViewEvent::TitleChanged => cx.notify(),
+            // Coming back to the window isn't looking at the pane in front (your eyes may go to
+            // another one); typing or clicking in it is.
+            TerminalViewEvent::Used => {
+                if self.unseen.remove(&tab) {
+                    self.report_attention(window, cx);
+                    cx.notify();
+                }
+            }
             TerminalViewEvent::CwdChanged => {
                 if self.layout.focused_tab() == Some(tab) {
                     self.sync_root(window, cx);

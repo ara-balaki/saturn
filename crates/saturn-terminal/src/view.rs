@@ -48,6 +48,8 @@ pub enum TerminalViewEvent {
     CwdChanged,
     /// The shell ended; the tab should close.
     Exited,
+    /// Someone typed in it or clicked in it: they've seen what it says.
+    Used,
 }
 
 /// Where the grid was last drawn: enough to turn a mouse position into a cell.
@@ -236,6 +238,7 @@ impl TerminalView {
     pub fn paste_from_clipboard(&mut self, cx: &mut Context<Self>) {
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
             self.paste(&text);
+            cx.emit(TerminalViewEvent::Used);
         }
     }
 
@@ -274,6 +277,7 @@ impl TerminalView {
 
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
+        cx.emit(TerminalViewEvent::Used);
         let Some((row, col, side)) = self.cell_at(event.position) else { return };
         if self.program_wants_mouse(event.modifiers) {
             self.drag = Drag::Reporting;
@@ -342,6 +346,7 @@ impl TerminalView {
         if let Some(bytes) = keys::encode(&press, self.terminal.mode().contains(TermMode::APP_CURSOR)) {
             self.terminal.clear_selection();
             self.write(bytes);
+            cx.emit(TerminalViewEvent::Used);
             cx.stop_propagation();
         }
     }

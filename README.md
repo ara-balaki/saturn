@@ -27,7 +27,8 @@ It isn't an IDE and doesn't try to replace yours. It's the place the agents live
   split it there. Tabs in every pane, dividers you drag, one pane maximised with ⌘⇧↩. A real
   terminal underneath (alacritty's engine), so TUIs, colours and the mouse work as they should.
 - **Agents that tell you how they're doing.** Each tab shows whether its agent is working, waiting
-  for you, done, or failed, and an agent that needs you rings its pane in orange. The title bar
+  for you, done, or failed. A pane that needs you rings orange, one that's done rings green,
+  until you type or click in it. The title bar
   counts them, ⌘⇧A jumps to the next one that needs you, macOS notifies you while Saturn is in the
   background, and a small Saturn in the menu bar shows how many are waiting even while it's hidden; its menu
   takes you to the next one.
