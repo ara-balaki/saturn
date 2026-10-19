@@ -50,6 +50,8 @@ pub enum TerminalViewEvent {
     Exited,
     /// Someone typed in it or clicked in it: they've seen what it says.
     Used,
+    /// A pull request was linked in it ([`TerminalView::pull_request_link`]).
+    PullRequestLinked,
 }
 
 /// Where the grid was last drawn: enough to turn a mouse position into a cell.
@@ -80,6 +82,8 @@ pub struct TerminalView {
     /// How far Claude says it is, 0–100 (OSC 7501 `progress`), when it says.
     pub progress: Option<u8>,
     pub cwd: PathBuf,
+    /// The pull request last linked in the terminal, by the agent or by you.
+    pub pull_request_link: Option<String>,
     /// Claude reports its state itself (OSC 7501); hook-based state is then ignored.
     has_program_status: bool,
     scroll_remainder: f32,
@@ -134,6 +138,7 @@ impl TerminalView {
             message: None,
             progress: None,
             cwd: cwd.to_owned(),
+            pull_request_link: None,
             has_program_status: false,
             scroll_remainder: 0.0,
             geometry: Rc::default(),
@@ -172,6 +177,12 @@ impl TerminalView {
                     if path != self.cwd {
                         self.cwd = path;
                         cx.emit(TerminalViewEvent::CwdChanged);
+                    }
+                }
+                TerminalEvent::PullRequestLink(link) => {
+                    if self.pull_request_link.as_ref() != Some(&link) {
+                        self.pull_request_link = Some(link);
+                        cx.emit(TerminalViewEvent::PullRequestLinked);
                     }
                 }
                 TerminalEvent::PromptStart => {}

@@ -18,7 +18,7 @@ use saturn_core::agent_state::{AgentState, tab_title};
 use saturn_core::clickup::Ticket;
 use saturn_core::git;
 use saturn_core::layout::{Cell, CellId, Direction, Layout, RowId, TabId};
-use saturn_core::pull_request::{PrState, PullRequest};
+use saturn_core::pull_request::{self, PrState, PullRequest};
 use saturn_core::session_name::rename_for_prompt;
 use saturn_design::{color, radius, shadow, space};
 use saturn_terminal::view::{TerminalView, TerminalViewEvent};
@@ -248,8 +248,9 @@ pub struct Workspace {
     drop_target: Option<(CellId, Option<Direction>)>,
     /// The repository and branch each tab is in, read in the background.
     checkouts: HashMap<TabId, Checkout>,
-    /// The pull request of each branch a tab is on, from `gh`.
-    pull_requests: HashMap<Checkout, PullRequest>,
+    /// The pull request each tab works on, from `gh`: the one last linked in it, else its branch's,
+    /// else one naming its ticket.
+    pull_requests: HashMap<TabId, PullRequest>,
     /// Whether the two above are being read, so refreshes don't pile up.
     checkout_refresh: Refresh,
 }
@@ -268,6 +269,60 @@ enum Refresh {
 struct Checkout {
     root: PathBuf,
     branch: String,
+}
+
+/// What a tab's pull request can be found from.
+struct TabSources {
+    tab: TabId,
+    dir: PathBuf,
+    /// The pull request last linked in the tab's terminal.
+    link: Option<String>,
+    /// The ticket the tab is named after.
+    ticket: Option<String>,
+}
+
+/// What finds a pull request, so tabs that share one ask `gh` once.
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum PrLookup {
+    Link(String),
+    Branch(Checkout),
+    Ticket(PathBuf, String),
+}
+
+/// The branch each tab is on, and the pull request each works on: the one last linked in it (the
+/// agent opened it, or you pasted it), else its branch's, else one that names its ticket. Slow:
+/// runs `git` and `gh`.
+fn read_checkouts(tabs: Vec<TabSources>) -> (HashMap<TabId, Checkout>, HashMap<TabId, PullRequest>) {
+    let mut checkouts = HashMap::new();
+    let mut pull_requests = HashMap::new();
+    let mut found: HashMap<PrLookup, Option<PullRequest>> = HashMap::new();
+    for sources in tabs {
+        let checkout =
+            git::toplevel(&sources.dir).and_then(|root| git::branch(&root).map(|branch| Checkout { root, branch }));
+        let root = checkout.as_ref().map_or(&sources.dir, |checkout| &checkout.root).clone();
+        let lookups = [
+            sources.link.map(PrLookup::Link),
+            checkout.clone().map(PrLookup::Branch),
+            sources.ticket.filter(|_| checkout.is_some()).map(|ticket| PrLookup::Ticket(root.clone(), ticket)),
+        ];
+        let pull_request = lookups.into_iter().flatten().find_map(|lookup| {
+            found
+                .entry(lookup.clone())
+                .or_insert_with(|| match &lookup {
+                    PrLookup::Link(link) => github::pull_request(&root, link),
+                    PrLookup::Branch(checkout) => github::pull_request(&checkout.root, &checkout.branch),
+                    PrLookup::Ticket(root, ticket) => github::pull_request_for_ticket(root, ticket),
+                })
+                .clone()
+        });
+        if let Some(checkout) = checkout {
+            checkouts.insert(sources.tab, checkout);
+        }
+        if let Some(pull_request) = pull_request {
+            pull_requests.insert(sources.tab, pull_request);
+        }
+    }
+    (checkouts, pull_requests)
 }
 
 /// The ClickUp connection as the window knows it.
@@ -847,41 +902,37 @@ impl Workspace {
         self.after_layout_change(window, cx);
     }
 
-    /// Reads the branch each tab is on and the pull request of each branch, off the main thread.
+    /// Reads the branch each tab is on and the pull request each tab works on, off the main thread.
     pub fn refresh_checkouts(&mut self, cx: &mut Context<Self>) {
         if self.checkout_refresh != Refresh::Idle {
             self.checkout_refresh = Refresh::RunningStale;
             return;
         }
         self.checkout_refresh = Refresh::Running;
-        let dirs: Vec<(TabId, PathBuf)> =
-            self.terminals.iter().map(|(tab, view)| (*tab, view.read(cx).cwd.clone())).collect();
+        let tabs: Vec<TabSources> = self
+            .terminals
+            .iter()
+            .map(|(tab, view)| {
+                let view = view.read(cx);
+                let names = [self.names.get(tab), self.session_names.get(tab), view.title.as_ref()];
+                TabSources {
+                    tab: *tab,
+                    dir: view.cwd.clone(),
+                    link: view.pull_request_link.clone(),
+                    ticket: names.into_iter().flatten().find_map(|name| pull_request::ticket_in(name)),
+                }
+            })
+            .collect();
         cx.spawn(async move |this, cx| {
-            let (checkouts, pull_requests) = cx
-                .background_spawn(async move {
-                    let checkouts: HashMap<TabId, Checkout> = dirs
-                        .into_iter()
-                        .filter_map(|(tab, dir)| {
-                            let root = git::toplevel(&dir)?;
-                            let branch = git::branch(&root)?;
-                            Some((tab, Checkout { root, branch }))
-                        })
-                        .collect();
-                    let unique: HashSet<&Checkout> = checkouts.values().collect();
-                    let pull_requests: HashMap<Checkout, PullRequest> = unique
-                        .into_iter()
-                        .filter_map(|checkout| {
-                            github::pull_request(&checkout.root, &checkout.branch).map(|pr| (checkout.clone(), pr))
-                        })
-                        .collect();
-                    (checkouts, pull_requests)
-                })
-                .await;
+            let (checkouts, pull_requests) = cx.background_spawn(async move { read_checkouts(tabs) }).await;
             let _ = this.update(cx, |this, cx| {
                 let stale = this.checkout_refresh == Refresh::RunningStale;
                 this.checkout_refresh = Refresh::Idle;
                 this.checkouts = checkouts;
-                this.pull_requests = pull_requests;
+                // Made-up agents keep their made-up pull requests.
+                if std::env::var_os("SATURN_FAKE_AGENTS").is_none() {
+                    this.pull_requests = pull_requests;
+                }
                 cx.notify();
                 if stale {
                     this.refresh_checkouts(cx);
@@ -930,9 +981,9 @@ impl Workspace {
         self.layout.tabs().filter_map(|tab| self.ticket_of(tab, cx).map(|ticket| ticket.key().to_owned())).collect()
     }
 
-    /// The pull request for the branch a tab is on.
+    /// The pull request a tab works on.
     fn pull_request_of(&self, tab: TabId) -> Option<&PullRequest> {
-        self.pull_requests.get(self.checkouts.get(&tab)?)
+        self.pull_requests.get(&tab)
     }
 
     /// The ticket a tab works on: a ticket whose key is the tab's name, its Claude session's name
@@ -1122,13 +1173,18 @@ impl Workspace {
     /// Gives the panes made-up agents, so screenshots show agents in every state without running Claude.
     pub fn fake_agents(&mut self, cx: &mut Context<Self>) {
         let samples = [
-            (AgentState::Working, Some(40), "Running the tests"),
-            (AgentState::NeedsYou, None, "Which branch should I deploy?"),
-            (AgentState::YourTurn, None, "Done: the filter is on every list page"),
-            (AgentState::Working, Some(72), "Writing the migration"),
+            (AgentState::Working, Some(40), "Running the tests", None),
+            (AgentState::NeedsYou, None, "Which branch should I deploy?", Some((158, PrState::Open))),
+            (AgentState::YourTurn, None, "Done: the filter is on every list page", Some((161, PrState::Draft))),
+            (AgentState::Working, Some(72), "Writing the migration", None),
         ];
         let tabs: Vec<TabId> = self.layout.tabs().collect();
-        for (tab, (state, progress, message)) in tabs.into_iter().zip(samples) {
+        for (tab, (state, progress, message, pull_request)) in tabs.into_iter().zip(samples) {
+            if let Some((number, state)) = pull_request {
+                let url = format!("https://github.com/acme/acme-shop/pull/{number}");
+                let title = "Round VAT half up".to_owned();
+                self.pull_requests.insert(tab, PullRequest { number, title, url, state });
+            }
             if let Some(view) = self.terminals.get(&tab) {
                 view.update(cx, |view, _| {
                     view.state = state;
@@ -1409,6 +1465,7 @@ impl Workspace {
                     cx.notify();
                 }
             }
+            TerminalViewEvent::PullRequestLinked => self.refresh_checkouts(cx),
             TerminalViewEvent::CwdChanged => {
                 if self.layout.focused_tab() == Some(tab) {
                     self.sync_root(window, cx);

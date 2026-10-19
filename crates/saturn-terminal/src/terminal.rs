@@ -12,6 +12,7 @@ use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::{Config, Term, TermMode, viewport_to_point};
 use alacritty_terminal::vte::ansi::Processor;
 use saturn_core::program_status::{PROBE_REPLY, ProgramStatus};
+use saturn_core::pull_request::LinkScanner;
 
 use crate::pty::{Pty, PtyEvent};
 use crate::signals::{Signal, SignalTap};
@@ -31,6 +32,8 @@ pub enum TerminalEvent {
     /// The program put text on the clipboard (OSC 52), as Claude Code does when you select in it.
     /// Reading the clipboard stays refused.
     Copy(String),
+    /// A GitHub pull request was linked: an agent printed the one it opened, or you pasted one.
+    PullRequestLink(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,6 +78,7 @@ pub struct Terminal {
     term: Term<EngineEvents>,
     processor: Processor,
     tap: SignalTap,
+    links: LinkScanner,
     events: EngineEvents,
     pty: Pty,
     size: GridSize,
@@ -91,7 +95,8 @@ impl Terminal {
         let events = EngineEvents::default();
         let config = Config { scrolling_history: SCROLLBACK_LINES, ..Config::default() };
         let term = Term::new(config, &size, events.clone());
-        Ok((Self { term, processor: Processor::new(), tap: SignalTap::default(), events, pty, size }, output))
+        let tap = SignalTap::default();
+        Ok((Self { term, processor: Processor::new(), tap, links: LinkScanner::default(), events, pty, size }, output))
     }
 
     /// Feeds program output to the screen and returns what the app should know about.
@@ -105,6 +110,7 @@ impl Terminal {
                 Signal::PromptStart => out.push(TerminalEvent::PromptStart),
             }
         }
+        out.extend(self.links.feed(bytes).map(TerminalEvent::PullRequestLink));
         self.processor.advance(&mut self.term, bytes);
         for event in self.events.drain() {
             match event {
@@ -231,8 +237,9 @@ mod tests {
         let (mut terminal, output) =
             Terminal::spawn(Path::new("/tmp"), size, &[("TERM", "xterm-256color")]).expect("a shell starts");
         terminal.write(
-            // A title, Claude's status, and text for the clipboard ("copied", base64), as programs send them.
-            b"printf '\\033]0;ABC-236\\007\\033]7501;state=done:app=claude-code\\007\\033]52;c;Y29waWVk\\007'; echo saturn-$((40+2)); exit\r"
+            // A title, Claude's status, text for the clipboard ("copied", base64) and a pull request
+            // link, which isn't typed whole: zsh holds a typed link back, and the output should find it.
+            b"printf '\\033]0;ABC-236\\007\\033]7501;state=done:app=claude-code\\007\\033]52;c;Y29waWVk\\007'; echo saturn-$((40+2)); printf 'htt\\160s://github.com/acme/acme-web/pull/42\\n'; exit\r"
                 .to_vec(),
         );
 
@@ -255,5 +262,9 @@ mod tests {
             "events: {events:?}"
         );
         assert!(events.contains(&TerminalEvent::Copy("copied".into())), "events: {events:?}");
+        assert!(
+            events.contains(&TerminalEvent::PullRequestLink("https://github.com/acme/acme-web/pull/42".into())),
+            "events: {events:?}"
+        );
     }
 }
