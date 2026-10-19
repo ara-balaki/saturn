@@ -104,7 +104,7 @@ fn clickup_section(
                     .items_center()
                     .justify_between()
                     .gap(len(space::SPACE_4))
-                    .child(muted(format!("{account} ⌘⇧T starts an agent on one of your tickets.")))
+                    .child(muted(format!("{account} ⌘⇧N starts an agent on one of your tickets.")))
                     .child(disconnect),
             )
             .child(div().text_size(px(13.)).font_weight(FontWeight::MEDIUM).child(format!("Starting a ticket in {project_name}")))

@@ -1839,37 +1839,39 @@ impl Workspace {
                 theme::color(if on { color::INK } else { color::INK_MUTED }),
             ))
         };
-        chrome::track()
-            .child(
-                toggle("toggle-sidebar", "panel-left", self.panels.sidebar)
-                    .tooltip(chrome::tip_for("Show or hide the sidebar", ToggleSidebar))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.panels.sidebar = !this.panels.sidebar;
-                        cx.notify();
-                    })),
-            )
-            .child(
-                toggle("toggle-editor", "panel-top", self.panels.editor)
-                    .tooltip(chrome::tip_for("Show or hide the editor", ToggleEditor))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.panels.editor = !this.panels.editor;
-                        cx.notify();
-                    })),
-            )
-            // Only with ClickUp connected: without it there's nothing to show.
-            .when(self.clickup.connected(), |track| {
-                track.child(
-                    toggle("toggle-tickets", "panel-right", self.panels.tickets)
-                        .tooltip(chrome::tip_for("Show or hide your tickets", ToggleTickets))
-                        .on_click(cx.listener(|this, _, window, cx| this.toggle_tickets(window, cx))),
+        chrome::on_glass(
+            chrome::track()
+                .child(
+                    toggle("toggle-sidebar", "panel-left", self.panels.sidebar)
+                        .tooltip(chrome::tip_for("Show or hide the sidebar", ToggleSidebar))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.panels.sidebar = !this.panels.sidebar;
+                            cx.notify();
+                        })),
                 )
-            })
-            .child(chrome::track_separator())
-            .child(
-                toggle("open-settings", "settings", false)
-                    .tooltip(chrome::tip_for("Settings", OpenSettings))
-                    .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx))),
-            )
+                .child(
+                    toggle("toggle-editor", "panel-top", self.panels.editor)
+                        .tooltip(chrome::tip_for("Show or hide the editor", ToggleEditor))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.panels.editor = !this.panels.editor;
+                            cx.notify();
+                        })),
+                )
+                // Only with ClickUp connected: without it there's nothing to show.
+                .when(self.clickup.connected(), |track| {
+                    track.child(
+                        toggle("toggle-tickets", "panel-right", self.panels.tickets)
+                            .tooltip(chrome::tip_for("Show or hide your tickets", ToggleTickets))
+                            .on_click(cx.listener(|this, _, window, cx| this.toggle_tickets(window, cx))),
+                    )
+                })
+                .child(chrome::track_separator())
+                .child(
+                    toggle("open-settings", "settings", false)
+                        .tooltip(chrome::tip_for("Settings", OpenSettings))
+                        .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx))),
+                ),
+        )
     }
 
     fn render_titlebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1911,8 +1913,14 @@ impl Workspace {
                         .on_click(cx.listener(|this, _, window, cx| this.next_attention(window, cx))),
                 );
             }
-            track
+            chrome::on_glass(track)
         });
+        let add_repo_primary = !self.clickup.connected() && !self.layout.is_empty();
+        let add_repo = chrome::button("add-repo", "Add repo", Some("⌘O"), add_repo_primary)
+            .h(len(chrome::TRACK_HEIGHT))
+            .rounded(len(radius::RADIUS_MD))
+            .tooltip(chrome::tip("Open another repository in this window"))
+            .on_click(cx.listener(|_, _, window, cx| Self::open_project(window, cx)));
         div()
             .flex()
             .items_center()
@@ -1924,23 +1932,12 @@ impl Workspace {
             .child(self.render_repo_tabs(cx))
             .child(empty("titlebar-middle").flex_1())
             .children(activity)
-            .child(
-                // New terminals come from each pane's ＋ (and ⌘T); the title bar adds repos. One
-                // primary button per screen: New agent when ClickUp is connected, else this, unless
-                // the empty grid shows its own.
-                chrome::button(
-                    "add-repo",
-                    "Add repo",
-                    Some("⌘O"),
-                    !self.clickup.connected() && !self.layout.is_empty(),
-                )
-                .h(len(chrome::TRACK_HEIGHT))
-                .rounded(len(radius::RADIUS_MD))
-                .tooltip(chrome::tip("Open another repository in this window"))
-                .on_click(cx.listener(|_, _, window, cx| Self::open_project(window, cx))),
-            )
+            // New terminals come from each pane's ＋ (and ⌘N); the title bar adds repos. One primary
+            // button per screen: New agent when ClickUp is connected, else this, unless the empty
+            // grid shows its own.
+            .map(|bar| if add_repo_primary { bar.child(add_repo) } else { bar.child(chrome::on_glass(add_repo)) })
             .children(self.clickup.connected().then(|| {
-                chrome::button("new-agent", "New agent", Some("⌘⇧T"), true)
+                chrome::button("new-agent", "New agent", Some("⌘⇧N"), true)
                     .h(len(chrome::TRACK_HEIGHT))
                     .rounded(len(radius::RADIUS_MD))
                     .tooltip(chrome::tip("Start an agent on a ClickUp ticket, in its own worktree"))
@@ -2030,7 +2027,7 @@ impl Workspace {
                     .on_click(cx.listener(move |this, _, window, cx| this.select_project(picked.clone(), window, cx))),
             );
         }
-        track.into_any_element()
+        chrome::on_glass(track).into_any_element()
     }
 
     /// Sidebar | (editor / grid), with draggable dividers. The panels stay in the same place in

@@ -66,7 +66,7 @@ const FONTS: [&[u8]; 6] = [
 fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("cmd-q", Quit, None),
-        KeyBinding::new("cmd-t", NewTab, None),
+        KeyBinding::new("cmd-n", NewTab, None),
         KeyBinding::new("cmd-d", SplitRight, None),
         KeyBinding::new("cmd-shift-d", SplitDown, None),
         KeyBinding::new("cmd-w", CloseTab, None),
@@ -84,7 +84,7 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-o", OpenProject, None),
         KeyBinding::new("cmd-,", OpenSettings, None),
         KeyBinding::new("cmd-s", SaveFile, None),
-        KeyBinding::new("cmd-shift-t", OpenTicketPicker, None),
+        KeyBinding::new("cmd-shift-n", OpenTicketPicker, None),
         KeyBinding::new("cmd-j", ToggleEditor, None),
         KeyBinding::new("cmd-p", GoToFile, None),
         KeyBinding::new("cmd-alt-b", ToggleTickets, None),

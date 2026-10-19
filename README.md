@@ -66,7 +66,7 @@ It isn't an IDE and doesn't try to replace yours. It's the place the agents live
 - **Glass, light and dark.** The title bar and sidebar are macOS's frosted glass over your desktop;
   panes are cards on it. It follows macOS's appearance, or you pick one. Every button says what it
   does, and its shortcut, when you hover it.
-- **Optional: tickets from ClickUp.** Connect a token and ⌘⇧T lists the tickets assigned to you,
+- **Optional: tickets from ClickUp.** Connect a token and ⌘⇧N lists the tickets assigned to you,
   and ⌘⌥B opens them as a panel on the right, by status, marking the ones an agent is on. Pick
   one, and Saturn opens a pane (in its own worktree if you like) and starts your agent on it.
   If you don't connect anything, none of this shows up.
@@ -112,7 +112,7 @@ keychain, and puts it on GitHub with the feed.
 | ------------ | ---------------------------------------------------- |
 | ⌘P           | Go to a file, by name or path                        |
 | ⌘⇧P          | Command palette: every command by name               |
-| ⌘T           | New tab in the focused pane                          |
+| ⌘N           | New tab in the focused pane                          |
 | ⌘D / ⌘⇧D     | Split right / down                                   |
 | ⌘W           | Close tab                                            |
 | ⌘1 … ⌘9      | Focus pane 1 to 9                                    |
@@ -127,7 +127,7 @@ keychain, and puts it on GitHub with the feed.
 | ⌘-click      | Go to definition                                     |
 | ⌘.           | Quick fixes, Find references, Rename                 |
 | ⌘,           | Settings                                             |
-| ⌘⇧T          | New agent from a ticket (with ClickUp)               |
+| ⌘⇧N          | New agent from a ticket (with ClickUp)               |
 | ⌘⌥B          | Show or hide your tickets (ClickUp)                  |
 
 ## How it talks to Claude Code

@@ -113,6 +113,25 @@ pub fn track() -> gpui_kit::Div {
         .bg(theme::overlay(if saturn_design::appearance() == saturn_design::Appearance::Dark { 0.07 } else { 0.05 }))
 }
 
+/// What sits right on the window's glass (the title bar's tracks and buttons): on the panes' own
+/// surface, so it reads over any desktop. The edge is a shadow, not a border, so it adds no size.
+pub fn on_glass(content: impl IntoElement) -> gpui_kit::Div {
+    let dark = saturn_design::appearance() == saturn_design::Appearance::Dark;
+    let ring = shadow(0., 0., 0., 1., theme::overlay(if dark { 0.07 } else { 0.08 }), false);
+    let lift = if dark {
+        shadow(0., 1., 0., 0., gpui_kit::hsla(0., 0., 1., 0.05), true)
+    } else {
+        shadow(0., 1., 3., 0., gpui_kit::hsla(0., 0., 0., 0.1), false)
+    };
+    div()
+        .flex()
+        .flex_none()
+        .rounded(len(radius::RADIUS_MD))
+        .bg(theme::color(color::SURFACE).opacity(if dark { 0.75 } else { 0.78 }))
+        .shadow(vec![ring, lift])
+        .child(content)
+}
+
 /// The selected look of every tab and track item: raised, in light mode a white pill with a
 /// faint edge and a small shadow, in dark mode a lighter fill. Selection is tone, not colour.
 /// Every item keeps its 1px edge (clear unless raised), so selecting one never changes its size
@@ -373,7 +392,7 @@ pub fn empty_grid(
                                         .child("Open a shell in the project folder, then start Claude in it."),
                                 ),
                         )
-                        .child(button("empty-new", "New terminal", Some("⌘T"), true).on_click(new_terminal)),
+                        .child(button("empty-new", "New terminal", Some("⌘N"), true).on_click(new_terminal)),
                 ),
             ),
         )
