@@ -177,7 +177,7 @@ them. They're stored in `~/Library/Application Support/Saturn/settings.json`.
 
 ```sh
 pnpm demo             # Saturn on a made-up project, to look around or show it off
-pnpm dev              # build and run Saturn (cargo run -p saturn)
+pnpm dev              # build, sign and run Saturn from the code
 pnpm health           # format check, clippy, tests, unused deps, licences
 pnpm dist             # build Saturn.app in target/bundle.noindex
 ```
