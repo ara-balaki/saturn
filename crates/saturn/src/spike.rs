@@ -12,6 +12,7 @@
 //!   servers' errors and warnings; `SATURN_PALETTE=files|commands` opens a palette, with
 //!   `SATURN_PALETTE_QUERY` typed in it; `SATURN_TICKET_PICKER=1` opens New agent;
 //!   `SATURN_TICKET_FILTERS=1` opens the Tickets panel's filters.
+//! - `SATURN_DROP=path` drops that file on the middle of the window, as Finder would.
 //! - `SATURN_KEYS="e c h tab"` presses those keys in the focused pane, through the window, and prints
 //!   the tab count after each; `SATURN_REBIND=new-tab=cmd-t` moves a shortcut first, as Settings
 //!   would. `SATURN_SETTINGS_SECTION=keyboard` opens Settings on that section.
@@ -137,9 +138,7 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
         open_palette(which, window, cx);
     }
     rebind_from_env(workspace, cx);
-    if let Ok(keys) = std::env::var("SATURN_KEYS") {
-        press_keys(keys, window, cx);
-    }
+    input_from_env(window, cx);
     if std::env::var_os("SATURN_TICKET_PICKER").is_some() {
         cx.spawn_in(window, async move |_, cx| {
             cx.background_executor().timer(Duration::from_millis(800)).await;
@@ -182,6 +181,35 @@ fn open_lineage(cx: &mut Context<Workspace>) {
     cx.spawn(async move |workspace, cx| {
         cx.background_executor().timer(Duration::from_millis(1500)).await;
         let _ = workspace.update(cx, Workspace::show_lineage);
+    })
+    .detach();
+}
+
+/// Input as a person would give it: a dropped file (`SATURN_DROP`), keys (`SATURN_KEYS`).
+fn input_from_env(window: &mut Window, cx: &mut Context<Workspace>) {
+    if let Ok(path) = std::env::var("SATURN_DROP") {
+        drop_file(path, window, cx);
+    }
+    if let Ok(keys) = std::env::var("SATURN_KEYS") {
+        press_keys(keys, window, cx);
+    }
+}
+
+/// Drops a file on the middle of the window, as Finder would (`SATURN_DROP=path`).
+fn drop_file(path: String, window: &mut Window, cx: &mut Context<Workspace>) {
+    cx.spawn_in(window, async move |_, cx| {
+        cx.background_executor().timer(Duration::from_millis(2000)).await;
+        let _ = cx.update(|window, cx| {
+            let middle = window.bounds().size.center();
+            let paths = gpui_kit::ExternalPaths(vec![std::path::PathBuf::from(path)].into());
+            for event in [
+                gpui_kit::FileDropEvent::Entered { position: middle, paths },
+                gpui_kit::FileDropEvent::Pending { position: middle },
+                gpui_kit::FileDropEvent::Submit { position: middle },
+            ] {
+                window.dispatch_event(gpui_kit::PlatformInput::FileDrop(event), cx);
+            }
+        });
     })
     .detach();
 }

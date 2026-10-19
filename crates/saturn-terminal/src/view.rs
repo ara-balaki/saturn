@@ -396,6 +396,13 @@ impl Render for TerminalView {
             .track_focus(&self.focus)
             .key_context("Terminal")
             .on_key_down(cx.listener(Self::key_down))
+            // Files dropped from Finder or a screenshot tool: their paths, typed in.
+            .on_drop(cx.listener(|this, dropped: &gpui_kit::ExternalPaths, window, cx| {
+                window.focus(&this.focus, cx);
+                this.paste(&keys::dropped_paths(dropped.paths()));
+                cx.emit(TerminalViewEvent::Used);
+                cx.notify();
+            }))
             .on_action(cx.listener(|this, _: &SendTab, _, cx| this.send_key("tab", false, cx)))
             .on_action(cx.listener(|this, _: &SendBackTab, _, cx| this.send_key("tab", true, cx)))
             .on_scroll_wheel(cx.listener(Self::scroll_wheel))

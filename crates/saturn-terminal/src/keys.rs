@@ -114,6 +114,23 @@ pub fn encode(key: &KeyPress, app_cursor: bool) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
+/// Files dropped on a terminal, as Terminal.app types them: each path with the shell's special
+/// characters escaped, a space between, and one after, ready to keep typing. Claude Code reads a
+/// dropped image's path as an attachment.
+pub fn dropped_paths(paths: &[std::path::PathBuf]) -> String {
+    let mut text = String::new();
+    for path in paths {
+        for c in path.to_string_lossy().chars() {
+            if !(c.is_alphanumeric() || "/._-+,:@%=~".contains(c)) {
+                text.push('\\');
+            }
+            text.push(c);
+        }
+        text.push(' ');
+    }
+    text
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,6 +141,18 @@ mod tests {
 
     fn bytes(key: &KeyPress) -> Vec<u8> {
         encode(key, false).expect("the terminal gets this key")
+    }
+
+    #[test]
+    fn dropped_paths_are_escaped_for_the_shell() {
+        let paths = [
+            std::path::PathBuf::from("/Users/mia/Desktop/CleanShot 2026-10-19 at 13.27.05@2x.png"),
+            std::path::PathBuf::from("/tmp/it's (final).txt"),
+        ];
+        assert_eq!(
+            dropped_paths(&paths),
+            "/Users/mia/Desktop/CleanShot\\ 2026-10-19\\ at\\ 13.27.05@2x.png /tmp/it\\'s\\ \\(final\\).txt "
+        );
     }
 
     #[test]
