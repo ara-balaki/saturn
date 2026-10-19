@@ -71,7 +71,7 @@ pub fn panel() -> gpui_kit::Div {
         .pt(len(space::SPACE_1))
         .rounded(len(radius::RADIUS_MD))
         // Mostly opaque: the glass shows through, never enough to fight the text.
-        .bg(theme::color(color::SURFACE).opacity(if dark { 0.75 } else { 0.78 }))
+        .bg(theme::color(color::SURFACE).opacity(if dark { 0.8 } else { 0.83 }))
         .border_1()
         .border_color(theme::overlay(if dark { 0.07 } else { 0.08 }))
         .shadow(edge)
@@ -127,7 +127,7 @@ pub fn on_glass(content: impl IntoElement) -> gpui_kit::Div {
         .flex()
         .flex_none()
         .rounded(len(radius::RADIUS_MD))
-        .bg(theme::color(color::SURFACE).opacity(if dark { 0.75 } else { 0.78 }))
+        .bg(theme::color(color::SURFACE).opacity(if dark { 0.8 } else { 0.83 }))
         .shadow(vec![ring, lift])
         .child(content)
 }

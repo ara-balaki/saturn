@@ -3833,7 +3833,7 @@ extern "C" fn blurred_view_update_layer(this: &Object, _: Sel) {
 }
 
 /// How much of the material's own fill stays: 1.0 is AppKit's sidebar, 0.0 a bare blur.
-const MATERIAL_FILL: f32 = 0.6;
+const MATERIAL_FILL: f32 = 0.65;
 
 /// Saturn's patch: turns the material's fill layers (those with a background colour, other than
 /// the backdrop that blurs) down to `MATERIAL_FILL`, and hides the layer that tints the glass
