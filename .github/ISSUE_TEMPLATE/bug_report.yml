@@ -1,0 +1,37 @@
+name: Something's wrong
+description: Saturn crashed, or did something it shouldn't.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what Saturn did, and what you expected. A screenshot helps.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen again
+      placeholder: |
+        1. Open a repo with …
+        2. Split the pane and …
+  - type: input
+    id: version
+    attributes:
+      label: Saturn version
+      description: Saturn → About Saturn.
+      placeholder: '0.1.12'
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and Mac
+      placeholder: macOS 15.4, Apple Silicon
+  - type: textarea
+    id: crash
+    attributes:
+      label: Crash report
+      description: If Saturn quit, paste the report macOS showed (or the one in Console → Crash Reports).
+      render: text
