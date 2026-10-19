@@ -1185,8 +1185,26 @@ impl Workspace {
             (AgentState::YourTurn, None, "Done: the filter is on every list page", Some((161, PrState::Draft))),
             (AgentState::Working, Some(72), "Writing the migration", None),
         ];
+        // `SATURN_FAKE_STATES=working,needs-you,…` sets the panes' states in order, so the frames of
+        // a demo clip can show agents moving from one to the next.
+        let states: Vec<Option<AgentState>> = std::env::var("SATURN_FAKE_STATES")
+            .map(|states| {
+                states
+                    .split(',')
+                    .map(|state| match state.trim() {
+                        "working" => Some(AgentState::Working),
+                        "needs-you" => Some(AgentState::NeedsYou),
+                        "your-turn" => Some(AgentState::YourTurn),
+                        "error" => Some(AgentState::Error),
+                        "idle" => Some(AgentState::Idle),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let tabs: Vec<TabId> = self.layout.tabs().collect();
-        for (tab, (state, progress, message, pull_request)) in tabs.into_iter().zip(samples) {
+        for (index, (tab, (state, progress, message, pull_request))) in tabs.into_iter().zip(samples).enumerate() {
+            let state = states.get(index).copied().flatten().unwrap_or(state);
             if let Some((number, state)) = pull_request {
                 let url = format!("https://github.com/acme/acme-shop/pull/{number}");
                 let title = "Round VAT half up".to_owned();
