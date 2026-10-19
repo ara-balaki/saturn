@@ -131,6 +131,8 @@ keychain, and puts it on GitHub with the feed.
 | ⌘⇧N          | New agent from a ticket (with ClickUp)               |
 | ⌘⌥B          | Show or hide your tickets (ClickUp)                  |
 
+Every shortcut but copy, paste and quit can be changed in Settings → Keyboard shortcuts.
+
 ## How it talks to Claude Code
 
 Saturn doesn't change your Claude Code setup. Every shell it opens gets `SATURN_SOCKET`,
@@ -141,18 +143,21 @@ is doing (working, waiting for a permission, done, failed) and do nothing outsid
 
 ## Settings
 
-Open them with ⌘, or the gear in the title bar. They're stored in
-`~/Library/Application Support/Saturn/settings.json`.
+Open them with ⌘, or the gear in the title bar: sections on the left, with a search across all of
+them. They're stored in `~/Library/Application Support/Saturn/settings.json`.
 
-- **Appearance**: System, Light or Dark.
-- **Name tabs after Claude's session**: tabs show the session's name, or the folder when it's off.
-  A name you type yourself always wins.
-- **Name sessions after tickets**: a slash command whose first word is a ticket, like
-  `/start abc-224`, renames the session to `ABC-224`, the same as typing `/rename ABC-224`. Tickets
-  mentioned in normal prompts never rename anything.
-- **Format on save**, with the formatter your project already uses.
-- **Notifications** when an agent needs you while Saturn is in the background.
-- **Menu bar icon** with how many agents wait for you; clicking it takes you to the next one.
+- **General**: notifications when an agent needs you while Saturn is in the background; the menu bar
+  icon with how many agents wait for you; checking for updates now.
+- **Appearance**: System, Light or Dark; the text size of terminals and files; the plan usage card.
+- **Editor**: format on save (with the formatter your project already uses), wrapping long lines,
+  line numbers, indent guides, visible whitespace, tab width.
+- **Terminal**: Option as Meta (Option+B jumps a word back in the shell) instead of typing the
+  characters your keyboard layout puts on it; copy on select.
+- **Claude**: tabs named after Claude's session (a name you type yourself always wins); sessions
+  named after tickets, so `/start abc-224` renames the session to `ABC-224`, as `/rename ABC-224`
+  would. Tickets mentioned in normal prompts never rename anything.
+- **Keyboard shortcuts**: click one and press the keys you want; a shortcut that had them gives them
+  up.
 - **ClickUp** (optional): your API token, kept in the macOS Keychain, plus, for each project, the
   command a ticket starts (`claude -n {ticket}` by default) and whether it gets its own worktree.
 

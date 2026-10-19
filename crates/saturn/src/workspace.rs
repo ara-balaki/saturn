@@ -306,6 +306,16 @@ enum SidebarTab {
     Changes,
 }
 
+/// The settings every window shares: the editor's (read by each editor as it draws) and the
+/// terminals'.
+pub fn apply_app_settings(settings: &Settings, cx: &mut gpui_kit::App) {
+    use std::sync::atomic::Ordering;
+    cx.set_global(settings.editor.clone());
+    saturn_terminal::view::OPTION_AS_META.store(settings.terminal.option_as_meta, Ordering::Relaxed);
+    saturn_terminal::view::COPY_ON_SELECT.store(settings.terminal.copy_on_select, Ordering::Relaxed);
+    cx.refresh_windows();
+}
+
 /// The Saturn plugin that Claude sessions in Saturn's panes load: inside Saturn.app
 /// (`Contents/Resources/plugin`), else `plugin/` in this repository when run from source.
 fn plugin_dir() -> Option<PathBuf> {
@@ -965,6 +975,11 @@ impl Workspace {
         cx.notify();
     }
 
+    /// How many terminal tabs the window has (spikes).
+    pub fn tab_count(&self) -> usize {
+        self.layout.tabs().count()
+    }
+
     /// Makes the editor panel take the grid's room (spikes).
     pub fn maximize_editor(&mut self, cx: &mut Context<Self>) {
         self.editor.update(cx, EditorView::maximize);
@@ -1103,6 +1118,7 @@ impl Workspace {
         if self.settings.menu_bar != menu_bar {
             menu_bar::set_shown(self.settings.menu_bar);
         }
+        apply_app_settings(&self.settings, cx);
         cx.notify();
     }
 
@@ -1985,7 +2001,8 @@ impl Workspace {
         let (files, changes) = (root.files.clone(), root.changes.clone());
         let header = self.render_sidebar_header(cx);
         // The Claude plan's limits; what each agent is doing shows in its own pane.
-        let footer = crate::usage::render(cx).map(IntoElement::into_any_element);
+        let footer =
+            self.settings.show_usage.then(|| crate::usage::render(cx).map(IntoElement::into_any_element)).flatten();
         let sidebar = match self.sidebar_tab {
             SidebarTab::Files => chrome::sidebar(header, switch, files, footer),
             SidebarTab::Changes => chrome::sidebar(header, switch, changes, footer),

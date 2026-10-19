@@ -29,6 +29,48 @@ pub struct Settings {
     pub text_size: u16,
     /// What starting an agent on a ticket does, per project folder.
     pub projects: std::collections::HashMap<PathBuf, ProjectSettings>,
+    /// Shortcuts the user changed, by id (`keymap::SHORTCUTS`): their keys, or empty for none.
+    pub keymap: std::collections::BTreeMap<String, String>,
+    pub editor: EditorSettings,
+    pub terminal: TerminalSettings,
+    /// The Claude plan's limits at the foot of the sidebar.
+    pub show_usage: bool,
+}
+
+/// How files look in the editor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+#[expect(clippy::struct_excessive_bools, reason = "independent on/off switches, each its own JSON field")]
+pub struct EditorSettings {
+    /// Long lines wrap at the panel's edge instead of scrolling sideways.
+    pub soft_wrap: bool,
+    pub line_numbers: bool,
+    /// Faint lines down each level of indentation.
+    pub indent_guides: bool,
+    /// Spaces and tabs drawn as faint dots and arrows.
+    pub show_whitespace: bool,
+    /// Columns per indent, where the file doesn't say.
+    pub tab_size: u8,
+}
+
+/// The editor settings in force, for every editor in every window.
+impl gpui_kit::Global for EditorSettings {}
+
+impl Default for EditorSettings {
+    fn default() -> Self {
+        Self { soft_wrap: false, line_numbers: true, indent_guides: true, show_whitespace: false, tab_size: 2 }
+    }
+}
+
+/// How the terminals behave.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TerminalSettings {
+    /// Option sends Escape before the key (Meta, as shells and editors expect) instead of typing
+    /// the character the keyboard layout puts on it.
+    pub option_as_meta: bool,
+    /// Selecting text copies it, as soon as the mouse is let go.
+    pub copy_on_select: bool,
 }
 
 /// How a project starts an agent on a ClickUp ticket. Kept in Saturn's settings, never in the
@@ -105,6 +147,10 @@ impl Default for Settings {
             appearance: AppearanceSetting::System,
             text_size: TEXT_SIZE,
             projects: std::collections::HashMap::new(),
+            keymap: std::collections::BTreeMap::new(),
+            editor: EditorSettings::default(),
+            terminal: TerminalSettings::default(),
+            show_usage: true,
         }
     }
 }

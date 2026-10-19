@@ -12,6 +12,7 @@ mod files_view;
 mod github;
 mod history_view;
 mod impact_view;
+mod keymap;
 mod languages;
 mod lsp;
 mod menu_bar;
@@ -41,10 +42,9 @@ use gpui_kit::{
 
 use crate::app_view::AppView;
 use crate::workspace::{
-    CloseTab, CommandPalette, Copy, FocusDown, FocusLeft, FocusPane1, FocusPane2, FocusPane3, FocusPane4, FocusPane5,
-    FocusPane6, FocusPane7, FocusPane8, FocusPane9, FocusRight, FocusUp, GoToFile, NewTab, NextAttention, NextTab,
-    OpenProject, OpenSettings, OpenTicketPicker, Paste, PreviousTab, SaveFile, SplitDown, SplitRight, TextBigger,
-    TextReset, TextSmaller, ToggleEditor, ToggleMaximize, ToggleSidebar, ToggleTickets,
+    CloseTab, CommandPalette, Copy, GoToFile, NewTab, NextAttention, NextTab, OpenProject, OpenSettings,
+    OpenTicketPicker, Paste, PreviousTab, SaveFile, SplitDown, SplitRight, TextBigger, TextReset, TextSmaller,
+    ToggleEditor, ToggleMaximize, ToggleSidebar, ToggleTickets,
 };
 
 actions!(saturn, [Quit, CheckForUpdates]);
@@ -66,49 +66,17 @@ const FONTS: [&[u8]; 6] = [
 
 fn bind_keys(cx: &mut App) {
     saturn_terminal::view::bind_keys(cx);
+    // Copy, paste and quit are macOS's own and stay where they are; the rest the user can change.
     cx.bind_keys([
         KeyBinding::new("cmd-q", Quit, None),
-        KeyBinding::new("cmd-n", NewTab, None),
-        KeyBinding::new("cmd-d", SplitRight, None),
-        KeyBinding::new("cmd-shift-d", SplitDown, None),
-        KeyBinding::new("cmd-w", CloseTab, None),
-        KeyBinding::new("cmd-shift-]", NextTab, None),
-        KeyBinding::new("cmd-shift-[", PreviousTab, None),
-        KeyBinding::new("cmd-alt-left", FocusLeft, None),
-        KeyBinding::new("cmd-alt-right", FocusRight, None),
-        KeyBinding::new("cmd-alt-up", FocusUp, None),
-        KeyBinding::new("cmd-alt-down", FocusDown, None),
-        KeyBinding::new("cmd-shift-enter", ToggleMaximize, None),
-        KeyBinding::new("cmd-shift-a", NextAttention, None),
         KeyBinding::new("cmd-v", Paste, None),
         KeyBinding::new("cmd-c", Copy, None),
-        KeyBinding::new("cmd-b", ToggleSidebar, None),
-        KeyBinding::new("cmd-o", OpenProject, None),
-        KeyBinding::new("cmd-,", OpenSettings, None),
-        KeyBinding::new("cmd-s", SaveFile, None),
-        KeyBinding::new("cmd-shift-n", OpenTicketPicker, None),
-        KeyBinding::new("cmd-j", ToggleEditor, None),
-        KeyBinding::new("cmd-p", GoToFile, None),
-        KeyBinding::new("cmd-alt-b", ToggleTickets, None),
-        // ⌘+ is ⌘= without shift on most keyboards; both make text bigger.
-        KeyBinding::new("cmd-=", TextBigger, None),
-        KeyBinding::new("cmd-+", TextBigger, None),
-        KeyBinding::new("cmd--", TextSmaller, None),
-        KeyBinding::new("cmd-0", TextReset, None),
-        KeyBinding::new("cmd-shift-p", CommandPalette, None),
-        KeyBinding::new("cmd-1", FocusPane1, None),
-        KeyBinding::new("cmd-2", FocusPane2, None),
-        KeyBinding::new("cmd-3", FocusPane3, None),
-        KeyBinding::new("cmd-4", FocusPane4, None),
-        KeyBinding::new("cmd-5", FocusPane5, None),
-        KeyBinding::new("cmd-6", FocusPane6, None),
-        KeyBinding::new("cmd-7", FocusPane7, None),
-        KeyBinding::new("cmd-8", FocusPane8, None),
-        KeyBinding::new("cmd-9", FocusPane9, None),
     ]);
+    keymap::bind(&settings::load().keymap, cx);
 }
 
-fn set_menus(cx: &mut App) {
+/// The menu bar's menus; set again when a shortcut changes, so they show its new keys.
+pub fn set_menus(cx: &mut App) {
     cx.set_menus(vec![
         Menu::new("Saturn").items([
             MenuItem::action("Check for Updates…", CheckForUpdates),
@@ -172,6 +140,7 @@ fn main() {
         theme::apply(settings::load().appearance, cx);
         theme::set_text_size(settings::load().text_size, cx);
         usage::start(cx);
+        workspace::apply_app_settings(&settings::load(), cx);
         if settings::load().notifications && !spike::is_automated() {
             notify::request_permission();
         }

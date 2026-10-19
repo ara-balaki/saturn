@@ -4,6 +4,7 @@
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use alacritty_terminal::index::Side;
@@ -21,6 +22,11 @@ use crate::pty::PtyEvent;
 use crate::terminal::{GridSize, Terminal, TerminalEvent};
 
 gpui_kit::actions!(terminal, [SendTab, SendBackTab]);
+
+/// Option acts as Meta in every terminal (Settings → Terminal).
+pub static OPTION_AS_META: AtomicBool = AtomicBool::new(false);
+/// Selecting text copies it when the mouse is let go (Settings → Terminal).
+pub static COPY_ON_SELECT: AtomicBool = AtomicBool::new(false);
 
 /// Tab and shift-tab belong to the shell (completion, Claude Code's suggestions). The window binds
 /// them to moving focus between controls, and bindings run before a view sees its keys, so the
@@ -285,7 +291,10 @@ impl TerminalView {
         }
     }
 
-    fn mouse_up(&mut self, event: &MouseUpEvent, _window: &mut Window, _cx: &mut Context<Self>) {
+    fn mouse_up(&mut self, event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.drag == Drag::Selecting && COPY_ON_SELECT.load(Ordering::Relaxed) {
+            self.copy_selection(cx);
+        }
         if self.drag == Drag::Reporting
             && let Some((row, col, _)) = self.cell_at(event.position)
         {
@@ -307,6 +316,7 @@ impl TerminalView {
             alt: keystroke.modifiers.alt,
             shift: keystroke.modifiers.shift,
             command: keystroke.modifiers.platform,
+            meta: OPTION_AS_META.load(Ordering::Relaxed),
         };
         if let Some(bytes) = keys::encode(&press, self.terminal.mode().contains(TermMode::APP_CURSOR)) {
             self.terminal.clear_selection();
@@ -317,7 +327,7 @@ impl TerminalView {
 
     /// Sends a key a binding took on its way here, as `key_down` would have.
     fn send_key(&mut self, key: &str, shift: bool, cx: &mut Context<Self>) {
-        let press = KeyPress { key, text: None, control: false, alt: false, shift, command: false };
+        let press = KeyPress { key, shift, ..KeyPress::default() };
         if let Some(bytes) = keys::encode(&press, self.terminal.mode().contains(TermMode::APP_CURSOR)) {
             self.terminal.clear_selection();
             self.write(bytes);

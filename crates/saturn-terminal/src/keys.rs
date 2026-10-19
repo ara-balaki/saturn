@@ -1,7 +1,8 @@
 //! Turns a key press into the bytes a terminal program expects (xterm conventions).
 //!
 //! Option types characters, as everywhere else on a Mac, rather than acting as Meta: on many
-//! keyboard layouts (Czech among them) `@`, `{`, `}`, `[` and `]` need it. The Mac terminal habits
+//! keyboard layouts (Czech among them) `@`, `{`, `}`, `[` and `]` need it. Settings can make it Meta
+//! instead (`KeyPress::meta`), for shells and editors that bind Alt. The Mac terminal habits
 //! still work: Option+←/→ jumps a word, Option+Backspace deletes one, ⌘←/→ go to line start/end.
 
 /// A key press, independent of the UI framework.
@@ -16,6 +17,8 @@ pub struct KeyPress<'a> {
     pub alt: bool,
     pub shift: bool,
     pub command: bool,
+    /// Option is Meta: Option+key sends Escape and the key, not the character the layout puts on it.
+    pub meta: bool,
 }
 
 /// xterm's modifier parameter: 1 + shift + 2·alt + 4·control.
@@ -102,6 +105,10 @@ pub fn encode(key: &KeyPress, app_cursor: bool) -> Option<Vec<u8>> {
             };
             vec![byte]
         }
+        name if key.alt && key.meta && name.chars().count() == 1 => {
+            let name = if key.shift { name.to_uppercase() } else { name.to_owned() };
+            format!("\x1b{name}").into_bytes()
+        }
         _ => return key.text.filter(|text| !text.is_empty()).map(|text| text.as_bytes().to_vec()),
     };
     Some(bytes)
@@ -129,6 +136,13 @@ mod tests {
     fn option_types_the_characters_a_layout_puts_on_it() {
         let at = KeyPress { key: "v", text: Some("@"), alt: true, ..KeyPress::default() };
         assert_eq!(bytes(&at), b"@");
+    }
+
+    #[test]
+    fn option_as_meta_sends_escape_and_the_key() {
+        let meta = KeyPress { key: "b", text: Some("∫"), alt: true, meta: true, ..KeyPress::default() };
+        assert_eq!(bytes(&meta), b"\x1bb");
+        assert_eq!(bytes(&KeyPress { shift: true, ..meta }), b"\x1bB");
     }
 
     #[test]

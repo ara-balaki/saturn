@@ -11,7 +11,9 @@
 //!   that place (0-based) and prints its answers; `SATURN_PROBLEMS=1` lists the
 //!   servers' errors and warnings; `SATURN_PALETTE=files|commands` opens a palette, with
 //!   `SATURN_PALETTE_QUERY` typed in it; `SATURN_TICKET_PICKER=1` opens New agent.
-//! - `SATURN_KEYS="e c h tab"` presses those keys in the focused pane, through the window.
+//! - `SATURN_KEYS="e c h tab"` presses those keys in the focused pane, through the window, and prints
+//!   the tab count after each; `SATURN_REBIND=new-tab=cmd-t` moves a shortcut first, as Settings
+//!   would. `SATURN_SETTINGS_SECTION=keyboard` opens Settings on that section.
 //! - `SATURN_SCREENSHOT=path.png` saves what the window draws after `SATURN_SCREENSHOT_AFTER`
 //!   seconds (needs the `capture` feature); `SATURN_QUIT_AFTER` quits after that many seconds.
 
@@ -130,6 +132,7 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
     if let Ok(which) = std::env::var("SATURN_PALETTE") {
         open_palette(which, window, cx);
     }
+    rebind_from_env(workspace, cx);
     if let Ok(keys) = std::env::var("SATURN_KEYS") {
         press_keys(keys, window, cx);
     }
@@ -156,10 +159,24 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
     }
 }
 
+/// `SATURN_REBIND=new-tab=cmd-t` moves a shortcut as Settings would, before any keys are pressed.
+fn rebind_from_env(workspace: &Workspace, cx: &mut Context<Workspace>) {
+    if let Some((id, keys)) = std::env::var("SATURN_REBIND")
+        .ok()
+        .and_then(|value| value.split_once('=').map(|(id, keys)| (id.to_owned(), keys.to_owned())))
+        && let Some(shortcut) = crate::keymap::SHORTCUTS.iter().find(|shortcut| shortcut.id == id)
+    {
+        let before = crate::keymap::keys_of(shortcut, &workspace.settings().keymap);
+        let mut after = workspace.settings().keymap.clone();
+        after.insert(id, keys);
+        crate::keymap::rebind(shortcut, &before, &after, cx);
+    }
+}
+
 /// Presses keys in the focused pane as a person would, through the window (`SATURN_KEYS`,
 /// keystrokes separated by spaces: `e c h tab`), to see what reaches the shell.
 fn press_keys(keys: String, window: &mut Window, cx: &mut Context<Workspace>) {
-    cx.spawn_in(window, async move |_, cx| {
+    cx.spawn_in(window, async move |workspace, cx| {
         cx.background_executor().timer(Duration::from_millis(2000)).await;
         for key in keys.split_whitespace() {
             let _ = cx.update(|window, cx| {
@@ -169,6 +186,7 @@ fn press_keys(keys: String, window: &mut Window, cx: &mut Context<Workspace>) {
                 }
             });
             cx.background_executor().timer(Duration::from_millis(100)).await;
+            let _ = workspace.update(cx, |workspace, _| eprintln!("tabs: {}", workspace.tab_count()));
         }
     })
     .detach();

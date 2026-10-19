@@ -118,6 +118,8 @@ enum Front {
 #[derive(Default)]
 pub struct EditorView {
     files: Vec<OpenFile>,
+    /// The editor settings the open files were last given; the files follow a change on the next frame.
+    applied: Option<crate::settings::EditorSettings>,
     active: usize,
     review: Option<Review>,
     front: Front,
@@ -173,6 +175,8 @@ impl EditorView {
         let language = language_for(path);
         let state = cx.new(|cx| {
             let mut state = EditorState::new(window, cx).language(language).searchable(true);
+            let settings = cx.try_global::<crate::settings::EditorSettings>().cloned().unwrap_or_default();
+            apply_settings(&mut state, &settings, window, cx);
             state.set_value(text.clone(), window, cx);
             state
         });
@@ -1259,8 +1263,32 @@ impl EditorView {
     }
 }
 
+/// Gives a file's editor the user's editor settings.
+fn apply_settings(
+    state: &mut EditorState,
+    settings: &crate::settings::EditorSettings,
+    window: &mut Window,
+    cx: &mut Context<EditorState>,
+) {
+    state.set_soft_wrap(settings.soft_wrap, window, cx);
+    state.set_line_number(settings.line_numbers, window, cx);
+    state.set_indent_guides(settings.indent_guides, window, cx);
+    state.set_show_whitespaces(settings.show_whitespace, window, cx);
+    state.set_tab_size(
+        gpui_kit::component::input::TabSize { tab_size: usize::from(settings.tab_size), hard_tabs: false },
+        cx,
+    );
+}
+
 impl Render for EditorView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let wanted = cx.try_global::<crate::settings::EditorSettings>().cloned().unwrap_or_default();
+        if self.applied.as_ref() != Some(&wanted) {
+            for file in &self.files {
+                file.state.update(cx, |state, cx| apply_settings(state, &wanted, window, cx));
+            }
+            self.applied = Some(wanted);
+        }
         let body: Option<AnyElement> = if self.front == Front::Review {
             self.review.as_ref().map(|review| Diff::new(&review.state).size_full().into_any_element())
         } else if self.front == Front::History {
