@@ -130,7 +130,16 @@ fn main() {
     });
     let project = settings::startup_project();
 
-    gpui_kit::application().with_assets(assets::Assets).run(move |cx| {
+    let app = gpui_kit::application().with_assets(assets::Assets);
+    // Clicking the Dock icon with no window open (the last one was closed) opens one, as a fresh
+    // start does: the welcome screen, where a recent repo comes back with its grid.
+    app.on_reopen(|cx| {
+        if cx.windows().is_empty() {
+            open_main_window(settings::startup_project(), cx);
+            cx.activate(true);
+        }
+    });
+    app.run(move |cx| {
         gpui_kit::init(cx);
         languages::register();
         theme::apply(settings::load().appearance, cx);
@@ -144,26 +153,31 @@ fn main() {
         cx.on_action(|_: &Quit, cx| cx.quit());
         set_menus(cx);
 
-        let options = WindowOptions {
-            titlebar: Some(TitlebarOptions {
-                title: Some("Saturn".into()),
-                appears_transparent: true,
-                // Centred in the 48px title bar.
-                traffic_light_position: Some(point(px(18.), px(17.))),
-            }),
-            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(1600.), px(1000.)), cx))),
-            // The glass is the window itself: macOS blurs the desktop behind the translucent ground.
-            window_background: WindowBackgroundAppearance::Blurred,
-            ..WindowOptions::default()
-        };
-        gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| AppView::new(project, window, cx)))
-            .expect("the window opens");
+        open_main_window(project, cx);
         // Automated runs (screenshots, spikes) must not take the keyboard from whatever the user is doing.
         if !spike::is_automated() {
             cx.activate(true);
             show_menu_bar(cx);
         }
     });
+}
+
+/// Saturn's window: on `project`, or the welcome screen with the recent repos.
+fn open_main_window(project: Option<std::path::PathBuf>, cx: &mut App) {
+    let options = WindowOptions {
+        titlebar: Some(TitlebarOptions {
+            title: Some("Saturn".into()),
+            appears_transparent: true,
+            // Centred in the 48px title bar.
+            traffic_light_position: Some(point(px(18.), px(17.))),
+        }),
+        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(1600.), px(1000.)), cx))),
+        // The glass is the window itself: macOS blurs the desktop behind the translucent ground.
+        window_background: WindowBackgroundAppearance::Blurred,
+        ..WindowOptions::default()
+    };
+    gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| AppView::new(project, window, cx)))
+        .expect("the window opens");
 }
 
 /// Saturn's menu bar item. A click brings Saturn forward on the next agent that needs you.
@@ -175,7 +189,9 @@ fn show_menu_bar(cx: &mut App) {
         while clicked.recv().await.is_ok() {
             cx.update(|cx| {
                 cx.activate(true);
-                if let Some(window) = cx.windows().into_iter().next() {
+                if cx.windows().is_empty() {
+                    open_main_window(settings::startup_project(), cx);
+                } else if let Some(window) = cx.windows().into_iter().next() {
                     let _ = window.update(cx, |_, window, cx| {
                         window.activate_window();
                         window.dispatch_action(Box::new(NextAttention), cx);
