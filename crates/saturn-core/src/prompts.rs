@@ -64,6 +64,45 @@ fn typed_prompt(entry: &Value) -> Option<String> {
     (!text.is_empty() && !text.starts_with('<')).then(|| text.to_owned())
 }
 
+/// Every prompt you typed in a transcript, in order.
+pub fn typed_prompts(lines: impl Iterator<Item = String>) -> Vec<Asked> {
+    lines
+        .filter(|line| line.contains("\"user\""))
+        .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
+        .filter(|entry| entry.get("type").and_then(Value::as_str) == Some("user"))
+        .filter_map(|entry| {
+            let prompt = typed_prompt(&entry)?;
+            let at = entry.get("timestamp").and_then(Value::as_str).unwrap_or_default().to_owned();
+            Some(Asked { prompt, at })
+        })
+        .collect()
+}
+
+/// Whether a prompt corrects the agent: it says no, never, always, instead, stop… These are the
+/// lessons worth keeping for the next session.
+pub fn is_correction(prompt: &str) -> bool {
+    let text = format!(" {} ", prompt.to_lowercase().replace(['.', ',', '!', '?', ':', ';'], " "));
+    let starts = ["no ", "nope ", "stop ", "wait ", "wrong "];
+    let says = [
+        " don't ",
+        " dont ",
+        " do not ",
+        " never ",
+        " always ",
+        " instead ",
+        " not like ",
+        " shouldn't ",
+        " should not ",
+        " why did you ",
+        " wrong ",
+        " stop ",
+        " please don't ",
+        " i said ",
+        " i told you ",
+    ];
+    starts.iter().any(|start| text.trim_start().starts_with(start)) || says.iter().any(|phrase| text.contains(phrase))
+}
+
 /// The files an assistant entry writes with Claude's file tools.
 fn written_files(entry: &Value) -> Vec<String> {
     let Some(Value::Array(parts)) = entry.get("message").and_then(|message| message.get("content")) else {
@@ -171,6 +210,20 @@ not json at all"#;
             "a subagent's edit counts for the prompt it served"
         );
         assert_eq!(found.len(), 2, "files outside the checkout and only read ones don't count");
+    }
+
+    #[test]
+    fn lists_typed_prompts_and_spots_corrections() {
+        let transcript = r#"{"type":"user","timestamp":"t1","message":{"content":"Add a cart page"}}
+{"type":"user","message":{"content":[{"type":"tool_result","content":"ok"}]}}
+{"type":"user","timestamp":"t2","message":{"content":"No, don't use reduce here, keep the loop."}}"#;
+        let prompts: Vec<String> = typed_prompts(lines(transcript)).into_iter().map(|asked| asked.prompt).collect();
+        assert_eq!(prompts, ["Add a cart page", "No, don't use reduce here, keep the loop."]);
+        assert!(is_correction(&prompts[1]));
+        assert!(is_correction("Always run the tests before you push"));
+        assert!(is_correction("use the tokens instead of hex"));
+        assert!(!is_correction(&prompts[0]));
+        assert!(!is_correction("Nothing else for now, thanks"));
     }
 
     #[test]

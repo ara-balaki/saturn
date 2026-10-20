@@ -173,6 +173,10 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   yours), rules and the files they're for, skills, commands, subagents, hooks and MCP servers. Long
   instruction files get a word, and anything said in more than one file comes first, so the copies
   can't drift apart. Each opens in the editor.
+- **Teach the repo** (⌘⇧P): the pane's recent prompts, corrections ("no, don't…", "always…") first;
+  pick one, say it as a lesson, and add it under `## Lessons` in `AGENTS.md`, `CLAUDE.md` or your
+  own `CLAUDE.local.md`, where it shows in Changes to review, or ask the agent to word it. A mistake
+  corrected once stays corrected for every session after.
 - **Overlaps**: when two panes' worktrees of one repo change the same files, both panes say so
   (hover for which files and where), while it's still easy to merge one first or split the work.
 - **What was asked**: each file in the review says what you asked Claude Code that changed it (the

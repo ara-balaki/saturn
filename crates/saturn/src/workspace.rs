@@ -102,6 +102,7 @@ actions!(
         ShowPictures,
         ShowPreview,
         ShowContext,
+        TeachRepo,
     ]
 );
 
@@ -158,6 +159,7 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("Pictures of the app", "camera", Box::new(ShowPictures)),
         ("Preview the app", "globe", Box::new(ShowPreview)),
         ("What the agent is told", "book-open", Box::new(ShowContext)),
+        ("Teach the repo: keep a correction for every session", "sprout", Box::new(TeachRepo)),
         ("Database diagram", "database", Box::new(ShowSchema)),
         ("dbt lineage", "workflow", Box::new(ShowLineage)),
         ("Problems", "circle-x", Box::new(ShowProblems)),
@@ -3675,6 +3677,11 @@ impl Workspace {
             .on_action(cx.listener(|this, _: &EditPrBody, window, cx| this.edit_pr_body(window, cx)))
             .on_action(cx.listener(|this, _: &ShowPictures, window, cx| this.show_pictures(window, cx)))
             .on_action(cx.listener(|this, _: &ShowPreview, window, cx| this.show_preview(window, cx)))
+            .on_action(cx.listener(|this, _: &TeachRepo, window, cx| {
+                let checkout = this.focused_checkout(cx);
+                let transcript = this.layout.focused_tab().and_then(|tab| this.transcripts.get(&tab).cloned());
+                crate::teach_view::open(cx.weak_entity(), checkout, transcript, window, cx);
+            }))
             .on_action(cx.listener(|this, _: &ShowContext, window, cx| {
                 let checkout = this.focused_checkout(cx);
                 let folder = this

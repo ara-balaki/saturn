@@ -217,6 +217,40 @@ fn mcp_servers(file: &Path) -> Vec<Source> {
         .collect()
 }
 
+/// The heading lessons go under in an instruction file.
+pub const LESSONS: &str = "## Lessons";
+
+/// Adds a lesson as a line under the file's `## Lessons` heading (made at the end if it isn't
+/// there), making the file if it doesn't exist. Returns the line it's on.
+pub fn add_lesson(file: &Path, lesson: &str) -> Result<usize, String> {
+    let lesson = lesson.trim().trim_start_matches(['-', '*', ' ']);
+    if lesson.is_empty() {
+        return Err("The lesson is empty.".to_owned());
+    }
+    let text = std::fs::read_to_string(file).unwrap_or_default();
+    let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
+    let at = if let Some(heading) = lines.iter().position(|line| line.trim() == LESSONS) {
+        // After the section's last line that says something, before the next heading.
+        let end = lines[heading + 1..]
+            .iter()
+            .position(|line| line.starts_with('#'))
+            .map_or(lines.len(), |next| heading + 1 + next);
+        let last = (heading + 1..end).rev().find(|index| !lines[*index].trim().is_empty()).unwrap_or(heading);
+        last + 1
+    } else {
+        if lines.last().is_some_and(|line| !line.trim().is_empty()) {
+            lines.push(String::new());
+        }
+        lines.push(LESSONS.to_owned());
+        lines.len()
+    };
+    lines.insert(at, format!("- {lesson}"));
+    let mut out = lines.join("\n");
+    out.push('\n');
+    std::fs::write(file, out).map_err(|error| error.to_string())?;
+    Ok(at + 1)
+}
+
 /// An instruction said in more than one place: the words, and where (file, line).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Repeat {
@@ -329,6 +363,25 @@ mod tests {
             Some("lint.sh")
         );
         assert_eq!(named(Kind::McpServer), ["db"]);
+    }
+
+    #[test]
+    fn adds_lessons_under_their_heading() {
+        let dir = tempfile::tempdir().expect("a temporary folder");
+        let file = dir.path().join("AGENTS.md");
+        fs::write(&file, "# Acme\nRun the tests.\n").expect("write");
+        assert_eq!(add_lesson(&file, "- Keep loops readable; no reduce.").expect("added"), 5);
+        assert_eq!(add_lesson(&file, "Use the design tokens.").expect("added"), 6);
+        assert_eq!(
+            fs::read_to_string(&file).expect("read"),
+            "# Acme\nRun the tests.\n\n## Lessons\n- Keep loops readable; no reduce.\n- Use the design tokens.\n"
+        );
+        fs::write(&file, "## Lessons\n- One.\n\n## Later\nText.\n").expect("write");
+        add_lesson(&file, "Two.").expect("added");
+        assert_eq!(fs::read_to_string(&file).expect("read"), "## Lessons\n- One.\n- Two.\n\n## Later\nText.\n");
+        let new = dir.path().join("CLAUDE.md");
+        assert_eq!(add_lesson(&new, "First.").expect("made"), 2);
+        assert!(add_lesson(&new, "  ").is_err());
     }
 
     #[test]
