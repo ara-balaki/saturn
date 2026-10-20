@@ -19,12 +19,14 @@ pub enum Outcome {
     OwnCopy,
 }
 
-/// Whether a file name is an env file: `.env`, `.env.local`, `production.env`. Templates meant
-/// to be committed (`.env.example`) are not.
+/// Whether a file name is an env file to share: `.env`, `.env.local`, `local.env`. Templates meant
+/// to be committed (`.env.example`) are not, and neither are production ones (`.env.prod`): a
+/// worktree is for trying things, never with production's credentials.
 pub fn is_env_file(name: &str) -> bool {
     let name = name.to_lowercase();
-    let template = [".example", ".sample", ".template", ".dist"].iter().any(|end| name.ends_with(end));
-    !template
+    let left_out = ["example", "sample", "template", "dist", "prod", "production"];
+    let left_out = name.split('.').any(|part| left_out.contains(&part));
+    !left_out
         && (name == ".env"
             || name.starts_with(".env.")
             || Path::new(&name).extension().is_some_and(|extension| extension == "env"))
@@ -129,8 +131,9 @@ mod tests {
 
     #[test]
     fn knows_env_files_from_templates() {
-        assert!(is_env_file(".env") && is_env_file(".env.local") && is_env_file("production.env"));
-        assert!(!is_env_file(".env.example") && !is_env_file("env.ts") && !is_env_file(".envrc"));
+        assert!(is_env_file(".env") && is_env_file(".env.local") && is_env_file("local.env"));
+        assert!(!is_env_file(".env.example") && !is_env_file(".env.example.bi") && !is_env_file("env.ts"));
+        assert!(!is_env_file(".env.prod") && !is_env_file("production.env") && !is_env_file(".envrc"));
     }
 
     #[test]
