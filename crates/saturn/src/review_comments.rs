@@ -4,6 +4,9 @@
 //!
 //! Clicking a line picks the change (the hunk) it's in, to stage on its own or revert, leaving the
 //! file's other changes as they are; a revert can be undone until the next one.
+//!
+//! Each file's header says what was asked that changed it (`saturn_core::prompts`), so the intent
+//! sits beside the diff.
 
 use std::path::PathBuf;
 
@@ -15,6 +18,7 @@ use gpui_kit::{
 };
 use saturn_core::git::{self, Scope};
 use saturn_core::hunks::{self, Hunk};
+use saturn_core::prompts::{self, Asked};
 use saturn_core::review::{self, Comment};
 use saturn_design::{color, radius, space};
 
@@ -64,6 +68,10 @@ pub struct ReviewComments {
     reverted: Option<Hunk>,
     /// What the last stage or revert said.
     said: Option<String>,
+    /// The prompts that changed each file, relative to `repo`, oldest first.
+    asked: std::collections::HashMap<String, Vec<Asked>>,
+    /// When they were last read, so a busy agent doesn't have its transcripts read every second.
+    asked_at: Option<std::time::Instant>,
     written: Vec<Written>,
     writing: Option<Writing>,
     next: u64,
@@ -74,7 +82,64 @@ impl EventEmitter<Touched> for ReviewComments {}
 
 impl ReviewComments {
     pub fn new(repo: PathBuf, scope: Scope) -> Self {
-        Self { repo, scope, picked: None, reverted: None, said: None, written: Vec::new(), writing: None, next: 0 }
+        Self {
+            repo,
+            scope,
+            picked: None,
+            reverted: None,
+            said: None,
+            asked: std::collections::HashMap::new(),
+            asked_at: None,
+            written: Vec::new(),
+            writing: None,
+            next: 0,
+        }
+    }
+
+    /// Reads what was asked that changed each file, at most every 20 seconds.
+    pub fn read_prompts(&mut self, cx: &mut Context<Self>) {
+        if self.asked_at.is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(20)) {
+            return;
+        }
+        self.asked_at = Some(std::time::Instant::now());
+        let repo = self.repo.clone();
+        cx.spawn(async move |this, cx| {
+            let asked = cx.background_spawn(async move { prompts::for_checkout(&repo) }).await;
+            let _ = this.update(cx, |this, cx| {
+                this.asked = asked;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// For a file's header: the last prompt that changed it, all of them on hover.
+    pub fn render_asked(&self, path: &str) -> Option<AnyElement> {
+        let asked = self.asked.get(path).filter(|asked| !asked.is_empty())?;
+        let short = |text: &str, most: usize| {
+            let line = text.lines().next().unwrap_or_default();
+            if line.chars().count() > most || text.lines().nth(1).is_some() {
+                format!("{}…", line.chars().take(most).collect::<String>().trim_end())
+            } else {
+                line.to_owned()
+            }
+        };
+        let latest = asked.last().map(|asked| short(&asked.prompt, 70)).unwrap_or_default();
+        let all =
+            asked.iter().rev().take(5).map(|asked| format!("“{}”", short(&asked.prompt, 240))).collect::<Vec<_>>();
+        let tip = format!("What was asked that changed this file, newest first:\n\n{}", all.join("\n\n"));
+        Some(
+            div()
+                .id(gpui_kit::SharedString::from(format!("asked-{path}")))
+                .flex_none()
+                .max_w(px(420.))
+                .truncate()
+                .text_size(px(12.))
+                .text_color(theme::color(color::INK_MUTED))
+                .child(format!("Asked: “{latest}”"))
+                .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx))
+                .into_any_element(),
+        )
     }
 
     /// Whether this holds the comments for `scope`'s changes in `repo`.

@@ -814,6 +814,9 @@ impl EditorView {
             });
             review.comments = Some((comments, [sent, touched]));
         }
+        if let Some((comments, _)) = &review.comments {
+            comments.update(cx, ReviewComments::read_prompts);
+        }
     }
 
     fn show_review(
@@ -928,6 +931,10 @@ impl EditorView {
     pub fn refresh_review(&mut self, files: Vec<DiffFile>, scope: Scope, cx: &mut Context<Self>) {
         if let Some(review) = self.review.as_ref().filter(|review| review.scope == Some(scope)) {
             review.state.update(cx, |state, cx| state.set_files(files, cx));
+            // An agent at work: what it was asked may have grown too.
+            if let Some((comments, _)) = &review.comments {
+                comments.update(cx, ReviewComments::read_prompts);
+            }
         }
     }
 
@@ -1409,13 +1416,17 @@ fn render_review(review: &Review, cx: &mut Context<EditorView>) -> AnyElement {
     let Some((comments, _)) = &review.comments else { return diff.into_any_element() };
     let bar = comments.update(cx, |comments, cx| comments.render_bar(cx));
     let annotations = comments.read(cx).annotations();
-    let (on_add, on_render, on_click) = (comments.clone(), comments.clone(), comments.clone());
+    let (on_add, on_render, on_click, on_header) =
+        (comments.clone(), comments.clone(), comments.clone(), comments.clone());
     let diff = diff
         .on_add_annotation(move |range, window, cx| {
             on_add.update(cx, |comments, cx| comments.start(range.clone(), window, cx));
         })
         .on_line_click(move |position, _, _, cx| {
             on_click.update(cx, |comments, cx| comments.pick(position, cx));
+        })
+        .render_header_title_suffix(move |file, _, cx| {
+            on_header.read(cx).render_asked(file.path()).unwrap_or_else(|| div().into_any_element())
         })
         .annotations(annotations)
         .render_annotation(move |annotation, _, cx| {

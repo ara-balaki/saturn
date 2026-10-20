@@ -145,6 +145,9 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   Claude on them. They only ever go to a pane running an agent, never to a bare shell.
 - **One change at a time**: click a line in the review to pick its change, then stage just that one,
   or revert it, leaving the file's other changes as they are. A revert can be undone.
+- **What was asked**: each file in the review says what you asked Claude Code that changed it (the
+  latest prompt; hover for the ones before), read from its session transcripts on your Mac. Edits
+  made through the shell can't be traced, so those files say nothing.
 - **History**: every branch as a graph, with tags, authors and dates; click a commit for its diff.
 - **Impact**: every file that depends on what changed, nearest first. It follows imports in
   JavaScript and TypeScript (with `tsconfig` aliases and a monorepo's packages), Rust and Python.

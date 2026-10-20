@@ -19,6 +19,7 @@ pub mod links;
 pub mod lsp;
 pub mod ports;
 pub mod program_status;
+pub mod prompts;
 pub mod pull_request;
 pub mod recipe;
 pub mod review;
