@@ -74,6 +74,10 @@ pub struct ChangesView {
 impl EventEmitter<ChangesEvent> for ChangesView {}
 
 impl ChangesView {
+    pub fn repo(&self) -> &Path {
+        &self.repo
+    }
+
     pub fn new(repo: &Path, cx: &mut Context<Self>) -> Self {
         let mut view = Self {
             repo: repo.to_owned(),

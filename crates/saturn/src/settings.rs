@@ -104,7 +104,7 @@ impl ProjectSettings {
 }
 
 /// `text` as one shell word: as is when it is plain, else in single quotes.
-fn shell_quote(text: &str) -> String {
+pub fn shell_quote(text: &str) -> String {
     if !text.is_empty() && text.chars().all(|c| c.is_ascii_alphanumeric() || "-_./:@".contains(c)) {
         text.to_owned()
     } else {

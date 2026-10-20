@@ -20,6 +20,7 @@ pub mod ports;
 pub mod program_status;
 pub mod pull_request;
 pub mod recipe;
+pub mod review;
 pub mod schema;
 pub mod servers;
 pub mod session_name;

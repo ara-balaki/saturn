@@ -10,9 +10,9 @@ use std::time::Duration;
 use gpui_kit::component::diff::{Diff, DiffFile, DiffMode, DiffState};
 use gpui_kit::component::input::{Editor, EditorState, Input, InputEvent, InputState};
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, Entity, FontWeight, InteractiveElement as _, IntoElement, MouseButton,
-    ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, Subscription, Task, Window, div,
-    prelude::FluentBuilder as _, px,
+    AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, InteractiveElement as _, IntoElement,
+    MouseButton, ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, Subscription, Task, Window,
+    div, prelude::FluentBuilder as _, px,
 };
 use saturn_core::format;
 use saturn_core::git::{self, Scope};
@@ -27,6 +27,7 @@ use crate::lineage_view::LineageView;
 use crate::lsp::{self, Provider, Servers, Status};
 use crate::problems_view::{self, ProblemsView};
 use crate::references_view::ReferencesView;
+use crate::review_comments::{ReviewComments, SendToAgent};
 use crate::schema_view::SchemaView;
 use crate::theme::{self, len};
 
@@ -72,6 +73,8 @@ struct Review {
     state: Entity<DiffState>,
     scope: Option<Scope>,
     label: String,
+    /// Comments for the agent, on a review of changes still being made (not on an old commit).
+    comments: Option<(Entity<ReviewComments>, Subscription)>,
 }
 
 /// What the editor panel tells the status bar.
@@ -792,12 +795,22 @@ impl EditorView {
     }
 
     /// Shows `files` in the Changes tab, scrolled to `path`.
-    pub fn review(&mut self, files: Vec<DiffFile>, scope: Scope, path: &str, cx: &mut Context<Self>) {
+    /// Shows the changes in `repo` as a review, which takes comments for the agent working there.
+    pub fn review(&mut self, files: Vec<DiffFile>, scope: Scope, path: &str, repo: &Path, cx: &mut Context<Self>) {
         let label = match scope {
             Scope::Uncommitted => "Uncommitted changes",
             Scope::Branch => "Branch changes",
         };
         self.show_review(files, Some(scope), label.to_owned(), path, cx);
+        let Some(review) = &mut self.review else { return };
+        let same_repo = review.comments.as_ref().is_some_and(|(comments, _)| comments.read(cx).repo() == repo);
+        if !same_repo {
+            let comments = cx.new(|_| ReviewComments::new(repo.to_owned()));
+            let passed_on = cx.subscribe(&comments, |_, _, event: &SendToAgent, cx| {
+                cx.emit(SendToAgent { repo: event.repo.clone(), message: event.message.clone() });
+            });
+            review.comments = Some((comments, passed_on));
+        }
     }
 
     fn show_review(
@@ -815,7 +828,7 @@ impl EditorView {
             review.state.clone()
         } else {
             let state = cx.new(|cx| DiffState::new(files, cx));
-            self.review = Some(Review { state: state.clone(), scope, label });
+            self.review = Some(Review { state: state.clone(), scope, label, comments: None });
             state
         };
         state.update(cx, |state, cx| state.scroll_to_file(path, cx));
@@ -1339,6 +1352,48 @@ fn apply_settings(
     );
 }
 
+impl EventEmitter<SendToAgent> for EditorView {}
+
+impl EditorView {
+    /// Comments on line `line` of the review's first file, then sends the comments when `send`: for
+    /// spikes (`SATURN_REVIEW_COMMENT`, `SATURN_REVIEW_SEND`).
+    pub fn comment_on_review(&mut self, line: usize, text: &str, send: bool, cx: &mut Context<Self>) {
+        let Some(review) = &self.review else { return };
+        let Some((comments, _)) = &review.comments else { return };
+        let Some(path) = review.state.read(cx).files().first().map(|file| file.path().clone()) else { return };
+        let range = gpui_kit::component::diff::DiffLineRange::new(
+            path,
+            gpui_kit::component::diff::DiffSide::Modified,
+            line,
+            line,
+        );
+        comments.update(cx, |comments, cx| {
+            comments.comment(range, text, cx);
+            if send {
+                comments.send(cx);
+            }
+        });
+    }
+}
+
+/// The review, with the comments for the agent when it takes them.
+fn render_review(review: &Review, cx: &mut Context<EditorView>) -> AnyElement {
+    let diff = Diff::new(&review.state).size_full();
+    let Some((comments, _)) = &review.comments else { return diff.into_any_element() };
+    let bar = comments.update(cx, |comments, cx| comments.render_bar(cx));
+    let annotations = comments.read(cx).annotations();
+    let (on_add, on_render) = (comments.clone(), comments.clone());
+    let diff = diff
+        .on_add_annotation(move |range, window, cx| {
+            on_add.update(cx, |comments, cx| comments.start(range.clone(), window, cx));
+        })
+        .annotations(annotations)
+        .render_annotation(move |annotation, _, cx| {
+            on_render.update(cx, |comments, cx| comments.render_annotation(annotation, cx))
+        });
+    div().flex().flex_col().size_full().children(bar).child(div().flex_1().min_h_0().child(diff)).into_any_element()
+}
+
 impl Render for EditorView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let wanted = cx.try_global::<crate::settings::EditorSettings>().cloned().unwrap_or_default();
@@ -1349,7 +1404,7 @@ impl Render for EditorView {
             self.applied = Some(wanted);
         }
         let body: Option<AnyElement> = if self.front == Front::Review {
-            self.review.as_ref().map(|review| Diff::new(&review.state).size_full().into_any_element())
+            self.review.as_ref().map(|review| render_review(review, cx))
         } else if self.front == Front::History {
             self.history.clone().map(gpui_kit::IntoElement::into_any_element)
         } else if self.front == Front::Schema {

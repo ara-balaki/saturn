@@ -4,7 +4,8 @@
 //!   types a command into each.
 //! - `SATURN_PERF=1` prints how long terminal frames take, every second.
 //! - `SATURN_OPEN_SETTINGS=1` opens the Settings dialog on start; `SATURN_OPEN_FILE=path` opens a file
-//!   in the editor (`SATURN_SAVE=1` saves it after a moment); `SATURN_REVIEW=1` shows the Changes tab and reviews the first change.
+//!   in the editor (`SATURN_SAVE=1` saves it after a moment); `SATURN_REVIEW=1` shows the Changes tab and reviews the first change
+//!   (`SATURN_REVIEW_COMMENT="12:text"` comments on its line 12; `SATURN_REVIEW_SEND=1` sends it).
 //! - `SATURN_MORE_REPOS=a:b` adds more repos to the window, as ⌘O would; `SATURN_FAKE_AGENTS=1`
 //!   gives the panes made-up agents and pull requests (`SATURN_FAKE_STATES=working,needs-you,your-turn`
 //!   sets their states in order); `SATURN_HISTORY=1` opens the History tab, `SATURN_IMPACT=1` the Impact tab (focused on `SATURN_IMPACT_FOCUS`), `SATURN_SCHEMA=1`
@@ -105,9 +106,7 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
     if std::env::var_os("SATURN_FAKE_AGENTS").is_some() {
         cx.defer_in(window, |workspace, _, cx| workspace.fake_agents(cx));
     }
-    if std::env::var_os("SATURN_REVIEW").is_some() {
-        cx.defer_in(window, |workspace, _, cx| workspace.review_first_change(cx));
-    }
+    review_from_env(window, cx);
     if std::env::var_os("SATURN_SAVE").is_some() {
         // After SATURN_OPEN_FILE has opened its file.
         cx.spawn(async move |workspace, cx| {
@@ -187,6 +186,28 @@ fn open_lineage(cx: &mut Context<Workspace>) {
         let _ = workspace.update(cx, Workspace::show_lineage);
     })
     .detach();
+}
+
+/// Reviews the first change (`SATURN_REVIEW`), and comments on it and sends the comment to the agent
+/// (`SATURN_REVIEW_COMMENT`, `SATURN_REVIEW_SEND`).
+fn review_from_env(window: &mut Window, cx: &mut Context<Workspace>) {
+    if std::env::var_os("SATURN_REVIEW").is_none() {
+        return;
+    }
+    cx.defer_in(window, |workspace, _, cx| workspace.review_first_change(cx));
+    if let Ok(comment) = std::env::var("SATURN_REVIEW_COMMENT") {
+        let send = std::env::var_os("SATURN_REVIEW_SEND").is_some();
+        cx.spawn(async move |workspace, cx| {
+            // After the review has opened (it opens 1.5 s in).
+            cx.background_executor().timer(Duration::from_millis(3000)).await;
+            let (line, text) = comment.split_once(':').unwrap_or(("1", comment.as_str()));
+            let line = line.parse().unwrap_or(1);
+            let _ = workspace.update(cx, |workspace, cx| {
+                workspace.editor().update(cx, |editor, cx| editor.comment_on_review(line, text, send, cx));
+            });
+        })
+        .detach();
+    }
 }
 
 /// Runs a palette command by its name (`SATURN_RUN_COMMAND`), as picking it would.

@@ -21,6 +21,7 @@ mod notify;
 mod palette;
 mod problems_view;
 mod references_view;
+mod review_comments;
 mod schema_view;
 mod session;
 mod settings;

@@ -33,6 +33,7 @@ use crate::chrome;
 use crate::clickup;
 use crate::editor_view::EditorView;
 use crate::files_view::{FilesEvent, FilesView};
+use crate::review_comments::SendToAgent;
 use crate::session::{self, SavedGrid, SavedTab};
 use crate::settings::{self, AppearanceSetting, Settings};
 use crate::status_bar::StatusBar;
@@ -177,6 +178,9 @@ const TAB_MIN_WIDTH: f32 = 64.0;
 const MIN_SHARE: f32 = 0.08;
 /// Programs a tab can close without asking, because nothing is lost.
 const SHELLS: &[&str] = &["zsh", "-zsh", "bash", "-bash", "fish", "sh", "login"];
+
+/// Coding agents, by the name of their program: what review comments may be pasted into.
+const AGENTS: &[&str] = &["claude", "codex", "gemini", "opencode", "aider", "amp", "cursor-agent"];
 
 /// A tab being dragged to another place in the grid.
 #[derive(Clone)]
@@ -694,6 +698,11 @@ impl Workspace {
         // The editor panel can take the grid's room; the workbench follows its changes.
         let editor = cx.new(|_| EditorView::default());
         cx.observe(&editor, |_, _, cx| cx.notify()).detach();
+        // Review comments go to the agent working where the changes are.
+        cx.subscribe_in(&editor, window, |this, _, event: &SendToAgent, window, cx| {
+            this.send_to_agent(&event.repo, &event.message, window, cx);
+        })
+        .detach();
         let handle = window.window_handle();
         let weak = cx.weak_entity();
         OPEN.with_borrow_mut(|open| open.push((handle, weak)));
@@ -829,9 +838,10 @@ impl Workspace {
 
     /// Reviewing a change opens it in the editor panel; new changes refresh an open review.
     fn follow_changes(changes: &Entity<ChangesView>, cx: &mut Context<Self>) -> Subscription {
-        cx.subscribe(changes, |this, _, event: &ChangesEvent, cx| match event {
+        cx.subscribe(changes, |this, changes, event: &ChangesEvent, cx| match event {
             ChangesEvent::Open { files, scope, path } => {
-                this.editor.update(cx, |editor, cx| editor.review(files.clone(), *scope, path, cx));
+                let repo = changes.read(cx).repo().to_owned();
+                this.editor.update(cx, |editor, cx| editor.review(files.clone(), *scope, path, &repo, cx));
                 this.panels.editor = true;
                 cx.notify();
             }
@@ -1036,6 +1046,45 @@ impl Workspace {
         }
         self.type_into(tab, command, cx);
         self.after_layout_change(window, cx);
+    }
+
+    /// Gives `message` to the agent working in `checkout`: the focused pane when its agent works there,
+    /// else another pane whose does. Only a pane running an agent: pasted into a shell, the message
+    /// (and any code quoted in it) would run as commands. With none, a new pane starts Claude with the
+    /// message as its first. The pane comes to the front, so you see it land.
+    pub fn send_to_agent(&mut self, checkout: &Path, message: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let checkout = checkout.canonicalize().unwrap_or_else(|_| checkout.to_owned());
+        let works_there = |view: &Entity<TerminalView>, cx: &gpui_kit::App| {
+            let cwd = view.read(cx).cwd.canonicalize().unwrap_or_else(|_| view.read(cx).cwd.clone());
+            cwd.starts_with(&checkout)
+        };
+        let runs_an_agent = |view: &Entity<TerminalView>, cx: &gpui_kit::App| {
+            view.read(cx).foreground_pid().and_then(process_name).is_some_and(|name| AGENTS.contains(&name.as_str()))
+        };
+        let agents: Vec<TabId> = self
+            .layout
+            .tabs()
+            .filter(|tab| self.terminals.get(tab).is_some_and(|view| works_there(view, cx) && runs_an_agent(view, cx)))
+            .collect();
+        let target = self.layout.focused_tab().filter(|tab| agents.contains(tab)).or_else(|| agents.first().copied());
+        if let Some(tab) = target {
+            if let Some(view) = self.terminals.get(&tab) {
+                view.update(cx, |view, _| {
+                    view.paste(message);
+                    view.write(b"\r".to_vec());
+                });
+            }
+            self.update_layout(window, cx, |layout| layout.activate_tab(tab));
+        } else {
+            let Some(tab) = self.spawn_terminal(&checkout, window, cx) else { return };
+            if self.layout.is_empty() {
+                self.layout.add_tab(tab, None);
+            } else {
+                self.layout.split_right(tab, None);
+            }
+            self.type_into(tab, format!("claude {}", settings::shell_quote(message)), cx);
+            self.after_layout_change(window, cx);
+        }
     }
 
     /// The recipe's setup for `checkout`, saying in `tab` when it was guessed or the recipe is wrong.
@@ -1577,6 +1626,11 @@ impl Workspace {
             }
         }
         cx.notify();
+    }
+
+    /// The editor panel, for spikes.
+    pub fn editor(&self) -> &Entity<EditorView> {
+        &self.editor
     }
 
     pub fn review_first_change(&mut self, cx: &mut Context<Self>) {

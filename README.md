@@ -139,6 +139,10 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
 
 - **Changes**: every changed file, for your uncommitted work or the whole branch, with a diff for
   each and checkboxes to stage them.
+- **Comments for the agent**: the + beside a line in the diff (or a selection of lines) takes a
+  comment, as in a pull request review. "Send to the agent" gives them all to the agent working
+  there in one message, each with its file, lines and code; with no agent there, a new pane starts
+  Claude on them. They only ever go to a pane running an agent, never to a bare shell.
 - **History**: every branch as a graph, with tags, authors and dates; click a commit for its diff.
 - **Impact**: every file that depends on what changed, nearest first. It follows imports in
   JavaScript and TypeScript (with `tsconfig` aliases and a monorepo's packages), Rust and Python.
