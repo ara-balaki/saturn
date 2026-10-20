@@ -3,13 +3,15 @@
 //! terminal (an agent printing the one it opened, or a link you pasted), else its branch's, else one
 //! that names the pane's ticket. The `gh` calls live in the app.
 
+use std::fmt::Write as _;
+
 use serde::Deserialize;
 
 /// The fields Saturn asks `gh pr view` for.
-pub const GH_FIELDS: &str = "number,state,isDraft,url,title";
+pub const GH_FIELDS: &str = "number,state,isDraft,url,title,statusCheckRollup,headRefOid";
 
 /// The fields Saturn asks `gh pr list` for, to find a ticket's pull request.
-pub const GH_LIST_FIELDS: &str = "number,state,isDraft,url,title,headRefName,body";
+pub const GH_LIST_FIELDS: &str = "number,state,isDraft,url,title,headRefName,body,statusCheckRollup,headRefOid";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrState {
@@ -36,6 +38,101 @@ pub struct PullRequest {
     pub title: String,
     pub url: String,
     pub state: PrState,
+    /// Its checks (CI), as of its last commit.
+    pub checks: Checks,
+    /// The commit its branch is at.
+    pub head: Option<String>,
+}
+
+/// A pull request's checks, by how they went.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Checks {
+    pub passed: usize,
+    pub running: Vec<String>,
+    pub failed: Vec<Check>,
+}
+
+/// A check that failed: its name, and where to read why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Check {
+    pub name: String,
+    pub url: Option<String>,
+}
+
+/// How a pull request's checks stand, all together.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChecksState {
+    Passed,
+    Running,
+    Failed,
+}
+
+impl Checks {
+    /// Failed if any did, else running if any are, else passed; `None` with no checks at all.
+    pub fn state(&self) -> Option<ChecksState> {
+        if !self.failed.is_empty() {
+            Some(ChecksState::Failed)
+        } else if !self.running.is_empty() {
+            Some(ChecksState::Running)
+        } else if self.passed > 0 {
+            Some(ChecksState::Passed)
+        } else {
+            None
+        }
+    }
+
+    /// Reads `statusCheckRollup`: check runs (GitHub Actions and apps) and commit statuses.
+    fn from_rollup(rollup: &[serde_json::Value]) -> Self {
+        let mut checks = Self::default();
+        for check in rollup {
+            let text = |key: &str| check.get(key).and_then(serde_json::Value::as_str).unwrap_or_default();
+            let (name, url) = if text("__typename") == "StatusContext" {
+                (text("context"), text("targetUrl"))
+            } else {
+                (text("name"), text("detailsUrl"))
+            };
+            let outcome = if text("__typename") == "StatusContext" {
+                match text("state") {
+                    "SUCCESS" => Some(true),
+                    "FAILURE" | "ERROR" => Some(false),
+                    _ => None,
+                }
+            } else if text("status") == "COMPLETED" {
+                Some(!matches!(
+                    text("conclusion"),
+                    "FAILURE" | "TIMED_OUT" | "CANCELLED" | "ACTION_REQUIRED" | "STARTUP_FAILURE"
+                ))
+            } else {
+                None
+            };
+            match outcome {
+                Some(true) => checks.passed += 1,
+                Some(false) => {
+                    checks.failed.push(Check { name: name.to_owned(), url: (!url.is_empty()).then(|| url.to_owned()) });
+                }
+                None => checks.running.push(name.to_owned()),
+            }
+        }
+        checks
+    }
+}
+
+/// What to tell an agent when a pull request's checks failed: which, where to read why, and how to
+/// get the logs from the terminal.
+pub fn failed_checks_message(pr: &PullRequest) -> String {
+    let mut out = format!("The checks of pull request #{} ({}) failed:\n", pr.number, pr.title);
+    for check in &pr.checks.failed {
+        let _ = match &check.url {
+            Some(url) => writeln!(out, "- {}: {url}", check.name),
+            None => writeln!(out, "- {}", check.name),
+        };
+    }
+    let _ = writeln!(
+        out,
+        "\nSee why with `gh pr checks {}`, and for a GitHub Actions run `gh run view <run id> --log-failed` (the run id is in its link). Fix the cause, run the same checks here, and push.",
+        pr.number
+    );
+    out
 }
 
 #[derive(Deserialize)]
@@ -52,6 +149,10 @@ struct Raw {
     head_ref_name: String,
     #[serde(default)]
     body: String,
+    #[serde(default)]
+    status_check_rollup: Vec<serde_json::Value>,
+    #[serde(default)]
+    head_ref_oid: Option<String>,
 }
 
 impl Raw {
@@ -64,7 +165,14 @@ impl Raw {
             "CLOSED" => PrState::Closed,
             _ => return None,
         };
-        Some(PullRequest { number: self.number, title: self.title, url: self.url, state })
+        Some(PullRequest {
+            number: self.number,
+            title: self.title,
+            url: self.url,
+            state,
+            checks: Checks::from_rollup(&self.status_check_rollup),
+            head: self.head_ref_oid,
+        })
     }
 }
 
@@ -210,6 +318,31 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reads_how_the_checks_went() {
+        let json = r#"{"number": 160, "state": "OPEN", "url": "u", "title": "Faster cube loads", "headRefOid": "abc",
+            "statusCheckRollup": [
+                {"__typename": "CheckRun", "name": "lint", "status": "COMPLETED", "conclusion": "SUCCESS", "detailsUrl": "https://ci/1"},
+                {"__typename": "CheckRun", "name": "test", "status": "COMPLETED", "conclusion": "FAILURE", "detailsUrl": "https://ci/2"},
+                {"__typename": "CheckRun", "name": "e2e", "status": "IN_PROGRESS", "conclusion": ""},
+                {"__typename": "StatusContext", "context": "deploy/preview", "state": "PENDING", "targetUrl": "https://preview"},
+                {"__typename": "StatusContext", "context": "coverage", "state": "SUCCESS"}
+            ]}"#;
+        let pr = super::parse(json).expect("a pull request");
+        assert_eq!(pr.checks.passed, 2);
+        assert_eq!(pr.checks.running, ["e2e", "deploy/preview"]);
+        assert_eq!(pr.checks.failed, [super::Check { name: "test".into(), url: Some("https://ci/2".into()) }]);
+        assert_eq!(pr.checks.state(), Some(super::ChecksState::Failed));
+        assert_eq!(pr.head.as_deref(), Some("abc"));
+        let message = super::failed_checks_message(&pr);
+        assert!(
+            message.starts_with("The checks of pull request #160 (Faster cube loads) failed:\n- test: https://ci/2\n")
+        );
+        assert!(message.contains("gh pr checks 160"));
+        let none = super::parse(r#"{"number": 1, "state": "OPEN", "url": "u"}"#).expect("a pull request");
+        assert_eq!(none.checks.state(), None);
+    }
+
     #[test]
     fn finds_each_branch_its_best_pull_request() {
         let json = r#"[

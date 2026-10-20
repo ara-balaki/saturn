@@ -21,7 +21,7 @@ use saturn_core::git;
 use saturn_core::layout::{Cell, CellId, Direction, Layout, RowId, TabId};
 use saturn_core::overlap;
 use saturn_core::ports;
-use saturn_core::pull_request::{self, PrState, PullRequest};
+use saturn_core::pull_request::{self, ChecksState, PrState, PullRequest};
 use saturn_core::recipe::{self, Source};
 use saturn_core::servers::{self, Server, Service};
 use saturn_core::session_name::rename_for_prompt;
@@ -517,7 +517,21 @@ fn pull_request_chip(cell: CellId, pr: &PullRequest) -> impl IntoElement {
         PrState::Closed => ("git-pull-request-closed", color::RED),
     };
     let url = pr.url.clone();
-    let tip = format!("{} · {}", pr.state.label(), pr.title);
+    let checks = match pr.checks.state() {
+        Some(ChecksState::Passed) => format!("\nChecks passed ({})", pr.checks.passed),
+        Some(ChecksState::Running) => format!("\nChecks running: {}", pr.checks.running.join(", ")),
+        Some(ChecksState::Failed) => format!(
+            "\nChecks failed: {}",
+            pr.checks.failed.iter().map(|check| check.name.as_str()).collect::<Vec<_>>().join(", ")
+        ),
+        None => String::new(),
+    };
+    let tip = format!("{} · {}{checks}", pr.state.label(), pr.title);
+    let mark = pr.checks.state().map(|state| match state {
+        ChecksState::Passed => chrome::icon("circle-check", 12., theme::color(color::TERM_GREEN)),
+        ChecksState::Running => chrome::icon("circle-dot", 12., theme::color(color::AMBER_TEXT)),
+        ChecksState::Failed => chrome::icon("circle-x", 12., theme::color(color::RED)),
+    });
     div()
         .id(("pr-chip", cell.key()))
         .flex()
@@ -534,6 +548,7 @@ fn pull_request_chip(cell: CellId, pr: &PullRequest) -> impl IntoElement {
         .hover(|s| s.bg(theme::fill_hover()))
         .child(chrome::icon(icon, 14., theme::color(state_color)))
         .child(format!("#{}", pr.number))
+        .children(mark)
         .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
         .on_click(move |_, _, _| {
             let _ = std::process::Command::new("open").arg(&url).spawn();
@@ -2037,12 +2052,24 @@ impl Workspace {
             })
             .unwrap_or_default();
         let tabs: Vec<TabId> = self.layout.tabs().collect();
+        let mut pull_requests = 0;
         for (index, (tab, (state, progress, message, pull_request))) in tabs.into_iter().zip(samples).enumerate() {
             let state = states.get(index).copied().flatten().unwrap_or(state);
             if let Some((number, state)) = pull_request {
                 let url = format!("https://github.com/acme/acme-shop/pull/{number}");
                 let title = "Round VAT half up".to_owned();
-                self.pull_requests.insert(tab, PullRequest { number, title, url, state });
+                // Made-up checks too: one pane's failed, one's running, the rest passed.
+                pull_requests += 1;
+                let checks = match pull_requests {
+                    1 => pull_request::Checks {
+                        passed: 3,
+                        running: Vec::new(),
+                        failed: vec![pull_request::Check { name: "test".to_owned(), url: None }],
+                    },
+                    2 => pull_request::Checks { passed: 2, running: vec!["e2e".to_owned()], failed: Vec::new() },
+                    _ => pull_request::Checks { passed: 4, ..Default::default() },
+                };
+                self.pull_requests.insert(tab, PullRequest { number, title, url, state, checks, head: None });
             }
             if let Some(view) = self.terminals.get(&tab) {
                 view.update(cx, |view, _| {
@@ -2656,6 +2683,34 @@ impl Workspace {
             .into_any_element()
     }
 
+    /// When the pane's pull request's checks failed: a button that hands them to its agent.
+    fn render_fix_ci(&self, cell: &Cell, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let tab = cell.active;
+        let pr = self.pull_request_of(tab).filter(|pr| pr.checks.state() == Some(ChecksState::Failed))?;
+        let names = pr.checks.failed.iter().map(|check| check.name.as_str()).collect::<Vec<_>>().join(", ");
+        let tip = format!("Send the failed checks ({names}) to this pane's agent, to find out why and fix them.");
+        Some(
+            chrome::icon_button(("fix-ci", cell.id.key()), "wrench", true)
+                .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+                .on_click(cx.listener(move |this, _, window, cx| this.fix_ci(tab, window, cx)))
+                .into_any_element(),
+        )
+    }
+
+    /// Hands a pane's failed checks to the agent working there.
+    fn fix_ci(&mut self, tab: TabId, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(pr) = self.pull_request_of(tab) else { return };
+        let message = pull_request::failed_checks_message(pr);
+        let checkout = self
+            .checkouts
+            .get(&tab)
+            .map(|checkout| checkout.root.clone())
+            .or_else(|| self.terminals.get(&tab).map(|view| view.read(cx).cwd.clone()));
+        if let Some(checkout) = checkout {
+            self.send_to_agent(&checkout, &message, window, cx);
+        }
+    }
+
     /// Undo (or redo) the last turn of the pane's agent, once it changed files.
     fn render_turn(&self, cell: &Cell, cx: &mut Context<Self>) -> Option<AnyElement> {
         let tab = cell.active;
@@ -2735,6 +2790,7 @@ impl Workspace {
             )
             .children(self.servers.get(&cell.active).into_iter().flatten().map(|server| server_chip(cell_id, server)))
             .children(self.pull_request_of(cell.active).map(|pr| pull_request_chip(cell_id, pr)))
+            .children(self.render_fix_ci(cell, cx))
             .child(header_button("split-right", "columns-2", Placement::Right, cx))
             .child(header_button("split-down", "rows-2", Placement::Down, cx))
             .child(header_button("new-tab", "plus", Placement::Tab, cx))
