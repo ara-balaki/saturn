@@ -23,6 +23,21 @@ pub fn deployment_preview(root: &Path, pr: &PullRequest) -> Option<pull_request:
     pull_request::parse_deployment_status(&String::from_utf8_lossy(&output.stdout), &environment)
 }
 
+/// A pull request's description as it is on GitHub.
+pub fn pr_body(root: &Path, number: u64) -> Option<String> {
+    let output = gh(root, &["pr", "view", &number.to_string(), "--json", "body", "--jq", ".body"])?;
+    Some(String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+}
+
+/// Replaces a pull request's description on GitHub, saying why when it can't.
+pub fn set_pr_body(root: &Path, number: u64, body: &str) -> Result<(), String> {
+    let file = std::env::temp_dir().join(format!("saturn-pr-{number}-{}.md", std::process::id()));
+    std::fs::write(&file, body).map_err(|error| error.to_string())?;
+    let done = gh(root, &["pr", "edit", &number.to_string(), "--body-file", &file.to_string_lossy()]);
+    let _ = std::fs::remove_file(&file);
+    done.map(|_| ()).ok_or_else(|| "gh couldn't save it (signed in, and allowed to edit the pull request?)".to_owned())
+}
+
 /// What reviewers left open on a pull request: its unresolved threads and requests for changes.
 pub fn review_notes(root: &Path, pr: &PullRequest) -> Option<pull_request::ReviewNotes> {
     let (owner, name) = pull_request::owner_and_name(&pr.url)?;

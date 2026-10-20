@@ -176,7 +176,9 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   wrench hands them to the pane's agent with where to read why. Open review threads count beside it
   (💬 2): click to hand them to the agent too, each with its file, line and conversation, and any
   request for changes. When the repo deploys pull requests (GitHub deployments: Vercel, Netlify, a
-  workflow), ↗ Preview opens this one's.
+  workflow), ↗ Preview opens this one's. "Edit the pull request's description" (⌘⇧P) opens it as it is on GitHub, or the
+  repo's template when it's empty, names the template's sections it leaves empty or out, and saves
+  it back; or hands the writing to the agent, with the template to follow.
 - **Status bar**: errors and warnings, the cursor, the language, and the branch with how many
   commits wait to be pushed and pulled.
 

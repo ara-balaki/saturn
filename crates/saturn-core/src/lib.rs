@@ -20,6 +20,7 @@ pub mod links;
 pub mod lsp;
 pub mod overlap;
 pub mod ports;
+pub mod pr_body;
 pub mod program_status;
 pub mod prompts;
 pub mod pull_request;

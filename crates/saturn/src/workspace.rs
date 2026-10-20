@@ -98,6 +98,7 @@ actions!(
         ShowWaiting,
         ToggleFocus,
         RunCheck,
+        EditPrBody,
     ]
 );
 
@@ -150,6 +151,7 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("Agents waiting for you", "bot", Box::new(ShowWaiting)),
         ("Focus: hold notifications, or stop", "moon", Box::new(ToggleFocus)),
         ("Run a check", "play", Box::new(RunCheck)),
+        ("Edit the pull request's description", "git-pull-request", Box::new(EditPrBody)),
         ("Database diagram", "database", Box::new(ShowSchema)),
         ("dbt lineage", "workflow", Box::new(ShowLineage)),
         ("Problems", "circle-x", Box::new(ShowProblems)),
@@ -2818,6 +2820,24 @@ impl Workspace {
         .detach();
     }
 
+    /// Opens the focused pane's pull request's description, to edit against the template.
+    pub fn edit_pr_body(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(tab) = self.layout.focused_tab() else { return };
+        let Some(number) = self.pull_request_of(tab).map(|pr| pr.number) else {
+            let checkout = self.focused_checkout(cx);
+            if let Some(tab) = self.recipe_tab(&checkout, "Description", window, cx) {
+                self.note(
+                    tab,
+                    "This pane has no pull request yet: open one, and its description can be edited here.",
+                    cx,
+                );
+            }
+            return;
+        };
+        let checkout = self.focused_checkout(cx);
+        crate::pr_body_view::open(cx.weak_entity(), checkout, number, window, cx);
+    }
+
     /// Runs every check of the focused pane's checkout (for spikes).
     pub fn run_all_checks(&mut self, cx: &mut Context<Self>) {
         let checkout = self.focused_checkout(cx);
@@ -3607,6 +3627,7 @@ impl Workspace {
             .on_action(cx.listener(|this, _: &CreateRecipe, window, cx| this.create_recipe(window, cx)))
             .on_action(cx.listener(|this, _: &ShowWorktrees, window, cx| this.show_worktrees(window, cx)))
             .on_action(cx.listener(|this, _: &ToggleFocus, _, cx| this.toggle_focus(cx)))
+            .on_action(cx.listener(|this, _: &EditPrBody, window, cx| this.edit_pr_body(window, cx)))
             .on_action(cx.listener(|this, _: &RunCheck, window, cx| {
                 let checkout = this.focused_checkout(cx);
                 crate::palette::checks(cx.weak_entity(), checkout, window, cx);
