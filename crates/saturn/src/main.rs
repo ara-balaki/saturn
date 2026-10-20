@@ -112,7 +112,7 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::separator(),
             MenuItem::action("Next Tab", NextTab),
             MenuItem::action("Previous Tab", PreviousTab),
-            MenuItem::action("Zoom Pane", ToggleMaximize),
+            MenuItem::action("Maximise Pane", ToggleMaximize),
             MenuItem::action("Next Agent Needing You", NextAttention),
         ]),
         Menu::new("View").items([

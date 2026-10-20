@@ -157,7 +157,7 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("Close terminal", "x", Box::new(CloseTab)),
         ("Next tab", "square-arrow-right", Box::new(NextTab)),
         ("Previous tab", "arrow-left", Box::new(PreviousTab)),
-        ("Zoom the pane in or out", "maximize-2", Box::new(ToggleMaximize)),
+        ("Maximise the pane", "maximize-2", Box::new(ToggleMaximize)),
         ("Go to the next agent that needs you", "bot", Box::new(NextAttention)),
         ("New agent", "square-plus", Box::new(OpenTicketPicker)),
         ("Send to several agents", "send", Box::new(SendToSeveral)),
@@ -208,9 +208,9 @@ struct Panels {
 }
 
 impl Panels {
-    /// The panels on screen: none while a pane is zoomed in, since it covers them all.
-    fn on_screen(self, zoomed: bool) -> Self {
-        if zoomed { Self { sidebar: false, editor: false, tickets: false } } else { self }
+    /// The panels on screen: none while a pane is maximised, since it covers them all.
+    fn on_screen(self, maximized: bool) -> Self {
+        if maximized { Self { sidebar: false, editor: false, tickets: false } } else { self }
     }
 }
 
@@ -1029,14 +1029,14 @@ impl Workspace {
         }
     }
 
-    /// Shows the editor panel. A zoomed-in pane covers it, so the pane zooms out first.
+    /// Shows the editor panel. A maximised pane covers it, so the pane is restored first.
     fn show_editor(&mut self) {
         self.panels.editor = true;
         self.layout.maximized = None;
     }
 
-    /// The sidebar's button and shortcut. A zoomed-in pane covers the sidebar, so asking for it
-    /// then zooms out and shows it, rather than toggling something unseen.
+    /// The sidebar's button and shortcut. A maximised pane covers the sidebar, so asking for it
+    /// then restores the pane and shows it, rather than toggling something unseen.
     fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
         self.panels.sidebar = self.layout.maximized.take().is_some() || !self.panels.sidebar;
         cx.notify();
@@ -2142,8 +2142,8 @@ impl Workspace {
         }
     }
 
-    /// Opens or closes the Tickets panel, reading the tickets again as it opens. A zoomed-in pane
-    /// covers it, so the pane zooms out and the panel shows.
+    /// Opens or closes the Tickets panel, reading the tickets again as it opens. A maximised pane
+    /// covers it, so the pane is restored and the panel shows.
     pub fn toggle_tickets(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.panels.tickets = self.layout.maximized.take().is_some() || !self.panels.tickets;
         if self.panels.tickets {
@@ -3355,22 +3355,22 @@ impl Workspace {
             .child(header_button("split-right", "columns-2", Placement::Right, cx))
             .child(header_button("split-down", "rows-2", Placement::Down, cx))
             .child(header_button("new-tab", "plus", Placement::Tab, cx))
-            .child(self.render_zoom_button(cell_id, cx))
+            .child(self.render_maximize_button(cell_id, cx))
     }
 
-    /// Zooms this pane in over the grid and the panels, or back out. The pane takes focus first,
-    /// so the button zooms the pane it sits on, not the one focused before.
-    fn render_zoom_button(&self, cell_id: CellId, cx: &mut Context<Self>) -> impl IntoElement {
-        let zoomed = self.layout.maximized == Some(cell_id);
-        let (icon, tip) = if zoomed { ("minimize-2", "Zoom out") } else { ("maximize-2", "Zoom in") };
-        chrome::icon_button(("zoom", cell_id.key()), icon, true).tooltip(chrome::tip_for(tip, ToggleMaximize)).on_click(
-            cx.listener(move |this, _, window, cx| {
+    /// Maximises this pane over the grid and the panels, or restores it. The pane takes focus
+    /// first, so the button maximises the pane it sits on, not the one focused before.
+    fn render_maximize_button(&self, cell_id: CellId, cx: &mut Context<Self>) -> impl IntoElement {
+        let maximized = self.layout.maximized == Some(cell_id);
+        let (icon, tip) = if maximized { ("minimize-2", "Minimise") } else { ("maximize-2", "Maximise") };
+        chrome::icon_button(("maximize", cell_id.key()), icon, true)
+            .tooltip(chrome::tip_for(tip, ToggleMaximize))
+            .on_click(cx.listener(move |this, _, window, cx| {
                 this.update_layout(window, cx, |layout| {
                     layout.focus_cell(cell_id);
                     layout.toggle_maximize();
                 });
-            }),
-        )
+            }))
     }
 
     fn render_cell(&self, cell: &Cell, cx: &mut Context<Self>) -> AnyElement {
@@ -3508,7 +3508,7 @@ impl Workspace {
                 }
             },
         ));
-        // A zoomed-in pane stands back from the edges, so what it covers reads as hidden, not gone.
+        // A maximised pane stands back from the edges, so what it covers reads as hidden, not gone.
         if maximized.is_some() {
             grid = grid.p(len(space::SPACE_6));
         }
@@ -3554,7 +3554,7 @@ impl Workspace {
 
     /// The panel toggles (raised while the panel is open) and Settings, in the title bar.
     fn render_panel_toggles(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        // Lit only while their panel is on screen: a zoomed-in pane covers them all.
+        // Lit only while their panel is on screen: a maximised pane covers them all.
         let panels = self.panels.on_screen(self.layout.maximized.is_some());
         let toggle = |id: &'static str, icon: &str, on: bool| {
             chrome::track_item(id, on).size(len(TITLEBAR_CONTROL)).child(chrome::icon(
@@ -3793,7 +3793,7 @@ impl Workspace {
     }
 
     /// Sidebar | (editor / grid) | tickets, with draggable dividers. The panels stay in the same
-    /// place in the tree when toggled, so terminals never restart. A zoomed-in pane covers them all.
+    /// place in the tree when toggled, so terminals never restart. A maximised pane covers them all.
     fn render_workbench(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let panels = self.panels.on_screen(self.layout.maximized.is_some());
         let editor_maximized = self.editor.read(cx).maximized();
