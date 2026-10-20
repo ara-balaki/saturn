@@ -33,5 +33,6 @@ pub mod shell_env;
 pub mod snapshot;
 pub mod status_line;
 pub mod usage;
+pub mod waiting;
 pub mod worktree_include;
 pub mod worktrees;

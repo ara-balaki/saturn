@@ -89,7 +89,10 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
 
 - A pane that needs you rings **orange**, one that's done rings **green**, until you type or click
   in it.
-- The title bar counts them, and ⌘⇧A jumps to the next one that needs you.
+- The title bar counts them, and ⌘⇧A jumps to the next one that needs you. Click a count for what
+  each waits for: a permission with the command or file it's for, a question, a finished turn with
+  the start of its last words, a failure. Allow or deny a permission right there (Saturn presses the
+  key in the pane), or go to the pane.
 - macOS notifies you while Saturn is in the background, and a small Saturn in the menu bar shows how
   many are waiting.
 - Your Claude plan's limits at the foot of the sidebar: the session, the week, and a model's own

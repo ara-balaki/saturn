@@ -20,6 +20,7 @@ mod menu_bar;
 mod notify;
 mod palette;
 mod problems_view;
+mod queue_view;
 mod references_view;
 mod review_comments;
 mod schema_view;

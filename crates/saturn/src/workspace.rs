@@ -28,6 +28,7 @@ use saturn_core::session_name::rename_for_prompt;
 use saturn_core::session_usage::{self, Tokens};
 use saturn_core::shared_env;
 use saturn_core::snapshot::{self, Snapshot};
+use saturn_core::waiting::{self, Waiting};
 use saturn_core::worktree_include;
 use saturn_design::{color, radius, shadow, space};
 use saturn_terminal::view::{TerminalView, TerminalViewEvent};
@@ -93,6 +94,7 @@ actions!(
         CreateRecipe,
         ShowWorktrees,
         CompareWith,
+        ShowWaiting,
     ]
 );
 
@@ -142,6 +144,7 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("Create worktree recipe", "file-code", Box::new(CreateRecipe)),
         ("Worktrees", "folder-git", Box::new(ShowWorktrees)),
         ("Compare with a branch or commit", "git-compare", Box::new(CompareWith)),
+        ("Agents waiting for you", "bot", Box::new(ShowWaiting)),
         ("Database diagram", "database", Box::new(ShowSchema)),
         ("dbt lineage", "workflow", Box::new(ShowLineage)),
         ("Problems", "circle-x", Box::new(ShowProblems)),
@@ -302,6 +305,8 @@ pub struct Workspace {
     transcripts: HashMap<TabId, PathBuf>,
     /// What each tab's session used in the plan's current 5-hour window.
     spent: HashMap<TabId, Tokens>,
+    /// What each tab's agent waits for, from its hooks.
+    waits: HashMap<TabId, Waiting>,
 }
 
 /// An agent's turn, saved before and after (`saturn_core::snapshot`), so its files can go back.
@@ -627,7 +632,7 @@ fn drop_preview(side: Option<Direction>) -> impl IntoElement {
     }
 }
 
-fn state_color(state: AgentState) -> Hsla {
+pub fn state_color(state: AgentState) -> Hsla {
     theme::color(match state {
         AgentState::Shell | AgentState::Idle => color::STATUS_IDLE,
         AgentState::Working => color::STATUS_WORKING,
@@ -804,6 +809,7 @@ impl Workspace {
             turns: HashMap::new(),
             transcripts: HashMap::new(),
             spent: HashMap::new(),
+            waits: HashMap::new(),
             roots,
             root: project.clone(),
             follow_pane: true,
@@ -1535,6 +1541,51 @@ impl Workspace {
         .detach();
     }
 
+    /// The agents waiting for you, for the list: what each waits for, where it works.
+    pub fn waiting_rows(&self, cx: &gpui_kit::App) -> Vec<crate::queue_view::Row> {
+        self.layout
+            .tabs()
+            .filter_map(|tab| {
+                let view = self.terminals.get(&tab)?.read(cx);
+                if !view.state.asks_for_you() {
+                    return None;
+                }
+                let folder = view.cwd.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+                let place = match self.checkouts.get(&tab) {
+                    Some(checkout) => format!("{folder} · {}", checkout.branch),
+                    None => folder,
+                };
+                Some(crate::queue_view::Row {
+                    tab,
+                    name: self.tab_name(tab, cx),
+                    place,
+                    state: view.state,
+                    waiting: self.waits.get(&tab).cloned(),
+                })
+            })
+            .collect()
+    }
+
+    /// Answers the permission a tab's agent asks for, by pressing what you would in the pane:
+    /// Return for Claude's highlighted "Yes", Escape for "No". Only while it really asks.
+    pub fn answer_permission(&mut self, tab: TabId, allow: bool, cx: &mut Context<Self>) {
+        let asks = matches!(self.waits.get(&tab), Some(Waiting::Permission { .. }));
+        let Some(view) = self.terminals.get(&tab).cloned() else { return };
+        let runs_an_agent =
+            view.read(cx).foreground_pid().and_then(process_name).is_some_and(|name| AGENTS.contains(&name.as_str()));
+        if !asks || view.read(cx).state != AgentState::NeedsYou || !runs_an_agent {
+            return;
+        }
+        view.update(cx, |view, _| view.write(if allow { b"\r".to_vec() } else { b"\x1b".to_vec() }));
+        self.waits.remove(&tab);
+        cx.notify();
+    }
+
+    /// Brings a tab to the front and gives it the keyboard.
+    pub fn go_to_tab(&mut self, tab: TabId, window: &mut Window, cx: &mut Context<Self>) {
+        self.update_layout(window, cx, |layout| layout.activate_tab(tab));
+    }
+
     /// Reads what each tab's session used in the plan's current 5-hour window, off the main thread.
     fn refresh_spent(&mut self, cx: &mut Context<Self>) {
         let since = crate::usage::window_start(cx);
@@ -2008,6 +2059,15 @@ impl Workspace {
         if self.claude_sessions.get(&tab) != session_before.as_ref() {
             self.save_session(cx);
         }
+        match waiting::from_hook(call.event(), &call.input) {
+            Some(Some(waiting)) => {
+                self.waits.insert(tab, waiting);
+            }
+            Some(None) => {
+                self.waits.remove(&tab);
+            }
+            None => {}
+        }
         if let Some(path) = call.field("transcript_path").filter(|path| !path.is_empty()) {
             self.transcripts.insert(tab, PathBuf::from(path));
         }
@@ -2327,7 +2387,7 @@ impl Workspace {
 
     /// A name typed by hand, else (when the setting is on) the session's or terminal's title,
     /// else the folder the terminal is in.
-    fn tab_name(&self, tab: TabId, cx: &Context<Self>) -> String {
+    fn tab_name(&self, tab: TabId, cx: &gpui_kit::App) -> String {
         if let Some(name) = self.names.get(&tab) {
             return name.clone();
         }
@@ -2850,8 +2910,17 @@ impl Workspace {
                         .when(state != AgentState::Working, |item| item.text_color(state_color(state)))
                         .child(status_dot(state))
                         .child(format!("{n} {label}"))
-                        .tooltip(chrome::tip_for("Go to the next agent that needs you", NextAttention))
-                        .on_click(cx.listener(|this, _, window, cx| this.next_attention(window, cx))),
+                        .when(state == AgentState::Working, |item| {
+                            item.tooltip(chrome::tip_for("Go to the next agent that needs you", NextAttention))
+                                .on_click(cx.listener(|this, _, window, cx| this.next_attention(window, cx)))
+                        })
+                        .when(state != AgentState::Working, |item| {
+                            item.tooltip(chrome::tip("What each agent waits for: answer or go to it")).on_click(
+                                cx.listener(|_, _, window, cx| {
+                                    crate::queue_view::open(cx.weak_entity(), window, cx);
+                                }),
+                            )
+                        }),
                 );
             }
             chrome::on_glass(track)
@@ -3122,6 +3191,9 @@ impl Workspace {
             .on_action(cx.listener(|this, _: &StartApp, window, cx| this.start_app(window, cx)))
             .on_action(cx.listener(|this, _: &CreateRecipe, window, cx| this.create_recipe(window, cx)))
             .on_action(cx.listener(|this, _: &ShowWorktrees, window, cx| this.show_worktrees(window, cx)))
+            .on_action(cx.listener(|_, _: &ShowWaiting, window, cx| {
+                crate::queue_view::open(cx.weak_entity(), window, cx);
+            }))
             .on_action(cx.listener(|this, _: &CompareWith, window, cx| {
                 crate::palette::compare(cx.weak_entity(), this.root.clone(), window, cx);
             }))
