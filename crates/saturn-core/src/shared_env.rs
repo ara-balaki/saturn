@@ -1,7 +1,8 @@
 //! One set of env files for a repository and all its worktrees. Git ignores env files, so a new
 //! worktree starts without them, and a copy drifts the moment a value is added on one side. Each
 //! worktree gets links to the main checkout's files instead: there is one file per path, and a
-//! value added in any worktree is in all of them at once.
+//! value added in any worktree is in all of them at once. Claude Code's local files
+//! (`CLAUDE.local.md`, `.claude/settings.local.json`) are shared the same way.
 
 use std::fs;
 use std::io;
@@ -31,8 +32,16 @@ pub fn is_env_file(name: &str) -> bool {
             || Path::new(&name).extension().is_some_and(|extension| extension == "env"))
 }
 
-/// The env files of a checkout that git ignores, relative to it. Ignored folders
-/// (`node_modules`) are skipped whole.
+/// Claude Code's own files that git ignores and that hold what should be the same in every worktree:
+/// personal instructions (`CLAUDE.local.md`) and the commands you allowed for good
+/// (`.claude/settings.local.json`). Claude shares its auto memory across worktrees by itself; these
+/// it leaves in the worktree they were made in, so a new worktree would start without them.
+pub fn is_claude_local_file(path: &Path) -> bool {
+    path.file_name().is_some_and(|name| name == "CLAUDE.local.md") || path.ends_with(".claude/settings.local.json")
+}
+
+/// The env files of a checkout that git ignores, and Claude Code's local files, relative to it.
+/// Ignored folders (`node_modules`) are skipped whole.
 pub fn env_files(checkout: &Path) -> Vec<PathBuf> {
     let Ok(output) = crate::git::command(checkout)
         .args(["--no-optional-locks", "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"])
@@ -47,7 +56,9 @@ pub fn env_files(checkout: &Path) -> Vec<PathBuf> {
         .split('\0')
         .filter(|entry| !entry.is_empty() && !entry.ends_with('/'))
         .map(PathBuf::from)
-        .filter(|path| path.file_name().is_some_and(|name| is_env_file(&name.to_string_lossy())))
+        .filter(|path| {
+            path.file_name().is_some_and(|name| is_env_file(&name.to_string_lossy())) || is_claude_local_file(path)
+        })
         .collect()
 }
 
@@ -159,6 +170,22 @@ mod tests {
 
         assert!(share(&worktree).iter().all(|(_, outcome)| *outcome == Outcome::AlreadyShared));
         assert!(share(&main).is_empty(), "main is left alone");
+    }
+
+    #[test]
+    fn claude_local_files_are_shared_too() {
+        let dir = tempfile::tempdir().expect("a temporary folder");
+        let (main, worktree) = repo_with_worktree(dir.path());
+        fs::write(main.join(".git/info/exclude"), "CLAUDE.local.md\n.claude/settings.local.json\n").expect("write");
+        fs::create_dir_all(main.join(".claude")).expect("make folders");
+        fs::write(main.join("CLAUDE.local.md"), "Use the staging API.\n").expect("write");
+        fs::write(main.join(".claude/settings.local.json"), "{}\n").expect("write");
+        fs::create_dir_all(worktree.join(".claude")).expect("make folders");
+        let shared: Vec<PathBuf> = share(&worktree).into_iter().map(|(path, _)| path).collect();
+        assert!(shared.contains(&PathBuf::from("CLAUDE.local.md")), "{shared:?}");
+        assert!(shared.contains(&PathBuf::from(".claude/settings.local.json")), "{shared:?}");
+        assert!(is_claude_local_file(Path::new("apps/api/CLAUDE.local.md")));
+        assert!(!is_claude_local_file(Path::new(".claude/settings.json")));
     }
 
     #[test]

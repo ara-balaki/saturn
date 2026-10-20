@@ -227,7 +227,7 @@ impl SettingsView {
             Row::new(
                 Section::General,
                 "Share env files with worktrees",
-                "A worktree's .env files point at the main checkout's, so a value added in either is in both. A worktree's own different file is left alone.",
+                "A worktree's .env files point at the main checkout's, so a value added in either is in both. So do CLAUDE.local.md and the commands you allowed Claude for good. A worktree's own different file is left alone.",
                 self.switch("share-env-files", settings.share_env_files, |settings, on| settings.share_env_files = on),
             ),
             Row::new(

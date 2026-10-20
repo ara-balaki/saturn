@@ -110,7 +110,9 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
 - Several repos in one window, as tabs in the title bar (the + after them, or ⌘O, adds one). Their agents share one grid.
 - Focus a pane that works in another git worktree, and the sidebar follows it there.
 - Worktrees share the main checkout's `.env` files: each one's is a link to main's, so a value added
-  in any worktree is in all of them. A worktree's own, different file is left alone.
+  in any worktree is in all of them. `CLAUDE.local.md` and `.claude/settings.local.json` (the commands
+  you allowed Claude for good) are shared the same way; Claude shares its own memory already. A
+  worktree's own, different file is left alone.
 - New agent (⌘⇧N): name the work (`fix-login`) and Saturn makes a worktree for it on a branch of that
   name, sets it up with the [worktree recipe](#worktree-recipe), and starts your agent there. The
   palette's "Start the app" opens a tab per server.
@@ -252,7 +254,7 @@ Open them with ⌘, or the gear in the title bar: sections on the left, with a s
 them. They're stored in `~/Library/Application Support/Saturn/settings.json`.
 
 - **General**: notifications when an agent needs you while Saturn is in the background; the menu bar
-  icon with how many agents wait for you; sharing `.env` files with worktrees; checking for updates now.
+  icon with how many agents wait for you; sharing `.env` and Claude's local files with worktrees; checking for updates now.
 - **Appearance**: System, Light or Dark; the text size of terminals and files; the plan usage card.
 - **Editor**: format on save (with the formatter your project already uses), wrapping long lines,
   line numbers, indent guides, visible whitespace, tab width.
