@@ -103,6 +103,7 @@ actions!(
         ShowPreview,
         ShowContext,
         TeachRepo,
+        SendToSeveral,
     ]
 );
 
@@ -139,6 +140,7 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("Maximise the pane", "maximize-2", Box::new(ToggleMaximize)),
         ("Go to the next agent that needs you", "bot", Box::new(NextAttention)),
         ("New agent", "square-plus", Box::new(OpenTicketPicker)),
+        ("Send to several agents", "send", Box::new(SendToSeveral)),
         ("Show or hide the sidebar", "panel-left", Box::new(ToggleSidebar)),
         ("Show or hide the editor", "panel-top", Box::new(ToggleEditor)),
         ("Show or hide your tickets", "panel-right", Box::new(ToggleTickets)),
@@ -1712,20 +1714,74 @@ impl Workspace {
                 if !view.state.asks_for_you() {
                     return None;
                 }
-                let folder = view.cwd.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
-                let place = match self.checkouts.get(&tab) {
-                    Some(checkout) => format!("{folder} · {}", checkout.branch),
-                    None => folder,
-                };
                 Some(crate::queue_view::Row {
                     tab,
                     name: self.tab_name(tab, cx),
-                    place,
+                    place: self.place(tab, cx),
                     state: view.state,
                     waiting: self.waits.get(&tab).cloned(),
                 })
             })
             .collect()
+    }
+
+    /// Every pane, for Send to several agents: where it works, and what a message would do there.
+    pub fn broadcast_panes(&self, cx: &gpui_kit::App) -> Vec<crate::broadcast_view::Pane> {
+        use crate::broadcast_view::{Pane, Reach};
+        self.layout
+            .tabs()
+            .filter_map(|tab| {
+                let view = self.terminals.get(&tab)?.read(cx);
+                let program = view.foreground_pid().and_then(process_name)?;
+                // A login shell is named with a dash in front, `-zsh`.
+                let program = program.trim_start_matches('-');
+                let reach = if AGENTS.contains(&program) {
+                    Reach::Agent
+                } else if SHELLS.contains(&program) {
+                    Reach::Shell
+                } else {
+                    Reach::Busy(program.to_owned())
+                };
+                Some(Pane { tab, name: self.tab_name(tab, cx), place: self.place(tab, cx), reach })
+            })
+            .collect()
+    }
+
+    /// Sends one message to several panes, read again now in case one changed: typed into the
+    /// agent, or starting Claude with it where there's only a shell. Busy panes are left alone.
+    pub fn send_to_panes(&mut self, tabs: &[TabId], message: &str, cx: &mut Context<Self>) {
+        use crate::broadcast_view::Reach;
+        for pane in self.broadcast_panes(cx) {
+            if !tabs.contains(&pane.tab) {
+                continue;
+            }
+            let Some(view) = self.terminals.get(&pane.tab) else { continue };
+            match pane.reach {
+                Reach::Agent => view.update(cx, |view, _| {
+                    view.paste(message);
+                    view.write(b"\r".to_vec());
+                }),
+                Reach::Shell => {
+                    let command = format!("claude {}\r", settings::shell_quote(message));
+                    view.update(cx, |view, _| view.write(command.into_bytes()));
+                }
+                Reach::Busy(_) => {}
+            }
+        }
+        cx.notify();
+    }
+
+    /// Where a tab works, for lists: its folder, and its branch when known.
+    fn place(&self, tab: TabId, cx: &gpui_kit::App) -> String {
+        let folder = self
+            .terminals
+            .get(&tab)
+            .and_then(|view| view.read(cx).cwd.file_name().map(|name| name.to_string_lossy().into_owned()))
+            .unwrap_or_default();
+        match self.checkouts.get(&tab) {
+            Some(checkout) => format!("{folder} · {}", checkout.branch),
+            None => folder,
+        }
     }
 
     /// Answers the permission a tab's agent asks for, by pressing what you would in the pane:
@@ -3696,6 +3752,10 @@ impl Workspace {
             .on_action(cx.listener(|this, _: &RunCheck, window, cx| {
                 let checkout = this.focused_checkout(cx);
                 crate::palette::checks(cx.weak_entity(), checkout, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &SendToSeveral, window, cx| {
+                let panes = this.broadcast_panes(cx);
+                crate::broadcast_view::open(cx.weak_entity(), panes, window, cx);
             }))
             .on_action(cx.listener(|_, _: &ShowWaiting, window, cx| {
                 crate::queue_view::open(cx.weak_entity(), window, cx);

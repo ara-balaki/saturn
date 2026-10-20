@@ -362,7 +362,7 @@ impl ChangesView {
 
 /// A stage checkbox in the macOS manner: 14px, a quiet relative outline when off; when on, the
 /// accent with a soft highlight along its top edge and a thin white tick (a dash when partly).
-fn checkbox(id: impl Into<ElementId>, staged: Staged) -> gpui_kit::Stateful<gpui_kit::Div> {
+pub fn checkbox(id: impl Into<ElementId>, staged: Staged) -> gpui_kit::Stateful<gpui_kit::Div> {
     let on = staged != Staged::No;
     div()
         .id(id)

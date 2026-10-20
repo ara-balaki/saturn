@@ -20,6 +20,8 @@
 //! - `SATURN_DROP=path` drops that file on the middle of the window, as Finder would.
 //! - `SATURN_RUN_COMMAND="Start the app"` runs that command from the palette's list, by its name
 //!   (after `SATURN_RUN_COMMAND_AFTER` seconds, else 1.5).
+//! - `SATURN_BROADCAST=text` writes that in Send to several agents (`SATURN_BROADCAST_SEND=1` sends it
+//!   two seconds after it opens).
 //! - `SATURN_UNDO_TURN=6` presses the first pane's "Undo the agent's last turn" after 6 seconds.
 //! - `SATURN_ANSWER=allow|deny` answers the first pane's permission after 5 seconds.
 //! - `SATURN_RUN_CHECKS=1` runs every check of the focused pane's checkout.

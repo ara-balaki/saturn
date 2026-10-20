@@ -217,10 +217,11 @@ pub fn icon_button(id: impl Into<ElementId>, name: &str, quiet: bool) -> gpui_ki
 /// accent fill with a soft blue bloom beneath it.
 pub fn button(
     id: impl Into<ElementId>,
-    label: &'static str,
+    label: impl Into<gpui_kit::SharedString>,
     shortcut: Option<&'static str>,
     primary: bool,
 ) -> gpui_kit::Stateful<gpui_kit::Div> {
+    let label = label.into();
     let hint = if primary { theme::color(color::INK_ON_ACCENT).opacity(0.7) } else { theme::color(color::INK_FAINT) };
     div()
         .id(id)

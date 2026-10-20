@@ -95,6 +95,9 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   each waits for: a permission with the command or file it's for, a question, a finished turn with
   the start of its last words, a failure. Allow or deny a permission right there (Saturn presses the
   key in the pane), or go to the pane.
+- **Send to several agents** (⌘⇧P): one message, typed into every pane you pick. Panes with an agent
+  are picked to begin with; a pane with only a shell starts Claude with it, and a busy one (a server,
+  a build) is left alone.
 - macOS notifies you while Saturn is in the background, and a small Saturn in the menu bar shows how
   many are waiting. The moon in the title bar (Focus) holds notifications while you concentrate;
   stopping it gives one that says what happened meanwhile.
