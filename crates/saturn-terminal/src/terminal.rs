@@ -7,10 +7,12 @@ use std::time::Instant;
 
 use alacritty_terminal::event::{Event as EngineEvent, EventListener};
 use alacritty_terminal::grid::{Dimensions, Scroll};
-use alacritty_terminal::index::{Column, Point, Side};
+use alacritty_terminal::index::{Column, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
+use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::{Config, Term, TermMode, viewport_to_point};
 use alacritty_terminal::vte::ansi::Processor;
+use saturn_core::links::{can_open, url_at};
 use saturn_core::program_status::{PROBE_REPLY, ProgramStatus};
 use saturn_core::pull_request::LinkScanner;
 
@@ -34,6 +36,20 @@ pub enum TerminalEvent {
     Copy(String),
     /// A GitHub pull request was linked: an agent printed the one it opened, or you pasted one.
     PullRequestLink(String),
+}
+
+/// A link on screen: the cells it covers, for underlining, and where it goes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Link {
+    pub start: Point,
+    pub end: Point,
+    pub target: String,
+}
+
+impl Link {
+    pub fn contains(&self, point: Point) -> bool {
+        self.start <= point && point <= self.end
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -204,6 +220,53 @@ impl Terminal {
         self.term.selection_to_string().filter(|text| !text.trim().is_empty())
     }
 
+    /// The link at a cell on screen: one the program marked (OSC 8), as Claude Code does, or an
+    /// address written out in the text.
+    pub fn link_at(&self, row: usize, col: usize) -> Option<Link> {
+        let point = self.grid_point(row, col);
+        let grid = self.term.grid();
+        if let Some(target) = grid[point].hyperlink().map(|link| link.uri().to_owned()) {
+            // A marked link can run on over the next rows; it ends where the marking does.
+            let same = |at: &Point| grid[*at].hyperlink().is_some_and(|link| link.uri() == target);
+            let (mut start, mut end) = (point, point);
+            while let Some(previous) = self.neighbour(start, false).filter(same) {
+                start = previous;
+            }
+            while let Some(next) = self.neighbour(end, true).filter(same) {
+                end = next;
+            }
+            return can_open(&target).then_some(Link { start, end, target });
+        }
+
+        // The whole line, across the rows it wrapped onto, since long addresses wrap.
+        let wraps = |line: Line| grid[line][self.term.last_column()].flags.contains(Flags::WRAPLINE);
+        let (mut first, mut last) = (point.line, point.line);
+        while first > self.term.topmost_line() && wraps(first - 1) {
+            first -= 1;
+        }
+        while last < self.term.bottommost_line() && wraps(last) {
+            last += 1;
+        }
+        let columns = self.term.columns();
+        let text: Vec<char> =
+            (first.0..=last.0).flat_map(|line| grid[Line(line)].into_iter().map(|cell| cell.c)).collect();
+        let index = usize::try_from(point.line.0 - first.0).ok()? * columns + point.column.0;
+        let (range, target) = url_at(&text, index)?;
+        let at = |index: usize| Some(Point::new(first + i32::try_from(index / columns).ok()?, Column(index % columns)));
+        Some(Link { start: at(range.start)?, end: at(range.end - 1)?, target })
+    }
+
+    /// The cell after (or before) a point, reading left to right and on to the next row.
+    fn neighbour(&self, at: Point, forward: bool) -> Option<Point> {
+        let last_column = self.term.last_column();
+        match (forward, at.column) {
+            (true, column) if column < last_column => Some(Point::new(at.line, column + 1)),
+            (true, _) => (at.line < self.term.bottommost_line()).then(|| Point::new(at.line + 1, Column(0))),
+            (false, Column(0)) => (at.line > self.term.topmost_line()).then(|| Point::new(at.line - 1, last_column)),
+            (false, column) => Some(Point::new(at.line, column - 1)),
+        }
+    }
+
     pub fn foreground_pid(&self) -> Option<i32> {
         self.pty.foreground_pid()
     }
@@ -233,6 +296,25 @@ mod tests {
         assert_eq!(terminal.selected_text().as_deref(), Some("first line\nsecond"));
         terminal.clear_selection();
         assert_eq!(terminal.selected_text(), None);
+    }
+
+    #[test]
+    fn finds_links_in_text_and_links_the_program_marked() {
+        let size = GridSize { cols: 20, rows: 5 };
+        let (mut terminal, _output) = Terminal::spawn(Path::new("/tmp"), size, &[]).expect("a shell starts");
+        // A written-out address that wraps onto the next row, then a marked link with other words.
+        terminal.advance(b"\x1b[2J\x1b[Hsee https://acme.dev/a/long/path ok\r\n");
+        terminal.advance(b"\x1b]8;;https://acme.dev/docs\x1b\\the docs\x1b]8;;\x1b\\ here");
+
+        let written = terminal.link_at(1, 2).expect("the wrapped address");
+        assert_eq!(written.target, "https://acme.dev/a/long/path");
+        assert_eq!((written.start, written.end), (Point::new(Line(0), Column(4)), Point::new(Line(1), Column(11))));
+        assert_eq!(terminal.link_at(0, 1), None);
+
+        let marked = terminal.link_at(2, 5).expect("the marked link");
+        assert_eq!(marked.target, "https://acme.dev/docs");
+        assert_eq!((marked.start, marked.end), (Point::new(Line(2), Column(0)), Point::new(Line(2), Column(7))));
+        assert_eq!(terminal.link_at(2, 10), None);
     }
 
     #[test]

@@ -1510,6 +1510,9 @@ impl Workspace {
             ("TERM".into(), "xterm-256color".into()),
             ("COLORTERM".into(), "truecolor".into()),
             ("TERM_PROGRAM".into(), "Saturn".into()),
+            // Programs don't know Saturn by name; this tells them it can open links they mark
+            // (OSC 8), so Claude Code's links work even where the text wraps or hides the address.
+            ("FORCE_HYPERLINK".into(), "1".into()),
             ("SATURN_PANE_ID".into(), tab.0.to_string()),
         ];
         // Claude sessions in this pane load the Saturn plugin and report to this window only.
