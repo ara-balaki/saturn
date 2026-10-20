@@ -100,7 +100,7 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
 ### Terminals
 
 - Split right (⌘D) or down (⌘⇧D), or drag a tab onto a pane's edge to split it there. Tabs in every
-  pane, dividers you drag, one pane maximised with ⌘⇧↩.
+  pane, dividers you drag (double-click one to even out its two panes), one pane maximised with ⌘⇧↩.
 - A real terminal underneath (alacritty's engine), so TUIs, colours and the mouse work as they should.
 - Drop a file, a screenshot say, on a terminal to type its path, so Claude attaches it.
 - Several repos in one window, as tabs in the title bar (the + after them, or ⌘O, adds one). Their agents share one grid.
