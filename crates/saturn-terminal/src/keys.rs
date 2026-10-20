@@ -117,6 +117,28 @@ pub fn encode(key: &KeyPress, app_cursor: bool) -> Option<Vec<u8>> {
 /// Files dropped on a terminal, as Terminal.app types them: each path with the shell's special
 /// characters escaped, a space between, and one after, ready to keep typing. Claude Code reads a
 /// dropped image's path as an attachment.
+/// What pasting the clipboard types: copied files as their paths (a copied file's clipboard also
+/// carries its bare name as text, which an agent can't find), an image (a screenshot copied to the
+/// clipboard) saved into `folder` and typed as its path, else the text. Paths are what Claude Code
+/// attaches, as with a dropped file.
+pub fn paste_text(item: &gpui_kit::ClipboardItem, folder: &std::path::Path) -> Option<String> {
+    for entry in &item.entries {
+        if let gpui_kit::ClipboardEntry::ExternalPaths(paths) = entry {
+            return Some(dropped_paths(paths.paths()));
+        }
+    }
+    for entry in &item.entries {
+        if let gpui_kit::ClipboardEntry::Image(image) = entry {
+            let kind = image.format.mime_type().rsplit('/').next().unwrap_or("png");
+            let extension = kind.split('+').next().unwrap_or("png").replace("jpeg", "jpg");
+            let path = folder.join(format!("pasted-{}.{extension}", image.id));
+            let saved = std::fs::create_dir_all(folder).and_then(|()| std::fs::write(&path, &image.bytes));
+            return saved.ok().map(|()| dropped_paths(&[path]));
+        }
+    }
+    item.text()
+}
+
 pub fn dropped_paths(paths: &[std::path::PathBuf]) -> String {
     let mut text = String::new();
     for path in paths {
@@ -141,6 +163,32 @@ mod tests {
 
     fn bytes(key: &KeyPress) -> Vec<u8> {
         encode(key, false).expect("the terminal gets this key")
+    }
+
+    #[test]
+    fn pastes_files_as_paths_and_images_as_saved_files() {
+        let dir = tempfile::tempdir().expect("a temporary folder");
+        let files = gpui_kit::ClipboardItem {
+            entries: vec![
+                gpui_kit::ClipboardEntry::ExternalPaths(gpui_kit::ExternalPaths(
+                    vec![std::path::PathBuf::from("/Users/mia/data.json")].into(),
+                )),
+                gpui_kit::ClipboardEntry::String(gpui_kit::ClipboardString::new("data.json".to_owned())),
+            ],
+        };
+        assert_eq!(paste_text(&files, dir.path()).as_deref(), Some("/Users/mia/data.json "));
+        let image = gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Png, b"\x89PNG".to_vec());
+        let typed = paste_text(&gpui_kit::ClipboardItem::new_image(&image), dir.path()).expect("a path");
+        let saved = std::path::PathBuf::from(typed.trim_end());
+        assert!(
+            saved.starts_with(dir.path()) && saved.extension().is_some_and(|extension| extension == "png"),
+            "{typed}"
+        );
+        assert_eq!(std::fs::read(&saved).expect("saved"), b"\x89PNG");
+        assert_eq!(
+            paste_text(&gpui_kit::ClipboardItem::new_string("hi".to_owned()), dir.path()).as_deref(),
+            Some("hi")
+        );
     }
 
     #[test]

@@ -112,7 +112,9 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   pane, one pane maximised with ⌘⇧↩. Panes share the space evenly whenever one opens or closes; drag a
   divider to change that, or double-click it to even out its two panes.
 - A real terminal underneath (alacritty's engine), so TUIs, colours and the mouse work as they should.
-- Drop a file, a screenshot say, on a terminal to type its path, so Claude attaches it.
+- Drop a file, a screenshot say, on a terminal to type its path, so Claude attaches it. Pasting works
+  the same: copied files (from Finder) and copied images (a screenshot copied to the clipboard) paste as
+  paths Claude attaches.
 - ⌘-click a link to open it, a pull request Claude links as `#123` too.
 - Each pane shows the servers its agent runs, named after their app and port (`web :5173`); click one
   to open it. The repo's Docker Compose services (`postgres :5432`) sit in the bar at the bottom.

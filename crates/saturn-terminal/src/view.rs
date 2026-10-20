@@ -268,8 +268,10 @@ impl TerminalView {
         }
     }
 
+    /// Pastes the clipboard: text as text, copied files and images as paths an agent attaches.
     pub fn paste_from_clipboard(&mut self, cx: &mut Context<Self>) {
-        if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+        let folder = std::env::temp_dir().join("saturn-pasted");
+        if let Some(text) = cx.read_from_clipboard().and_then(|item| keys::paste_text(&item, &folder)) {
             self.paste(&text);
             cx.emit(TerminalViewEvent::Used);
         }

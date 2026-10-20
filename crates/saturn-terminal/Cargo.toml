@@ -15,5 +15,8 @@ portable-pty.workspace = true
 anyhow.workspace = true
 async-channel.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true
