@@ -226,6 +226,17 @@ To change the steps, "Create worktree recipe" in the palette saves the guess to
 - `run` names the commands that start the app. "Start the app" opens a tab for each, named after it.
 - `cleanup` is for when a worktree goes away.
 
+Each checkout also gets its own block of ten ports, the same every time: `SATURN_PORT` in its
+terminals is the first (42000, 42010…), and the sidebar shows the block. Use it where two worktrees'
+servers would otherwise clash; shell arithmetic gives the rest:
+
+```json
+"run": {
+  "api": "PORT=$((SATURN_PORT + 1)) pnpm --filter api dev",
+  "web": "API_URL=http://localhost:$((SATURN_PORT + 1)) pnpm --filter web dev --port $SATURN_PORT"
+}
+```
+
 A list of steps runs one after another and stops at the first that fails. Every field is optional. A
 branch made before the recipe existed uses the main checkout's. Steps Saturn guessed say so in the
 pane before they run.
@@ -252,7 +263,9 @@ them. They're stored in `~/Library/Application Support/Saturn/settings.json`.
 - **Keyboard shortcuts**: click one and press the keys you want; a shortcut that had them gives them
   up.
 - **ClickUp** (optional): your API token, kept in a file only you can read, plus, for each project, the
-  command a ticket starts (`claude -n {ticket}` by default) and whether it gets its own worktree.
+  command a ticket starts (`claude -n {ticket}` by default; `claude -n {ticket} "/start {ticket}"`
+  sends the agent a first message, so it starts working at once) and whether it gets its own
+  worktree.
 
 ## FAQ
 

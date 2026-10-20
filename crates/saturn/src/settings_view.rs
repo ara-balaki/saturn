@@ -579,7 +579,7 @@ impl SettingsView {
             Row::new(
                 Section::ClickUp,
                 format!("Starting a ticket in {project_name}"),
-                "Runs in the new pane. {ticket} becomes the ticket's id (ABC-236), {title} its title.",
+                "Runs in the new pane. {ticket} becomes the ticket's id (ABC-236), {title} its title. To have the agent start straight away, give it a first message: claude -n {ticket} \"/start {ticket}\".",
                 Input::new(&self.command),
             )
             .wide(),

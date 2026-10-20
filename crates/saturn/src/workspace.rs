@@ -18,6 +18,7 @@ use saturn_core::agent_state::{AgentState, tab_title};
 use saturn_core::clickup::Ticket;
 use saturn_core::git;
 use saturn_core::layout::{Cell, CellId, Direction, Layout, RowId, TabId};
+use saturn_core::ports;
 use saturn_core::pull_request::{self, PrState, PullRequest};
 use saturn_core::recipe::{self, Source};
 use saturn_core::servers::{self, Server, Service};
@@ -276,6 +277,8 @@ pub struct Workspace {
     services: Vec<Service>,
     /// Whether the two above are being read.
     reading_servers: bool,
+    /// Each checkout's first port (`SATURN_PORT`), as its terminals were given it.
+    ports: HashMap<PathBuf, u16>,
 }
 
 /// A background refresh: not running, running, or running with another asked for meanwhile (a new
@@ -613,7 +616,9 @@ fn process_name(pid: i32) -> Option<String> {
 }
 
 impl Workspace {
-    pub fn new(project: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// What changes outside Saturn without telling it, read again on timers: ClickUp's tickets,
+    /// branches and pull requests, and the servers panes run.
+    fn keep_fresh(cx: &mut Context<Self>) {
         // A saved ClickUp token turns the ticket picker on; it's read off the main thread.
         cx.spawn(async move |this, cx| {
             let token = cx.background_spawn(async { clickup::token() }).await;
@@ -654,6 +659,10 @@ impl Workspace {
             }
         })
         .detach();
+    }
+
+    pub fn new(project: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::keep_fresh(cx);
         // Pane sizes change by dragging, which saves nothing on its own; quitting saves them.
         cx.on_app_quit(|this, cx| {
             this.save_session(cx);
@@ -703,6 +712,7 @@ impl Workspace {
             servers: HashMap::new(),
             services: Vec::new(),
             reading_servers: false,
+            ports: HashMap::new(),
             roots,
             root: project.clone(),
             follow_pane: true,
@@ -1666,6 +1676,12 @@ impl Workspace {
             ("FORCE_HYPERLINK".into(), "1".into()),
             ("SATURN_PANE_ID".into(), tab.0.to_string()),
         ];
+        // The checkout's own block of ports, the same in every terminal of it and across restarts.
+        let checkout = git::toplevel(cwd).unwrap_or_else(|| cwd.to_owned());
+        if let Some(port) = settings::data_dir().and_then(|dir| ports::block_for(&dir.join("ports.json"), &checkout)) {
+            env.push(("SATURN_PORT".into(), port.to_string()));
+            self.ports.insert(checkout, port);
+        }
         // Claude sessions in this pane load the Saturn plugin and report to this window only.
         if let (Some(bridge), Some(plugin)) = (&self.bridge, plugin_dir()) {
             env.push(("SATURN_SOCKET".into(), bridge.path().display().to_string()));
@@ -2407,7 +2423,8 @@ impl Workspace {
         };
         let name = self.root.file_name().map_or_else(|| "/".to_owned(), |name| name.to_string_lossy().into_owned());
         let branch = self.roots.get(&self.root).and_then(|views| views.branch.clone());
-        let detail = branch.map_or_else(|| short.clone(), |branch| format!("{branch} · {short}"));
+        let ports = self.ports.get(&self.root).map(|port| format!("ports {port}–{}", port + ports::BLOCK - 1));
+        let detail = [branch, ports, Some(short.clone())].into_iter().flatten().collect::<Vec<_>>().join(" · ");
         let follow = chrome::icon_button("follow-pane", if self.follow_pane { "locate-fixed" } else { "locate" }, true)
             .when(self.follow_pane, |button| button.bg(theme::fill_pressed()))
             .tooltip(chrome::tip("Follow the focused terminal: the sidebar shows the folder it works in"))
