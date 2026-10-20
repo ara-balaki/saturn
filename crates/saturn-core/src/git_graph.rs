@@ -8,7 +8,6 @@
 //! through for the lanes passing by, and from its commit down to its parents' lanes.
 
 use std::path::Path;
-use std::process::Command;
 
 /// The fields Saturn asks `git log` for, separated by unit separators, one commit per record
 /// separator: hash, parents, refs, author, author time, subject.
@@ -35,9 +34,8 @@ impl Commit {
 
 /// The newest `limit` commits of every branch in `repo`.
 pub fn log(repo: &Path, limit: usize) -> Vec<Commit> {
-    let output = Command::new("git")
+    let output = crate::git::command(repo)
         .args(["--no-optional-locks", "log", "--all", "--topo-order", FORMAT, &format!("-n{limit}")])
-        .current_dir(repo)
         .output();
     match output {
         Ok(output) if output.status.success() => parse(&String::from_utf8_lossy(&output.stdout)),

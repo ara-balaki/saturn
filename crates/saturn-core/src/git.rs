@@ -31,11 +31,10 @@ impl FileState {
 /// Changed files by absolute path, from `git status` in `repo`. Empty when `repo` is not a git
 /// repository or git is missing.
 pub fn status(repo: &Path) -> HashMap<PathBuf, FileState> {
-    let Ok(output) = Command::new("git")
+    let Ok(output) = command(repo)
         // A read must not write: without this, `git status` refreshes .git/index, which the file
         // watcher sees, which runs `git status` again.
         .args(["--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=all"])
-        .current_dir(repo)
         .output()
     else {
         return HashMap::new();
@@ -49,7 +48,7 @@ pub fn status(repo: &Path) -> HashMap<PathBuf, FileState> {
 
 /// The repository's top folder, which `git status` paths are relative to.
 pub fn toplevel(dir: &Path) -> Option<PathBuf> {
-    let output = Command::new("git").args(["rev-parse", "--show-toplevel"]).current_dir(dir).output().ok()?;
+    let output = command(dir).args(["rev-parse", "--show-toplevel"]).output().ok()?;
     output.status.success().then(|| PathBuf::from(String::from_utf8_lossy(&output.stdout).trim()))
 }
 
@@ -141,10 +140,9 @@ fn change_index(repo: &Path, command: &[&str], paths: &[String]) -> Result<(), S
     }
     let top = toplevel(repo).ok_or_else(|| format!("{} is not a git repository", repo.display()))?;
     // Writing the index needs git's lock, so not `git()`, which reads without it.
-    let output = Command::new("git")
+    let output = self::command(&top)
         .args(command)
         .args(paths)
-        .current_dir(&top)
         .output()
         .map_err(|error| format!("git could not run: {error}"))?;
     if output.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&output.stderr).trim().to_owned()) }
@@ -250,8 +248,32 @@ pub fn ticket_worktree(repo: &Path, ticket: &str) -> Result<PathBuf, String> {
 }
 
 fn git(repo: &Path) -> Command {
+    let mut command = command(repo);
+    command.arg("--no-optional-locks");
+    command
+}
+
+/// Git's variables that say which repository to work on. A hook sets them for its own repository
+/// (`GIT_DIR` in a worktree, `GIT_INDEX_FILE` before a commit), and a command that inherited them
+/// would work on that repository whatever folder it ran in: tests run by a hook once committed
+/// into the repository being pushed.
+const LOCATION_VARIABLES: [&str; 7] = [
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_PREFIX",
+];
+
+/// `git` working on the repository in `dir`, and only that one.
+pub fn command(dir: &Path) -> Command {
     let mut command = Command::new("git");
-    command.arg("--no-optional-locks").current_dir(repo);
+    command.current_dir(dir);
+    for name in LOCATION_VARIABLES {
+        command.env_remove(name);
+    }
     command
 }
 
@@ -304,7 +326,7 @@ mod tests {
     fn repo() -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("a temp dir");
         let sh = |args: &[&str]| {
-            let status = Command::new("git").args(args).current_dir(dir.path()).output().expect("git runs").status;
+            let status = command(dir.path()).args(args).output().expect("git runs").status;
             assert!(status.success(), "git {args:?}");
         };
         sh(&["init", "--quiet", "--initial-branch=main"]);

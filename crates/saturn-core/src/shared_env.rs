@@ -6,7 +6,6 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// What sharing did with one env file in a worktree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,9 +34,8 @@ pub fn is_env_file(name: &str) -> bool {
 /// The env files of a checkout that git ignores, relative to it. Ignored folders
 /// (`node_modules`) are skipped whole.
 pub fn env_files(checkout: &Path) -> Vec<PathBuf> {
-    let Ok(output) = Command::new("git")
+    let Ok(output) = crate::git::command(checkout)
         .args(["--no-optional-locks", "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"])
-        .current_dir(checkout)
         .output()
     else {
         return Vec::new();
@@ -103,7 +101,7 @@ mod tests {
     use super::*;
 
     fn git(dir: &Path, args: &[&str]) {
-        let status = Command::new("git").args(args).current_dir(dir).output().expect("git runs").status;
+        let status = crate::git::command(dir).args(args).output().expect("git runs").status;
         assert!(status.success(), "git {args:?}");
     }
 
