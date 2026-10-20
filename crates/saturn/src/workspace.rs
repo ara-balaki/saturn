@@ -536,6 +536,16 @@ fn move_divider(sizes: &[f32], index: usize, at: f32) -> Vec<f32> {
     next
 }
 
+/// Shares the space of the two neighbours of the divider after `index` evenly between them,
+/// leaving the others as they are.
+fn even_divider(sizes: &[f32], index: usize) -> Vec<f32> {
+    let half = f32::midpoint(sizes[index], sizes[index + 1]);
+    let mut next = sizes.to_vec();
+    next[index] = half;
+    next[index + 1] = half;
+    next
+}
+
 /// The name of the program in the foreground of a terminal, e.g. `zsh` or `claude`.
 fn process_name(pid: i32) -> Option<String> {
     let output = std::process::Command::new("ps").args(["-o", "comm=", "-p", &pid.to_string()]).output().ok()?;
@@ -1899,8 +1909,9 @@ impl Workspace {
         pane.into_any_element()
     }
 
-    /// A divider between rows or cells: the grid's gap, draggable.
-    fn render_divider(divider: GridDivider, vertical: bool) -> AnyElement {
+    /// A divider between rows or cells: the grid's gap, draggable. A double click makes its two
+    /// neighbours the same size.
+    fn render_divider(divider: GridDivider, vertical: bool, cx: &mut Context<Self>) -> AnyElement {
         let id = match divider {
             GridDivider::Rows(index) => ("row-divider", index as u64),
             GridDivider::Cells(row, index) => ("cell-divider", row.key() * 1000 + index as u64),
@@ -1911,6 +1922,23 @@ impl Workspace {
             .when(vertical, |d| d.w(len(space::SPACE_2)).h_full().cursor(CursorStyle::ResizeLeftRight))
             .when(!vertical, |d| d.h(len(space::SPACE_2)).w_full().cursor(CursorStyle::ResizeUpDown))
             .on_drag(divider, |_, _, _, cx| cx.new(|_| DividerPreview))
+            .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+                if event.click_count() != 2 {
+                    return;
+                }
+                match divider {
+                    GridDivider::Rows(index) => {
+                        let sizes: Vec<f32> = this.layout.rows.iter().map(|row| row.size).collect();
+                        this.layout.resize_rows(&even_divider(&sizes, index));
+                    }
+                    GridDivider::Cells(row_id, index) => {
+                        let Some(row) = this.layout.rows.iter().find(|row| row.id == row_id) else { return };
+                        let sizes: Vec<f32> = row.cells.iter().map(|cell| cell.size).collect();
+                        this.layout.resize_cells(row_id, &even_divider(&sizes, index));
+                    }
+                }
+                cx.notify();
+            }))
             .into_any_element()
     }
 
@@ -1934,7 +1962,7 @@ impl Workspace {
                 continue;
             }
             if row_index > 0 && maximized.is_none() {
-                grid = grid.child(Self::render_divider(GridDivider::Rows(row_index - 1), false));
+                grid = grid.child(Self::render_divider(GridDivider::Rows(row_index - 1), false, cx));
             }
             let row_id = row.id;
             let cell_sizes: Vec<f32> = row.cells.iter().map(|cell| cell.size).collect();
@@ -1956,7 +1984,7 @@ impl Workspace {
             for (cell_index, cell) in shown.into_iter().enumerate() {
                 if cell_index > 0 && maximized.is_none() {
                     row_element =
-                        row_element.child(Self::render_divider(GridDivider::Cells(row_id, cell_index - 1), true));
+                        row_element.child(Self::render_divider(GridDivider::Cells(row_id, cell_index - 1), true, cx));
                 }
                 let mut cell_element =
                     div().flex().min_w_0().flex_basis(relative(0.)).child(self.render_cell(cell, cx));
@@ -2429,7 +2457,7 @@ impl Render for Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::{Direction, drop_side, move_divider};
+    use super::{Direction, drop_side, even_divider, move_divider};
     use gpui_kit::{Bounds, point, px, size};
 
     #[test]
@@ -2447,6 +2475,13 @@ mod tests {
     fn moves_a_divider_and_keeps_the_pair_total() {
         let sizes = move_divider(&[1.0, 1.0, 2.0], 0, 0.125);
         assert!((sizes[0] - 0.5).abs() < 1e-6 && (sizes[1] - 1.5).abs() < 1e-6 && (sizes[2] - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn evens_out_the_two_neighbours_of_a_divider() {
+        let sizes = even_divider(&[1.0, 0.5, 1.5, 2.0], 1);
+        assert!((sizes[1] - 1.0).abs() < 1e-6 && (sizes[2] - 1.0).abs() < 1e-6);
+        assert!((sizes[0] - 1.0).abs() < 1e-6 && (sizes[3] - 2.0).abs() < 1e-6);
     }
 
     #[test]
