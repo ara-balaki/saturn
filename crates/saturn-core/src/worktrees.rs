@@ -1,0 +1,255 @@
+//! A repository's worktrees, and which of them are done with. Agents make worktrees faster than
+//! anyone tidies them, and removing one by hand means checking it's merged (a squash merge leaves no
+//! trace in the branch), has nothing uncommitted, and has nothing still running in it. This reads all
+//! of that, and removes a worktree the way the repository asks (its recipe's `cleanup` first).
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+/// One worktree, as `git worktree list --porcelain` tells it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Worktree {
+    pub path: PathBuf,
+    /// `None` when it's on a detached `HEAD`.
+    pub branch: Option<String>,
+    /// The main checkout, which is never removed.
+    pub main: bool,
+    /// Its folder is gone; git still lists it until it's pruned.
+    pub missing: bool,
+}
+
+/// Reads `git worktree list --porcelain`: blocks of lines, one per worktree, the main one first.
+pub fn parse_list(porcelain: &str) -> Vec<Worktree> {
+    porcelain
+        .split("\n\n")
+        .filter_map(|block| {
+            let mut worktree = None::<Worktree>;
+            for line in block.lines() {
+                if let Some(path) = line.strip_prefix("worktree ") {
+                    worktree = Some(Worktree { path: PathBuf::from(path), branch: None, main: false, missing: false });
+                } else if let (Some(branch), Some(worktree)) = (line.strip_prefix("branch "), worktree.as_mut()) {
+                    worktree.branch = Some(branch.trim_start_matches("refs/heads/").to_owned());
+                } else if let (true, Some(worktree)) = (line.starts_with("prunable"), worktree.as_mut()) {
+                    worktree.missing = true;
+                }
+            }
+            worktree
+        })
+        .enumerate()
+        .map(|(index, worktree)| Worktree { main: index == 0, ..worktree })
+        .collect()
+}
+
+/// The worktrees of the repository `repo` is in, the main checkout first.
+pub fn list(repo: &Path) -> Vec<Worktree> {
+    run(repo, &["worktree", "list", "--porcelain"]).map(|out| parse_list(&out)).unwrap_or_default()
+}
+
+/// The branch work lands in: what `origin/HEAD` points at, else `main` or `master`.
+pub fn default_branch(repo: &Path) -> Option<String> {
+    run(repo, &["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"])
+        .map(|name| name.trim().to_owned())
+        .or_else(|| {
+            ["main", "master"]
+                .into_iter()
+                .find(|name| run(repo, &["rev-parse", "--verify", "--quiet", name]).is_some())
+                .map(str::to_owned)
+        })
+}
+
+/// Whether a branch's work is in the default branch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Merged {
+    No,
+    /// Its commits are in it (merged, or none of its own).
+    Yes,
+    /// Its changes are, under other commits: squashed or rebased in.
+    ByContent,
+}
+
+/// Whether `branch` is merged into `base`. A squash merge leaves the branch's commits out of `base`,
+/// so the content counts too: if merging the branch would change nothing, its work is in.
+pub fn merged(repo: &Path, branch: &str, base: &str) -> Merged {
+    let ancestor = crate::git::command(repo)
+        .args(["merge-base", "--is-ancestor", branch, base])
+        .status()
+        .is_ok_and(|status| status.success());
+    if ancestor {
+        return Merged::Yes;
+    }
+    let merged_tree =
+        run(repo, &["merge-tree", "--write-tree", base, branch]).and_then(|out| out.lines().next().map(str::to_owned));
+    let base_tree = run(repo, &["rev-parse", &format!("{base}^{{tree}}")]).map(|out| out.trim().to_owned());
+    match (merged_tree, base_tree) {
+        (Some(merged), Some(base)) if merged == base => Merged::ByContent,
+        _ => Merged::No,
+    }
+}
+
+/// Files changed or added and not committed, in a worktree. Ignored files (`node_modules`, shared env
+/// links) don't count.
+pub fn uncommitted(worktree: &Path) -> usize {
+    run(worktree, &["--no-optional-locks", "status", "--porcelain"]).map_or(0, |out| out.lines().count())
+}
+
+/// When the worktree's last commit was made, in seconds since 1970.
+pub fn last_commit(worktree: &Path) -> Option<i64> {
+    run(worktree, &["log", "-1", "--format=%ct"]).and_then(|out| out.trim().parse().ok())
+}
+
+/// The programs whose working folder is somewhere in each of `folders` (a dev server, an agent, a
+/// shell), by name: what would break if the folder went. Runs `lsof` over every process: off the main
+/// thread.
+pub fn programs_in(folders: &[PathBuf]) -> HashMap<PathBuf, Vec<String>> {
+    let Ok(output) = Command::new("lsof").args(["-nP", "-d", "cwd", "-Fcn"]).output() else {
+        return HashMap::new();
+    };
+    let mut found: HashMap<PathBuf, Vec<String>> = HashMap::new();
+    let mut program = String::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        if let Some(name) = line.strip_prefix('c') {
+            name.clone_into(&mut program);
+        } else if let Some(cwd) = line.strip_prefix('n') {
+            let cwd = Path::new(cwd);
+            if let Some(folder) = folders.iter().find(|folder| cwd.starts_with(folder)) {
+                let names = found.entry(folder.clone()).or_default();
+                if !names.contains(&program) {
+                    names.push(program.clone());
+                }
+            }
+        }
+    }
+    found
+}
+
+/// Removes a worktree: its recipe's `cleanup` first (when there is one), then the folder, then its
+/// branch when git agrees it's merged (`branch -d`; a squashed one stays, for git to keep its
+/// history). Refuses one with uncommitted work, as `git worktree remove` does. Says what happened.
+pub fn remove(main: &Path, worktree: &Worktree, cleanup: Option<&str>) -> Result<String, String> {
+    if worktree.main {
+        return Err("The main checkout stays.".to_owned());
+    }
+    if worktree.missing {
+        return run(main, &["worktree", "prune"])
+            .map(|_| "Forgot the missing worktree.".to_owned())
+            .ok_or_else(|| "git couldn't forget the missing worktree.".to_owned());
+    }
+    let mut said = Vec::new();
+    if let Some(cleanup) = cleanup {
+        let ran = Command::new("/bin/sh").args(["-c", cleanup]).current_dir(&worktree.path).output();
+        if !ran.is_ok_and(|output| output.status.success()) {
+            said.push(format!("Its cleanup (`{cleanup}`) failed; the worktree was removed anyway."));
+        }
+    }
+    let output = crate::git::command(main)
+        .args(["worktree", "remove"])
+        .arg(&worktree.path)
+        .output()
+        .map_err(|error| format!("git could not run: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+    }
+    if let Some(branch) = &worktree.branch
+        && run(main, &["branch", "-d", branch]).is_some()
+    {
+        said.push(format!("Deleted the merged branch {branch}."));
+    }
+    Ok(said.join(" "))
+}
+
+fn run(repo: &Path, args: &[&str]) -> Option<String> {
+    let output = crate::git::command(repo).args(args).output().ok()?;
+    output.status.success().then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn reads_the_list() {
+        let list = parse_list(
+            "worktree /code/acme-web\nHEAD 1111\nbranch refs/heads/main\n\nworktree /code/acme-web-abc-1\nHEAD 2222\nbranch refs/heads/abc-1\n\nworktree /tmp/gone\nHEAD 3333\ndetached\nprunable gitdir file points to non-existent location\n",
+        );
+        assert_eq!(list.len(), 3);
+        assert!(list[0].main && list[0].branch.as_deref() == Some("main"));
+        assert_eq!(list[1].branch.as_deref(), Some("abc-1"));
+        assert!(!list[1].main && !list[1].missing);
+        assert!(list[2].missing && list[2].branch.is_none());
+    }
+
+    fn git(dir: &Path, args: &[&str]) {
+        let status = crate::git::command(dir)
+            .args(["-c", "user.email=test@example.com", "-c", "user.name=Test"])
+            .args(args)
+            .output()
+            .expect("git runs")
+            .status;
+        assert!(status.success(), "git {args:?}");
+    }
+
+    #[test]
+    fn knows_merged_squashed_and_unfinished_work() {
+        let dir = tempfile::tempdir().expect("a temporary folder");
+        let main = dir.path().join("acme-web");
+        fs::create_dir_all(&main).expect("make folders");
+        git(&main, &["init", "-q", "-b", "main"]);
+        fs::write(main.join("a.txt"), "a\n").expect("write");
+        git(&main, &["add", "."]);
+        git(&main, &["commit", "-q", "-m", "start"]);
+        for (branch, file) in [("merged", "m.txt"), ("squashed", "s.txt"), ("open", "o.txt")] {
+            git(&main, &["switch", "-q", "-c", branch, "main"]);
+            fs::write(main.join(file), "work\n").expect("write");
+            git(&main, &["add", "."]);
+            git(&main, &["commit", "-q", "-m", branch]);
+        }
+        git(&main, &["switch", "-q", "main"]);
+        git(&main, &["merge", "-q", "--no-edit", "merged"]);
+        git(&main, &["merge", "-q", "--squash", "squashed"]);
+        git(&main, &["commit", "-q", "-m", "squashed in"]);
+        assert_eq!(merged(&main, "merged", "main"), Merged::Yes);
+        assert_eq!(merged(&main, "squashed", "main"), Merged::ByContent);
+        assert_eq!(merged(&main, "open", "main"), Merged::No);
+        assert_eq!(default_branch(&main).as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn removes_a_finished_worktree_and_its_merged_branch() {
+        let dir = tempfile::tempdir().expect("a temporary folder");
+        let main = dir.path().join("acme-web");
+        fs::create_dir_all(&main).expect("make folders");
+        git(&main, &["init", "-q", "-b", "main"]);
+        git(&main, &["commit", "-q", "--allow-empty", "-m", "start"]);
+        let path = dir.path().join("acme-web-abc-1");
+        git(&main, &["worktree", "add", "-q", "-b", "abc-1", &path.to_string_lossy()]);
+        let worktrees = list(&main);
+        let worktree = worktrees.iter().find(|worktree| worktree.branch.as_deref() == Some("abc-1")).expect("listed");
+        assert_eq!(uncommitted(&worktree.path), 0);
+
+        let marker = dir.path().join("cleaned");
+        let said = remove(&main, worktree, Some(&format!("touch {}", marker.display()))).expect("removed");
+        assert!(marker.exists(), "cleanup ran first");
+        assert!(!path.exists());
+        assert!(said.contains("abc-1"), "{said}");
+        assert_eq!(list(&main).len(), 1);
+        assert!(remove(&main, &list(&main)[0], None).is_err(), "the main checkout stays");
+    }
+
+    #[test]
+    fn refuses_a_worktree_with_uncommitted_work() {
+        let dir = tempfile::tempdir().expect("a temporary folder");
+        let main = dir.path().join("acme-web");
+        fs::create_dir_all(&main).expect("make folders");
+        git(&main, &["init", "-q", "-b", "main"]);
+        git(&main, &["commit", "-q", "--allow-empty", "-m", "start"]);
+        let path = dir.path().join("acme-web-abc-2");
+        git(&main, &["worktree", "add", "-q", "-b", "abc-2", &path.to_string_lossy()]);
+        fs::write(path.join("draft.txt"), "unsaved\n").expect("write");
+        let worktree = list(&main).into_iter().find(|worktree| !worktree.main).expect("listed");
+        assert_eq!(uncommitted(&worktree.path), 1);
+        assert!(remove(&main, &worktree, None).is_err());
+        assert!(path.exists());
+    }
+}

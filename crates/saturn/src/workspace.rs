@@ -86,6 +86,7 @@ actions!(
         SetUpWorktree,
         StartApp,
         CreateRecipe,
+        ShowWorktrees,
     ]
 );
 
@@ -133,6 +134,7 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("Set up this worktree", "wrench", Box::new(SetUpWorktree)),
         ("Start the app", "play", Box::new(StartApp)),
         ("Create worktree recipe", "file-code", Box::new(CreateRecipe)),
+        ("Worktrees", "git-branch", Box::new(ShowWorktrees)),
         ("Database diagram", "database", Box::new(ShowSchema)),
         ("dbt lineage", "workflow", Box::new(ShowLineage)),
         ("Problems", "circle-x", Box::new(ShowProblems)),
@@ -1130,6 +1132,13 @@ impl Workspace {
         if let Some(tab) = self.recipe_tab(&checkout, "Start", window, cx) {
             self.note(tab, &note, cx);
         }
+    }
+
+    /// Lists the selected repo's worktrees, to see what's finished and remove it.
+    fn show_worktrees(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let repo = git::main_worktree(&self.project).unwrap_or_else(|| self.project.clone());
+        let pane_folders = self.terminals.values().map(|view| view.read(cx).cwd.clone()).collect();
+        crate::worktrees_view::open(cx.weak_entity(), repo, pane_folders, window, cx);
     }
 
     /// Writes the focused checkout's guessed recipe to `.saturn/worktree.json`, to adjust and commit,
@@ -2662,6 +2671,7 @@ impl Workspace {
             .on_action(cx.listener(|this, _: &SetUpWorktree, window, cx| this.set_up_worktree(window, cx)))
             .on_action(cx.listener(|this, _: &StartApp, window, cx| this.start_app(window, cx)))
             .on_action(cx.listener(|this, _: &CreateRecipe, window, cx| this.create_recipe(window, cx)))
+            .on_action(cx.listener(|this, _: &ShowWorktrees, window, cx| this.show_worktrees(window, cx)))
             .on_action(cx.listener(|this, _: &ShowLineage, _, cx| this.show_lineage(cx)))
             .on_action(cx.listener(|this, _: &ShowProblems, _, cx| this.show_problems(cx)))
     }

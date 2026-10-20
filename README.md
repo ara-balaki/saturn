@@ -109,6 +109,9 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   to open it. The repo's Docker Compose services (`postgres :5432`) sit in the bar at the bottom.
 - Several repos in one window, as tabs in the title bar (the + after them, or ⌘O, adds one). Their agents share one grid.
 - Focus a pane that works in another git worktree, and the sidebar follows it there.
+- Worktrees (⌘⇧P): every worktree of the repo with its branch, last commit, pull request and whether
+  its work is merged (squash merges too). The finished ones, with nothing uncommitted, no open pull
+  request and nothing running in them, go with one click.
 - Worktrees share the main checkout's `.env` files: each one's is a link to main's, so a value added
   in any worktree is in all of them. `CLAUDE.local.md` and `.claude/settings.local.json` (the commands
   you allowed Claude for good) are shared the same way; Claude shares its own memory already. A
@@ -227,7 +230,7 @@ To change the steps, "Create worktree recipe" in the palette saves the guess to
   only if it worked). "Set up this worktree" in the palette (⌘⇧P) runs it again, or in a worktree made
   some other way.
 - `run` names the commands that start the app. "Start the app" opens a tab for each, named after it.
-- `cleanup` is for when a worktree goes away.
+- `cleanup` runs in a worktree before Worktrees removes it (stopping its containers, say).
 
 Files git ignores that worktrees should still get (local config, certificates) go in
 `.worktreeinclude`, written like `.gitignore`, as for `claude --worktree`: Saturn copies them from the

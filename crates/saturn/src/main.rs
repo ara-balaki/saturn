@@ -34,6 +34,7 @@ mod tickets_view;
 mod updates;
 mod usage;
 mod workspace;
+mod worktrees_view;
 
 use std::borrow::Cow;
 

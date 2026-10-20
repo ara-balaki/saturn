@@ -202,14 +202,7 @@ fn parse_counts(counts: &str) -> Option<(usize, usize)> {
 
 /// Where the current branch left the default branch (`origin/HEAD`, else `main` or `master`).
 pub fn merge_base(repo: &Path) -> Option<String> {
-    let default_branch = run(repo, &["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"])
-        .map(|name| name.trim().to_owned())
-        .or_else(|| {
-            ["main", "master"]
-                .into_iter()
-                .find(|name| run(repo, &["rev-parse", "--verify", "--quiet", name]).is_some())
-                .map(str::to_owned)
-        })?;
+    let default_branch = crate::worktrees::default_branch(repo)?;
     run(repo, &["merge-base", "HEAD", &default_branch]).map(|sha| sha.trim().to_owned())
 }
 
