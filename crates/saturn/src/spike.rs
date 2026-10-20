@@ -34,6 +34,7 @@
 //! - `SATURN_KEYS="e c h tab"` presses those keys in the focused pane, through the window, and prints
 //!   the tab count after each; `SATURN_REBIND=new-tab=cmd-t` moves a shortcut first, as Settings
 //!   would. `SATURN_SETTINGS_SECTION=keyboard` opens Settings on that section.
+//! - `SATURN_ZOOM_PANE=1` zooms the focused pane in, over the grid and the panels.
 //! - `SATURN_SCREENSHOT=path.png` saves what the window draws after `SATURN_SCREENSHOT_AFTER`
 //!   seconds (needs the `capture` feature); `SATURN_QUIT_AFTER` quits after that many seconds.
 
@@ -164,9 +165,7 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
         })
         .detach();
     }
-    if std::env::var_os("SATURN_MAXIMIZE_EDITOR").is_some() {
-        cx.defer_in(window, |workspace, _, cx| workspace.maximize_editor(cx));
-    }
+    zoom_from_env(window, cx);
     if std::env::var_os("SATURN_PROBLEMS").is_some() {
         // Once the opened file's server has reported.
         cx.spawn(async move |workspace, cx| {
@@ -191,6 +190,16 @@ fn rebind_from_env(workspace: &Workspace, cx: &mut Context<Workspace>) {
         let mut after = workspace.settings().keymap.clone();
         after.insert(id, keys);
         crate::keymap::rebind(shortcut, &before, &after, cx);
+    }
+}
+
+/// `SATURN_ZOOM_PANE`: the focused pane zoomed in; `SATURN_MAXIMIZE_EDITOR`: the editor in the grid's room.
+fn zoom_from_env(window: &mut Window, cx: &mut Context<Workspace>) {
+    if std::env::var_os("SATURN_ZOOM_PANE").is_some() {
+        cx.defer_in(window, |_, window, cx| window.dispatch_action(Box::new(crate::workspace::ToggleMaximize), cx));
+    }
+    if std::env::var_os("SATURN_MAXIMIZE_EDITOR").is_some() {
+        cx.defer_in(window, |workspace, _, cx| workspace.maximize_editor(cx));
     }
 }
 

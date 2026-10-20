@@ -123,8 +123,9 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
 ### Terminals
 
 - Split right (⌘D) or down (⌘⇧D), or drag a tab onto a pane's edge to split it there. Tabs in every
-  pane, one pane maximised with ⌘⇧↩. Panes share the space evenly whenever one opens or closes; drag a
-  divider to change that, or double-click it to even out its two panes.
+  pane. Zoom one pane in over everything with its button or ⌘⇧↩. Panes share the space evenly
+  whenever one opens or closes; drag a divider to change that, or double-click it to even out its two
+  panes.
 - A real terminal underneath (alacritty's engine), so TUIs, colours and the mouse work as they should.
 - Drop a file, a screenshot say, on a terminal to type its path, so Claude attaches it. Pasting works
   the same: copied files (from Finder) and copied images (a screenshot copied to the clipboard) paste as
@@ -254,7 +255,7 @@ which it is when they ask, so Claude Code's "Auto" theme (`/theme`) matches, and
 | ⌘1 … ⌘9      | Focus pane 1 to 9                                    |
 | ⌘⌥ + arrows  | Move focus between panes                             |
 | ⌘⇧[ / ⌘⇧]    | Previous / next tab                                  |
-| ⌘⇧↩          | Maximise the focused pane                            |
+| ⌘⇧↩          | Zoom the focused pane in or out                      |
 | ⌘⇧A          | Jump to the next agent that needs you                |
 | ⌘B / ⌘J      | Toggle the sidebar / the editor                      |
 | ⌘O           | Add a repo                                           |
