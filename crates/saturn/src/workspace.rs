@@ -19,6 +19,7 @@ use saturn_core::clickup::Ticket;
 use saturn_core::git;
 use saturn_core::layout::{Cell, CellId, Direction, Layout, RowId, TabId};
 use saturn_core::pull_request::{self, PrState, PullRequest};
+use saturn_core::servers::{self, Server, Service};
 use saturn_core::session_name::rename_for_prompt;
 use saturn_core::shared_env;
 use saturn_design::{color, radius, shadow, space};
@@ -262,6 +263,12 @@ pub struct Workspace {
     checkout_refresh: Refresh,
     /// The checkouts whose env files have been shared with the main checkout's this session.
     env_shared: HashSet<PathBuf>,
+    /// The servers running under each tab's shell (an agent's `pnpm dev`), by port.
+    servers: HashMap<TabId, Vec<Server>>,
+    /// This window's repos' Docker Compose services with ports on this Mac: shared by every tab.
+    services: Vec<Service>,
+    /// Whether the two above are being read.
+    reading_servers: bool,
 }
 
 /// A background refresh: not running, running, or running with another asked for meanwhile (a new
@@ -473,6 +480,33 @@ fn pull_request_chip(cell: CellId, pr: &PullRequest) -> impl IntoElement {
         })
 }
 
+/// A server the pane's terminal runs: its name and port. Clicking opens it in the browser.
+fn server_chip(cell: CellId, server: &Server) -> impl IntoElement {
+    let url = format!("http://localhost:{}", server.port);
+    let tip = format!("{url} · {}", server.command);
+    div()
+        .id(("server-chip", cell.key() * 100_000 + u64::from(server.port)))
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(len(space::SPACE_1))
+        .h(len(TAB_HEIGHT))
+        .px(len(space::SPACE_2))
+        .rounded(len(radius::RADIUS_SM))
+        .cursor_pointer()
+        .text_size(px(12.))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(theme::color(color::INK_MUTED))
+        .hover(|s| s.bg(theme::fill_hover()))
+        .child(chrome::icon("globe", 13., theme::color(color::INK_FAINT)))
+        .child(server.name.clone())
+        .child(div().text_color(theme::color(color::INK_FAINT)).child(format!(":{}", server.port)))
+        .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+        .on_click(move |_, _, _| {
+            let _ = std::process::Command::new("open").arg(&url).spawn();
+        })
+}
+
 /// Where in a pane a dragged tab lands: within a quarter of an edge splits the pane on that side,
 /// anywhere further in moves the tab into the pane (`None`).
 fn drop_side(bounds: Bounds<Pixels>, at: Point<Pixels>) -> Option<Direction> {
@@ -588,6 +622,17 @@ impl Workspace {
             }
         })
         .detach();
+        // Servers start and stop without telling anyone; reading them takes a few hundredths of a
+        // second, so every few seconds keeps the chips current.
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(3)).await;
+                if this.update(cx, Workspace::refresh_servers).is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
         // Pane sizes change by dragging, which saves nothing on its own; quitting saves them.
         cx.on_app_quit(|this, cx| {
             this.save_session(cx);
@@ -634,6 +679,9 @@ impl Workspace {
             pull_requests: HashMap::new(),
             checkout_refresh: Refresh::Idle,
             env_shared: HashSet::new(),
+            servers: HashMap::new(),
+            services: Vec::new(),
+            reading_servers: false,
             roots,
             root: project.clone(),
             follow_pane: true,
@@ -975,6 +1023,59 @@ impl Workspace {
             });
         })
         .detach();
+    }
+
+    /// Reads the servers each tab runs and the repos' Docker services, off the main thread.
+    fn refresh_servers(&mut self, cx: &mut Context<Self>) {
+        if self.reading_servers {
+            return;
+        }
+        self.reading_servers = true;
+        let shells: Vec<(TabId, u32, Option<PathBuf>)> = self
+            .terminals
+            .iter()
+            .filter_map(|(tab, view)| {
+                let shell = view.read(cx).shell_pid()?;
+                Some((*tab, shell, self.checkouts.get(tab).map(|checkout| checkout.root.clone())))
+            })
+            .collect();
+        let projects = self.projects.clone();
+        cx.spawn(async move |this, cx| {
+            let (servers, services) = cx
+                .background_spawn(async move {
+                    let by_shell = servers::read(
+                        &shells.iter().map(|(_, shell, root)| (*shell, root.clone())).collect::<Vec<_>>(),
+                    );
+                    let servers: HashMap<TabId, Vec<Server>> = shells
+                        .iter()
+                        .filter_map(|(tab, shell, _)| Some((*tab, by_shell.get(shell)?.clone())))
+                        .collect();
+                    // Only this window's repos' services, run from the repo or one of its worktrees.
+                    let services: Vec<Service> = servers::docker_services()
+                        .into_iter()
+                        .filter(|service| {
+                            projects.contains(&service.folder)
+                                || git::main_worktree(&service.folder).is_some_and(|main| projects.contains(&main))
+                        })
+                        .collect();
+                    (servers, services)
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.reading_servers = false;
+                if this.servers != servers || this.services != services {
+                    this.servers = servers;
+                    this.services = services;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// The repos' Docker Compose services running with ports, for the bottom bar.
+    pub fn services(&self) -> &[Service] {
+        &self.services
     }
 
     /// Links the main checkout's env files into each worktree a tab is in, once a session, also
@@ -1849,6 +1950,7 @@ impl Workspace {
             .items_center()
             .gap(len(space::SPACE_1))
             .children(self.ticket_of(cell.active, cx).map(|ticket| ticket_chip(cell_id, ticket)))
+            .children(self.servers.get(&cell.active).into_iter().flatten().map(|server| server_chip(cell_id, server)))
             .children(self.pull_request_of(cell.active).map(|pr| pull_request_chip(cell_id, pr)))
             .child(header_button("split-right", "columns-2", Placement::Right, cx))
             .child(header_button("split-down", "rows-2", Placement::Down, cx))

@@ -208,6 +208,10 @@ impl Terminal {
         self.pty.foreground_pid()
     }
 
+    pub fn shell_pid(&self) -> Option<u32> {
+        self.pty.shell_pid()
+    }
+
     pub fn kill(&mut self) {
         self.pty.kill();
     }

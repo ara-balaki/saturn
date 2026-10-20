@@ -18,6 +18,7 @@ pub mod lsp;
 pub mod program_status;
 pub mod pull_request;
 pub mod schema;
+pub mod servers;
 pub mod session_name;
 pub mod shared_env;
 pub mod shell_env;

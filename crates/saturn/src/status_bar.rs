@@ -6,9 +6,11 @@
 use std::path::{Path, PathBuf};
 
 use gpui_kit::component::input::EditorState;
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, Entity, EntityId, InteractiveElement as _, IntoElement, ParentElement as _,
-    Render, StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div, px,
+    AnyElement, App, AppContext as _, Context, ElementId, Entity, EntityId, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity,
+    Window, div, px,
 };
 use saturn_core::git;
 use saturn_design::{color, radius, space};
@@ -102,7 +104,7 @@ impl StatusBar {
         .detach();
     }
 
-    fn item(id: &'static str) -> gpui_kit::Stateful<gpui_kit::Div> {
+    fn item(id: impl Into<ElementId>) -> gpui_kit::Stateful<gpui_kit::Div> {
         div()
             .id(id)
             .flex()
@@ -112,6 +114,27 @@ impl StatusBar {
             .px(len(space::SPACE_2))
             // 4px inside the bar's card (radius 10).
             .rounded(len(radius::RADIUS_SM))
+    }
+
+    /// The repos' Docker Compose services with ports: shared by every terminal, so they sit here
+    /// rather than on a pane. Read-only: they aren't anything to click.
+    fn render_services(&self, cx: &App) -> Vec<AnyElement> {
+        let Some(workspace) = self.workspace.upgrade() else { return Vec::new() };
+        workspace
+            .read(cx)
+            .services()
+            .iter()
+            .enumerate()
+            .map(|(index, service)| {
+                let ports = service.ports.iter().map(|port| format!(":{port}")).collect::<Vec<_>>().join(" ");
+                let tip = format!("Docker Compose service, shared by every terminal ({})", service.folder.display());
+                Self::item(SharedString::from(format!("service-{index}")))
+                    .child(service.name.clone())
+                    .child(div().text_color(theme::color(color::INK_FAINT)).child(ports))
+                    .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+                    .into_any_element()
+            })
+            .collect()
     }
 
     fn render_problems(errors: usize, warnings: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -191,6 +214,7 @@ impl Render for StatusBar {
             .text_color(theme::color(color::INK_MUTED))
             .child(Self::render_problems(status.errors, status.warnings, cx))
             .children(server)
+            .children(self.render_services(cx))
             .child(div().flex_1())
             .children(
                 status

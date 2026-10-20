@@ -23,6 +23,8 @@ pub struct Pty {
     master: Box<dyn MasterPty + Send>,
     input: mpsc::Sender<Vec<u8>>,
     killer: Box<dyn ChildKiller + Send + Sync>,
+    /// The shell's process id: everything the terminal runs is under it.
+    shell: Option<u32>,
 }
 
 impl Pty {
@@ -50,6 +52,7 @@ impl Pty {
         let mut child = pair.slave.spawn_command(command)?;
         drop(pair.slave);
         let killer = child.clone_killer();
+        let shell = child.process_id();
 
         let (events, receiver) = async_channel::bounded(OUTPUT_BACKLOG);
         let mut reader = pair.master.try_clone_reader()?;
@@ -77,7 +80,7 @@ impl Pty {
             }
         })?;
 
-        Ok((Self { master: pair.master, input, killer }, receiver))
+        Ok((Self { master: pair.master, input, killer, shell }, receiver))
     }
 
     pub fn write(&self, bytes: impl Into<Vec<u8>>) {
@@ -91,6 +94,10 @@ impl Pty {
     /// The process group in the foreground of this terminal: the shell, or what it runs.
     pub fn foreground_pid(&self) -> Option<i32> {
         self.master.process_group_leader()
+    }
+
+    pub fn shell_pid(&self) -> Option<u32> {
+        self.shell
     }
 
     pub fn kill(&mut self) {

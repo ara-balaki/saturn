@@ -232,6 +232,11 @@ impl TerminalView {
         self.terminal.foreground_pid()
     }
 
+    /// The terminal's shell, under which runs everything started in it.
+    pub fn shell_pid(&self) -> Option<u32> {
+        self.terminal.shell_pid()
+    }
+
     pub fn write(&mut self, bytes: impl Into<Vec<u8>>) {
         self.terminal.write(bytes);
     }
