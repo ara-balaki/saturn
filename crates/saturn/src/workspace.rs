@@ -16,6 +16,7 @@ use gpui_kit::{
 };
 use saturn_bridge::{Bridge, HookCall};
 use saturn_core::agent_state::{AgentState, tab_title};
+use saturn_core::checks;
 use saturn_core::clickup::Ticket;
 use saturn_core::git;
 use saturn_core::layout::{Cell, CellId, Direction, Layout, RowId, TabId};
@@ -96,6 +97,7 @@ actions!(
         CompareWith,
         ShowWaiting,
         ToggleFocus,
+        RunCheck,
     ]
 );
 
@@ -147,6 +149,7 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("Compare with a branch or commit", "git-compare", Box::new(CompareWith)),
         ("Agents waiting for you", "bot", Box::new(ShowWaiting)),
         ("Focus: hold notifications, or stop", "moon", Box::new(ToggleFocus)),
+        ("Run a check", "play", Box::new(RunCheck)),
         ("Database diagram", "database", Box::new(ShowSchema)),
         ("dbt lineage", "workflow", Box::new(ShowLineage)),
         ("Problems", "circle-x", Box::new(ShowProblems)),
@@ -311,11 +314,21 @@ pub struct Workspace {
     waits: HashMap<TabId, Waiting>,
     /// Focus mode: notifications held, and what they'd have said (by state) for one at the end.
     focusing: Option<Vec<AgentState>>,
+    /// The checks run in each checkout, newest last: running ones have no outcome yet.
+    check_runs: HashMap<PathBuf, Vec<CheckRun>>,
     /// What reviewers left open on each tab's pull request.
     review_notes: HashMap<TabId, ReviewNotes>,
     /// Each tab's session's permission mode (`default`, `plan`, `bypassPermissions`…), as its hooks
     /// report it.
     modes: HashMap<TabId, String>,
+}
+
+/// A check run in a checkout, and how it went (`None` while it runs).
+struct CheckRun {
+    name: String,
+    command: String,
+    log: PathBuf,
+    outcome: Option<checks::Outcome>,
 }
 
 /// An agent's turn, saved before and after (`saturn_core::snapshot`), so its files can go back.
@@ -941,6 +954,7 @@ impl Workspace {
             focusing: None,
             modes: HashMap::new(),
             review_notes: HashMap::new(),
+            check_runs: HashMap::new(),
             roots,
             root: project.clone(),
             follow_pane: true,
@@ -2766,6 +2780,113 @@ impl Workspace {
             .into_any_element()
     }
 
+    /// Runs a check in `checkout` in the background, its log kept beside Saturn's settings.
+    pub fn run_check(&mut self, checkout: &Path, name: String, command: String, cx: &mut Context<Self>) {
+        let folder: String =
+            checkout.to_string_lossy().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+        let Some(log) = settings::data_dir().map(|dir| dir.join("checks").join(folder).join(format!("{name}.log")))
+        else {
+            return;
+        };
+        let runs = self.check_runs.entry(checkout.to_owned()).or_default();
+        runs.retain(|run| run.name != name);
+        runs.push(CheckRun { name: name.clone(), command: command.clone(), log: log.clone(), outcome: None });
+        cx.notify();
+        let checkout = checkout.to_owned();
+        cx.spawn(async move |this, cx| {
+            let outcome = cx
+                .background_spawn({
+                    let (checkout, log) = (checkout.clone(), log.clone());
+                    async move { checks::run(&checkout, &command, &log) }
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if let Some(run) =
+                    this.check_runs.get_mut(&checkout).and_then(|runs| runs.iter_mut().find(|run| run.name == name))
+                {
+                    run.outcome = Some(outcome);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Runs every check of the focused pane's checkout (for spikes).
+    pub fn run_all_checks(&mut self, cx: &mut Context<Self>) {
+        let checkout = self.focused_checkout(cx);
+        let Ok((recipe, _)) = recipe::for_checkout(&checkout) else { return };
+        for (name, command) in recipe.checks {
+            self.run_check(&checkout, name, command, cx);
+        }
+    }
+
+    /// The checks run in the pane's checkout: each with how it went; click for its log. A failed one
+    /// can go to the agent.
+    fn render_check_runs(&self, cell: &Cell, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let tab = cell.active;
+        let checkout = self.checkouts.get(&tab).map(|checkout| checkout.root.clone())?;
+        let runs = self.check_runs.get(&checkout).filter(|runs| !runs.is_empty())?;
+        let mut row = div().flex().flex_none().items_center().gap(len(space::SPACE_1));
+        for (index, run) in runs.iter().enumerate().rev().take(3) {
+            let (icon, tint, words) = match &run.outcome {
+                None => ("circle-dot", color::BLUE, "running".to_owned()),
+                Some(outcome) if outcome.passed() => {
+                    ("circle-check", color::TERM_GREEN, format!("passed in {} s", outcome.seconds))
+                }
+                Some(outcome) if outcome.no_tests => ("circle-x", color::RED, "ran no tests".to_owned()),
+                Some(outcome) => ("circle-x", color::RED, format!("failed after {} s", outcome.seconds)),
+            };
+            let tip = format!("{} ({}) {words}. Click for its log.", run.name, run.command);
+            let log = run.log.clone();
+            row = row.child(
+                div()
+                    .id(("check-run", cell.id.key() * 100 + index as u64))
+                    .flex()
+                    .items_center()
+                    .gap(len(space::SPACE_1))
+                    .h(len(TAB_HEIGHT))
+                    .px(len(space::SPACE_2))
+                    .rounded(len(radius::RADIUS_SM))
+                    .cursor_pointer()
+                    .text_size(px(12.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme::color(color::INK_MUTED))
+                    .hover(|s| s.bg(theme::fill_hover()))
+                    .child(chrome::icon(icon, 12., theme::color(tint)))
+                    .child(run.name.clone())
+                    .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        if log.is_file() {
+                            this.open_file(&log, window, cx);
+                        }
+                    })),
+            );
+            if run.outcome.as_ref().is_some_and(|outcome| !outcome.passed()) {
+                let name = run.name.clone();
+                row = row.child(
+                    chrome::icon_button(("check-to-agent", cell.id.key() * 100 + index as u64), "wrench", true)
+                        .tooltip(chrome::tip("Send what failed to this pane's agent"))
+                        .on_click(
+                            cx.listener(move |this, _, window, cx| this.send_check_failure(tab, &name, window, cx)),
+                        ),
+                );
+            }
+        }
+        Some(row.into_any_element())
+    }
+
+    /// Hands a failed check, summed up, to the agent in a pane.
+    fn send_check_failure(&mut self, tab: TabId, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(checkout) = self.checkouts.get(&tab).map(|checkout| checkout.root.clone()) else { return };
+        let Some(run) = self.check_runs.get(&checkout).and_then(|runs| runs.iter().find(|run| run.name == name)) else {
+            return;
+        };
+        let Some(outcome) = &run.outcome else { return };
+        let message = checks::failure_message(&run.name, &run.command, outcome, &run.log);
+        self.send_to_agent(&checkout, &message, window, cx);
+    }
+
     /// When the pane's pull request's checks failed: a button that hands them to its agent.
     fn render_fix_ci(&self, cell: &Cell, cx: &mut Context<Self>) -> Option<AnyElement> {
         let tab = cell.active;
@@ -2918,6 +3039,7 @@ impl Workspace {
             .children(self.servers.get(&cell.active).into_iter().flatten().map(|server| server_chip(cell_id, server)))
             .children(self.pull_request_of(cell.active).map(|pr| pull_request_chip(cell_id, pr)))
             .children(self.pull_request_of(cell.active).and_then(|pr| preview_chip(cell_id, pr)))
+            .children(self.render_check_runs(cell, cx))
             .children(self.render_fix_ci(cell, cx))
             .children(self.render_review_notes(cell, cx))
             .child(header_button("split-right", "columns-2", Placement::Right, cx))
@@ -3479,6 +3601,10 @@ impl Workspace {
             .on_action(cx.listener(|this, _: &CreateRecipe, window, cx| this.create_recipe(window, cx)))
             .on_action(cx.listener(|this, _: &ShowWorktrees, window, cx| this.show_worktrees(window, cx)))
             .on_action(cx.listener(|this, _: &ToggleFocus, _, cx| this.toggle_focus(cx)))
+            .on_action(cx.listener(|this, _: &RunCheck, window, cx| {
+                let checkout = this.focused_checkout(cx);
+                crate::palette::checks(cx.weak_entity(), checkout, window, cx);
+            }))
             .on_action(cx.listener(|_, _: &ShowWaiting, window, cx| {
                 crate::queue_view::open(cx.weak_entity(), window, cx);
             }))

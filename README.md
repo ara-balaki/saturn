@@ -256,7 +256,8 @@ To change the steps, "Create worktree recipe" in the palette saves the guess to
 {
   "setup": ["pnpm install", "pnpm --filter @acme/shared build"],
   "run": { "api": "pnpm --filter api dev", "web": "pnpm --filter web dev" },
-  "cleanup": "docker compose down"
+  "cleanup": "docker compose down",
+  "checks": { "lint": "pnpm lint", "test": "pnpm test" }
 }
 ```
 
@@ -265,6 +266,11 @@ To change the steps, "Create worktree recipe" in the palette saves the guess to
   some other way.
 - `run` names the commands that start the app. "Start the app" opens a tab for each, named after it.
 - `cleanup` runs in a worktree before Worktrees removes it (stopping its containers, say).
+- `checks` names commands that check the work (`"lint": "pnpm lint"`, `"test": "pnpm test"`; guessed
+  from `package.json` scripts or Cargo without a recipe). "Run a check" (⌘⇧P) runs one, or all, in
+  the background: the pane shows each as it runs and how it went, a click opens its whole log, and a
+  failed one goes to the agent as a short summary with the log's path. Output that says no tests
+  ran counts as a failure, whatever the exit code.
 
 Files git ignores that worktrees should still get (local config, certificates) go in
 `.worktreeinclude`, written like `.gitignore`, as for `claude --worktree`: Saturn copies them from the

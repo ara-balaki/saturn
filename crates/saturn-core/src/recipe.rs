@@ -31,6 +31,8 @@ pub struct Recipe {
     /// Name and command, in the file's order.
     pub run: Vec<(String, String)>,
     pub cleanup: Vec<String>,
+    /// Named checks (`"test": "pnpm test"`), run on demand with their logs kept.
+    pub checks: Vec<(String, String)>,
 }
 
 /// One command or several.
@@ -60,27 +62,29 @@ struct File {
     setup: Option<Steps>,
     run: Option<serde_json::Map<String, serde_json::Value>>,
     cleanup: Option<Steps>,
+    checks: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+/// Named commands from a map in the file, saying which one isn't a command.
+fn named(map: Option<serde_json::Map<String, serde_json::Value>>, key: &str) -> Result<Vec<(String, String)>, String> {
+    map.unwrap_or_default()
+        .into_iter()
+        .map(|(name, command)| match command {
+            serde_json::Value::String(command) if !command.trim().is_empty() => Ok((name, command.trim().to_owned())),
+            _ => Err(format!("\"{key}\": \"{name}\" needs a command, as text")),
+        })
+        .collect()
 }
 
 impl Recipe {
     /// Reads a recipe, saying what is wrong with it in words.
     pub fn parse(text: &str) -> Result<Self, String> {
         let file: File = serde_json::from_str(text).map_err(|error| error.to_string())?;
-        let run = file
-            .run
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(name, command)| match command {
-                serde_json::Value::String(command) if !command.trim().is_empty() => {
-                    Ok((name, command.trim().to_owned()))
-                }
-                _ => Err(format!("\"run\": \"{name}\" needs a command, as text")),
-            })
-            .collect::<Result<_, _>>()?;
         Ok(Self {
             setup: file.setup.map(Steps::into_vec).unwrap_or_default(),
-            run,
+            run: named(file.run, "run")?,
             cleanup: file.cleanup.map(Steps::into_vec).unwrap_or_default(),
+            checks: named(file.checks, "checks")?,
         })
     }
 
@@ -245,7 +249,31 @@ pub fn guess(checkout: &Path) -> Recipe {
     if checkout.join("bin/dev").is_file() {
         recipe.run.push(("dev".to_owned(), "bin/dev".to_owned()));
     }
+    recipe.checks = guess_checks(checkout);
     recipe
+}
+
+/// Checks from what a checkout already has: its `package.json` scripts that check (lint, typecheck,
+/// test), or Cargo's.
+fn guess_checks(checkout: &Path) -> Vec<(String, String)> {
+    let mut checks = Vec::new();
+    if let Some(manager) = PackageManager::of(checkout) {
+        let scripts: Vec<String> = std::fs::read_to_string(checkout.join("package.json"))
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .and_then(|json| json.get("scripts")?.as_object().map(|scripts| scripts.keys().cloned().collect()))
+            .unwrap_or_default();
+        for name in ["lint", "typecheck", "test"] {
+            if scripts.iter().any(|script| script == name) {
+                checks.push((name.to_owned(), manager.run(name, None)));
+            }
+        }
+    }
+    if checkout.join("Cargo.toml").is_file() {
+        checks.push(("clippy".to_owned(), "cargo clippy --all-targets".to_owned()));
+        checks.push(("test".to_owned(), "cargo test".to_owned()));
+    }
+    checks
 }
 
 impl Recipe {
@@ -262,6 +290,11 @@ impl Recipe {
         }
         if !self.cleanup.is_empty() {
             file.insert("cleanup".into(), self.cleanup.clone().into());
+        }
+        if !self.checks.is_empty() {
+            let checks: serde_json::Map<String, serde_json::Value> =
+                self.checks.iter().map(|(name, command)| (name.clone(), command.clone().into())).collect();
+            file.insert("checks".into(), checks.into());
         }
         let mut text = serde_json::to_string_pretty(&serde_json::Value::Object(file)).unwrap_or_default();
         text.push('\n');
@@ -341,6 +374,27 @@ mod tests {
         let text = recipe.to_json();
         assert!(text.starts_with("{\n  \"setup\": [\n    \"npm install\"\n  ],"), "{text}");
         assert_eq!(Recipe::parse(&text).expect("valid"), recipe);
+    }
+
+    #[test]
+    fn reads_and_guesses_checks() {
+        let recipe =
+            Recipe::parse(r#"{ "checks": { "fast": "pnpm typecheck", "full": "pnpm health" } }"#).expect("valid");
+        assert_eq!(
+            recipe.checks,
+            [("fast".to_owned(), "pnpm typecheck".to_owned()), ("full".to_owned(), "pnpm health".to_owned())]
+        );
+        assert!(Recipe::parse(r#"{ "checks": { "fast": 1 } }"#).expect_err("not a command").contains("checks"));
+        let dir = checkout(&[
+            ("package.json", r#"{ "scripts": { "test": "vitest", "lint": "eslint .", "dev": "vite" } }"#),
+            ("pnpm-lock.yaml", ""),
+        ]);
+        assert_eq!(
+            guess(dir.path()).checks,
+            [("lint".to_owned(), "pnpm lint".to_owned()), ("test".to_owned(), "pnpm test".to_owned())]
+        );
+        let saved = guess(dir.path());
+        assert_eq!(Recipe::parse(&saved.to_json()).expect("valid"), saved);
     }
 
     #[test]

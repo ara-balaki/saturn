@@ -132,7 +132,7 @@ impl Palette {
     /// Lists the recent picks while nothing is typed, else what matches.
     fn filter(&mut self, cx: &mut Context<Self>) {
         let query = self.query(cx);
-        self.shown = if query.is_empty() && self.kind == "compare" {
+        self.shown = if query.is_empty() && (self.kind == "compare" || self.kind == "checks") {
             // Branches and commits are few and in an order that matters: all of them, newest first.
             (0..self.entries.len().min(SHOWN)).collect()
         } else if query.is_empty() {
@@ -360,6 +360,51 @@ pub fn compare(workspace: WeakEntity<Workspace>, repo: PathBuf, window: &mut Win
     })
     .detach();
     open("Compare with", palette, window, cx);
+}
+
+/// The checks of the focused pane's checkout (its recipe's, or guessed), to run one, or all.
+pub fn checks(workspace: WeakEntity<Workspace>, checkout: PathBuf, window: &mut Window, cx: &mut App) {
+    let found = match saturn_core::recipe::for_checkout(&checkout) {
+        Ok((recipe, _)) => recipe.checks,
+        Err(_) => Vec::new(),
+    };
+    let mut entries: Vec<Entry> = found
+        .iter()
+        .map(|(name, command)| Entry {
+            text: format!("{name} {command}"),
+            label: name.clone(),
+            detail: Some(command.clone()),
+            icon: "play",
+            action: None,
+        })
+        .collect();
+    if found.len() > 1 {
+        entries.push(Entry {
+            text: "All of them".to_owned(),
+            label: "All of them".to_owned(),
+            detail: None,
+            icon: "play",
+            action: None,
+        });
+    }
+    let pick: Pick = Rc::new(move |index, _, cx| {
+        let picked: Vec<(String, String)> = match found.get(index) {
+            Some(check) => vec![check.clone()],
+            None => found.clone(),
+        };
+        let _ = workspace.update(cx, |workspace, cx| {
+            for (name, command) in picked {
+                workspace.run_check(&checkout, name, command, cx);
+            }
+        });
+    });
+    let words = Words {
+        hint: "Pick a check to run.",
+        loading: "",
+        none: "No checks here. Add \"checks\" to .saturn/worktree.json, or a lint or test script.",
+    };
+    let palette = cx.new(|cx| Palette::new("checks", "Run a check", words, Some(entries), pick, window, cx));
+    open("Run a check", palette, window, cx);
 }
 
 fn file_entry(file: &Path) -> Entry {

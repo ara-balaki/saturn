@@ -21,6 +21,7 @@
 //! - `SATURN_RUN_COMMAND="Start the app"` runs that command from the palette's list, by its name.
 //! - `SATURN_UNDO_TURN=6` presses the first pane's "Undo the agent's last turn" after 6 seconds.
 //! - `SATURN_ANSWER=allow|deny` answers the first pane's permission after 5 seconds.
+//! - `SATURN_RUN_CHECKS=1` runs every check of the focused pane's checkout.
 //! - `SATURN_KEYS="e c h tab"` presses those keys in the focused pane, through the window, and prints
 //!   the tab count after each; `SATURN_REBIND=new-tab=cmd-t` moves a shortcut first, as Settings
 //!   would. `SATURN_SETTINGS_SECTION=keyboard` opens Settings on that section.
@@ -146,8 +147,7 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
     rebind_from_env(workspace, cx);
     input_from_env(window, cx);
     run_command_from_env(window, cx);
-    undo_turn_from_env(cx);
-    answer_from_env(cx);
+    press_from_env(cx);
     if std::env::var_os("SATURN_TICKET_PICKER").is_some() {
         cx.spawn_in(window, async move |_, cx| {
             cx.background_executor().timer(Duration::from_millis(800)).await;
@@ -232,6 +232,20 @@ fn review_from_env(window: &mut Window, cx: &mut Context<Workspace>) {
             let _ = workspace.update(cx, |workspace, cx| {
                 workspace.editor().update(cx, |editor, cx| editor.comment_on_review(line, text, send, cx));
             });
+        })
+        .detach();
+    }
+}
+
+/// Buttons a spike presses after a while: undo a turn, answer a permission, run the checks.
+fn press_from_env(cx: &mut Context<Workspace>) {
+    undo_turn_from_env(cx);
+    answer_from_env(cx);
+    if std::env::var_os("SATURN_RUN_CHECKS").is_some() {
+        // Every check of the focused pane's checkout, as picking "All of them" would.
+        cx.spawn(async move |workspace, cx| {
+            cx.background_executor().timer(Duration::from_secs(2)).await;
+            let _ = workspace.update(cx, Workspace::run_all_checks);
         })
         .detach();
     }
