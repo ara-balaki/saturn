@@ -244,30 +244,26 @@ impl Layout {
         self.focused = Some(target.id);
     }
 
-    /// Opens a tab in a new cell to the right of a cell, sharing its width.
+    /// Opens a tab in a new cell to the right of a cell; the row's panes share its width evenly.
     pub fn split_right(&mut self, tab: TabId, cell: Option<CellId>) {
         let Some(at) = self.target(cell) else { return self.add_tab(tab, None) };
-        let half = self.rows[at.row].cells[at.cell].size / 2.0;
-        let new_cell = self.new_cell(tab, half);
+        let new_cell = self.new_cell(tab, 1.0);
         self.focused = Some(new_cell.id);
         self.maximized = None;
         let row = &mut self.rows[at.row];
-        row.cells[at.cell].size = half;
         row.cells.insert(at.cell + 1, new_cell);
-        even_out_if_cramped(row.cells.iter_mut().map(|cell| &mut cell.size));
+        even_out(row.cells.iter_mut().map(|cell| &mut cell.size));
     }
 
-    /// Opens a tab in a new row below a cell's row, sharing its height.
+    /// Opens a tab in a new row below a cell's row; the rows share the height evenly.
     pub fn split_down(&mut self, tab: TabId, cell: Option<CellId>) {
         let Some(at) = self.target(cell) else { return self.add_tab(tab, None) };
-        let half = self.rows[at.row].size / 2.0;
         let new_cell = self.new_cell(tab, 1.0);
         let id = RowId(self.new_id());
         self.focused = Some(new_cell.id);
         self.maximized = None;
-        self.rows[at.row].size = half;
-        self.rows.insert(at.row + 1, Row { id, cells: vec![new_cell], size: half });
-        even_out_if_cramped(self.rows.iter_mut().map(|row| &mut row.size));
+        self.rows.insert(at.row + 1, Row { id, cells: vec![new_cell], size: 1.0 });
+        even_out(self.rows.iter_mut().map(|row| &mut row.size));
     }
 
     /// Moves a tab out of its cell into a new cell beside `target`: left or right of it in its row,
@@ -283,30 +279,27 @@ impl Layout {
         self.maximized = None;
         match side {
             Direction::Left | Direction::Right => {
-                let half = self.rows[at.row].cells[at.cell].size / 2.0;
-                let new_cell = self.new_cell(tab, half);
+                let new_cell = self.new_cell(tab, 1.0);
                 self.focused = Some(new_cell.id);
                 let row = &mut self.rows[at.row];
-                row.cells[at.cell].size = half;
                 let index = if side == Direction::Right { at.cell + 1 } else { at.cell };
                 row.cells.insert(index, new_cell);
-                even_out_if_cramped(row.cells.iter_mut().map(|cell| &mut cell.size));
+                even_out(row.cells.iter_mut().map(|cell| &mut cell.size));
             }
             Direction::Up | Direction::Down => {
-                let half = self.rows[at.row].size / 2.0;
                 let new_cell = self.new_cell(tab, 1.0);
                 self.focused = Some(new_cell.id);
                 let id = RowId(self.new_id());
-                self.rows[at.row].size = half;
                 let index = if side == Direction::Down { at.row + 1 } else { at.row };
-                self.rows.insert(index, Row { id, cells: vec![new_cell], size: half });
-                even_out_if_cramped(self.rows.iter_mut().map(|row| &mut row.size));
+                self.rows.insert(index, Row { id, cells: vec![new_cell], size: 1.0 });
+                even_out(self.rows.iter_mut().map(|row| &mut row.size));
             }
         }
         self.fill();
     }
 
-    /// Takes a tab out of the grid; an emptied cell or row goes with it.
+    /// Takes a tab out of the grid; an emptied cell or row goes with it, and the rest share its
+    /// space evenly.
     pub fn remove_tab(&mut self, tab: TabId) {
         let Some(at) = self.position_of_tab(tab) else { return };
         let cell = self.cell_at(at);
@@ -324,7 +317,12 @@ impl Layout {
         let place = order.iter().position(|id| *id == removed).unwrap_or(0);
         let neighbour = place.checked_sub(1).and_then(|i| order.get(i)).or_else(|| order.get(place + 1)).copied();
         self.rows[at.row].cells.remove(at.cell);
-        self.rows.retain(|row| !row.cells.is_empty());
+        if self.rows[at.row].cells.is_empty() {
+            self.rows.remove(at.row);
+            even_out(self.rows.iter_mut().map(|row| &mut row.size));
+        } else {
+            even_out(self.rows[at.row].cells.iter_mut().map(|cell| &mut cell.size));
+        }
         self.fill();
         if self.focused == Some(removed) {
             self.focused = neighbour;
@@ -431,18 +429,14 @@ impl Layout {
 }
 
 /// The horizontal centre of each cell in a row, from 0 to 1.
-/// Splitting halves a pane, so splitting the same one again and again leaves slivers too narrow
-/// for a tab. Once a pane would be under half its even share, they all get the same share.
-fn even_out_if_cramped<'a>(sizes: impl Iterator<Item = &'a mut f32>) {
+/// Every pane in a row, or every row, the same size: what a grid gets whenever a pane comes or
+/// goes. Sizes dragged by hand last until then.
+fn even_out<'a>(sizes: impl Iterator<Item = &'a mut f32>) {
     let mut sizes: Vec<&mut f32> = sizes.collect();
     #[expect(clippy::cast_precision_loss, reason = "a row holds a handful of panes")]
     let count = sizes.len() as f32;
-    let total: f32 = sizes.iter().map(|size| **size).sum();
-    let even = total / count;
-    if sizes.iter().any(|size| **size < even / 2.0) {
-        for size in &mut sizes {
-            **size = even;
-        }
+    for size in &mut sizes {
+        **size = 1.0 / count;
     }
 }
 
@@ -512,7 +506,7 @@ mod tests {
     }
 
     #[test]
-    fn splitting_the_same_pane_again_and_again_evens_the_row_out() {
+    fn adding_panes_evens_the_row_out() {
         let mut layout = Layout::default();
         layout.add_tab(A, None);
         for tab in [B, C, D, E] {
@@ -543,9 +537,10 @@ mod tests {
 
         layout.split_right(C, None);
         layout.split_right(D, None);
+        layout.resize_cells(layout.rows[0].id, &[0.6, 0.3, 0.1]);
         layout.remove_tab(B);
         let sizes: Vec<f32> = layout.rows[0].cells.iter().map(|c| c.size).collect();
-        assert!((sizes.iter().sum::<f32>() - 1.0).abs() < 1e-6, "{sizes:?}");
+        assert!(sizes.iter().all(|size| (size - 0.5).abs() < 1e-6), "{sizes:?}");
     }
 
     #[test]
