@@ -25,6 +25,7 @@ use saturn_core::pull_request::{self, PrState, PullRequest};
 use saturn_core::recipe::{self, Source};
 use saturn_core::servers::{self, Server, Service};
 use saturn_core::session_name::rename_for_prompt;
+use saturn_core::session_usage::{self, Tokens};
 use saturn_core::shared_env;
 use saturn_core::snapshot::{self, Snapshot};
 use saturn_core::worktree_include;
@@ -297,6 +298,10 @@ pub struct Workspace {
     reading_overlaps: bool,
     /// Each tab's agent's last turn: its files before and after, to undo it.
     turns: HashMap<TabId, Turn>,
+    /// Each tab's Claude session transcript, as its hooks name it.
+    transcripts: HashMap<TabId, PathBuf>,
+    /// What each tab's session used in the plan's current 5-hour window.
+    spent: HashMap<TabId, Tokens>,
 }
 
 /// An agent's turn, saved before and after (`saturn_core::snapshot`), so its files can go back.
@@ -705,7 +710,13 @@ impl Workspace {
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(60)).await;
-                if this.update(cx, Workspace::refresh_checkouts).is_err() {
+                if this
+                    .update(cx, |this, cx| {
+                        this.refresh_checkouts(cx);
+                        this.refresh_spent(cx);
+                    })
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -791,6 +802,8 @@ impl Workspace {
             overlaps: std::collections::BTreeMap::new(),
             reading_overlaps: false,
             turns: HashMap::new(),
+            transcripts: HashMap::new(),
+            spent: HashMap::new(),
             roots,
             root: project.clone(),
             follow_pane: true,
@@ -1522,6 +1535,72 @@ impl Workspace {
         .detach();
     }
 
+    /// Reads what each tab's session used in the plan's current 5-hour window, off the main thread.
+    fn refresh_spent(&mut self, cx: &mut Context<Self>) {
+        let since = crate::usage::window_start(cx);
+        let transcripts: Vec<(TabId, PathBuf)> =
+            self.transcripts.iter().map(|(tab, path)| (*tab, path.clone())).collect();
+        cx.spawn(async move |this, cx| {
+            let spent = cx
+                .background_spawn(async move {
+                    transcripts
+                        .into_iter()
+                        .filter_map(|(tab, path)| {
+                            let file = std::fs::File::open(path).ok()?;
+                            let lines = std::io::BufRead::lines(std::io::BufReader::new(file)).map_while(Result::ok);
+                            Some((tab, session_usage::read(lines, Some(since))))
+                        })
+                        .collect::<HashMap<TabId, Tokens>>()
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.spent = spent;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// What the pane's session used: its share of the 5-hour limit, estimated from its part of what
+    /// all the panes' sessions used, or its tokens when the plan has no limits to share.
+    fn render_spent(&self, cell: &Cell, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let tokens = self.spent.get(&cell.active).filter(|tokens| tokens.counted() > 0)?;
+        let all: u64 = self.spent.values().map(Tokens::counted).sum();
+        #[expect(clippy::cast_precision_loss, reason = "a share shown as a whole percentage")]
+        let share = tokens.counted() as f64 / all.max(1) as f64;
+        let percent = crate::usage::session_percent(cx);
+        let label = match percent {
+            Some(percent) => format!("≈{:.0}% of 5h", (share * percent).max(1.)),
+            None => format!("{} tokens", session_usage::short(tokens.counted())),
+        };
+        let mut tip = format!(
+            "This session in the current 5-hour window: {} tokens in, {} out, {} written to the cache ({} read back from it, which counts little).",
+            session_usage::short(tokens.input),
+            session_usage::short(tokens.output),
+            session_usage::short(tokens.cache_write),
+            session_usage::short(tokens.cache_read),
+        );
+        if let Some(percent) = percent {
+            let _ = write!(
+                tip,
+                "\n\nThat's {:.0}% of what the agents in Saturn used, and the 5-hour limit is {percent:.0}% used, so about {:.0}% of it went here.",
+                share * 100.,
+                share * percent
+            );
+        }
+        Some(
+            div()
+                .id(("spent", cell.id.key()))
+                .flex_none()
+                .px(len(space::SPACE_2))
+                .text_size(px(12.))
+                .text_color(theme::color(color::INK_FAINT))
+                .child(label)
+                .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+                .into_any_element(),
+        )
+    }
+
     /// Finds the panes' checkouts that change the same files as another of their repository's, off the
     /// main thread: after the branches are read, and when an agent finishes a turn.
     fn refresh_overlaps(&mut self, cx: &mut Context<Self>) {
@@ -1929,9 +2008,13 @@ impl Workspace {
         if self.claude_sessions.get(&tab) != session_before.as_ref() {
             self.save_session(cx);
         }
+        if let Some(path) = call.field("transcript_path").filter(|path| !path.is_empty()) {
+            self.transcripts.insert(tab, PathBuf::from(path));
+        }
         if call.event() == "Stop" {
             // A turn used some of the plan.
             crate::usage::refresh(false, cx);
+            self.refresh_spent(cx);
         }
         let state = match call.event() {
             "UserPromptSubmit" | "PostToolUse" => Some(AgentState::Working),
@@ -2497,6 +2580,7 @@ impl Workspace {
             .items_center()
             .gap(len(space::SPACE_1))
             .children(self.ticket_of(cell.active, cx).map(|ticket| ticket_chip(cell_id, ticket)))
+            .children(self.render_spent(cell, cx))
             .children(self.render_turn(cell, cx))
             .children(
                 self.checkouts

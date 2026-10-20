@@ -24,6 +24,61 @@ pub struct Usage {
     pub limits: Option<Vec<Limit>>,
     read_at: Option<Instant>,
     reading: bool,
+    /// The highest warning given for each limit's current window (80 or 95), by label and reset.
+    warned: std::collections::HashMap<(String, Option<i64>), u8>,
+}
+
+/// Where a limit gets a notification: once nearly used, once almost gone.
+const WARN_AT: [u8; 2] = [80, 95];
+
+/// The 5-hour window's start, from the session limit's reset: what agents' own use is measured
+/// against.
+pub fn window_start(cx: &App) -> i64 {
+    let resets = cx
+        .try_global::<Usage>()
+        .and_then(|usage| usage.limits.as_ref())
+        .and_then(|limits| limits.iter().find(|limit| limit.label == "Session"))
+        .and_then(|limit| limit.resets_at);
+    resets.map_or_else(|| unix_now() - 5 * 3600, |resets| resets - 5 * 3600)
+}
+
+/// The session limit's use, 0–100, when the plan has one.
+pub fn session_percent(cx: &App) -> Option<f64> {
+    cx.try_global::<Usage>()?.limits.as_ref()?.iter().find(|limit| limit.label == "Session").map(|limit| limit.percent)
+}
+
+/// A notification when a limit passes 80% or 95% of its window, once each per window.
+fn warn(usage: &mut Usage) {
+    let Some(limits) = &usage.limits else { return };
+    for limit in limits {
+        let level = WARN_AT.iter().rev().copied().find(|at| limit.percent >= f64::from(*at));
+        let Some(level) = level else { continue };
+        let key = (limit.label.clone(), limit.resets_at);
+        if usage.warned.get(&key).is_some_and(|warned| *warned >= level) {
+            continue;
+        }
+        usage.warned.insert(key, level);
+        let which = match limit.label.as_str() {
+            "Session" => "5-hour limit".to_owned(),
+            "Week" => "weekly limit".to_owned(),
+            model => format!("weekly {model} limit"),
+        };
+        let resets =
+            limit.resets_at.map(|at| format!(" It resets {}.", resets_in(at - unix_now()))).unwrap_or_default();
+        let title = format!("{level}% of your {which} used");
+        let body = format!("Agents slow down or stop when it runs out.{resets}");
+        crate::notify::post(&format!("limit-{}", limit.label), &title, &body, false);
+    }
+}
+
+/// "in 2 h 15 min", "in 3 days".
+fn resets_in(seconds: i64) -> String {
+    let minutes = seconds.max(0) / 60;
+    match minutes {
+        0..=59 => format!("in {minutes} min"),
+        60..=1439 => format!("in {} h {} min", minutes / 60, minutes % 60),
+        _ => format!("in {} days", minutes / 1440),
+    }
 }
 
 impl Global for Usage {}
@@ -65,6 +120,7 @@ pub fn refresh(now: bool, cx: &mut App) {
             usage.reading = false;
             usage.read_at = Some(Instant::now());
             usage.limits = limits;
+            warn(usage);
             cx.refresh_windows();
         });
     })

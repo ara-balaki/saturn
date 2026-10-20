@@ -27,6 +27,7 @@ pub mod review;
 pub mod schema;
 pub mod servers;
 pub mod session_name;
+pub mod session_usage;
 pub mod shared_env;
 pub mod shell_env;
 pub mod snapshot;
