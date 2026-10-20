@@ -10,7 +10,8 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool};
 use objc2::{MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
-    NSBezierPath, NSColor, NSImage, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
+    NSBezierPath, NSColor, NSCompositingOperation, NSGraphicsContext, NSImage, NSMenu, NSMenuItem, NSStatusBar,
+    NSStatusItem, NSVariableStatusItemLength, NSWindingRule,
 };
 use objc2_foundation::{NSAffineTransform, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
 
@@ -162,53 +163,61 @@ fn menu(summary: &str, waiting: bool, target: &ClickTarget, main_thread: MainThr
     menu
 }
 
-/// Saturn's mark at menu bar size, as the app icon draws it: a tilted ring rising to the right,
-/// its far half behind the planet and its near half in front. A template image, so macOS draws
-/// it black or white to match the menu bar.
+/// Saturn's mark at menu bar size, drawn like the app icon (`design/app-icon.html`) so the two
+/// read as one: a planet, and a ring rising to the right that passes behind it and comes back in
+/// front, with a gap either side. It is a template image, so macOS draws it black or white to
+/// match the menu bar; the gaps are cut out because one colour can't overlap itself. The
+/// proportions are the icon's, with the ring and the gaps thicker so they stay legible.
 fn glyph() -> Retained<NSImage> {
+    const CENTER: f64 = 9.;
+    const PLANET: f64 = 5.;
+    const RING_HALF_WIDTH: f64 = 8.4;
+    const RING_HALF_HEIGHT: f64 = 2.2;
+    const RING_STROKE: f64 = 1.3;
+    const GAP: f64 = 0.8;
     let draw = RcBlock::new(|_rect: NSRect| -> Bool {
-        NSColor::blackColor().set();
-        // The ring in halves around (9, 9): the far half above the centre line, the near below.
-        let (centre, across, deep) = (9.0_f64, 7.75_f64, 2.6_f64);
-        let half = |sign: f64| {
-            const K: f64 = 0.552_284_75;
-            let path = NSBezierPath::bezierPath();
-            path.moveToPoint(NSPoint::new(centre + across, centre));
-            path.curveToPoint_controlPoint1_controlPoint2(
-                NSPoint::new(centre, centre + sign * deep),
-                NSPoint::new(centre + across, centre + sign * K * deep),
-                NSPoint::new(centre + K * across, centre + sign * deep),
-            );
-            path.curveToPoint_controlPoint1_controlPoint2(
-                NSPoint::new(centre - across, centre),
-                NSPoint::new(centre - K * across, centre + sign * deep),
-                NSPoint::new(centre - across, centre + sign * K * deep),
-            );
-            path.setLineWidth(1.3);
-            path.setLineCapStyle(objc2_app_kit::NSLineCapStyle::Round);
-            // Rising to the right, as on the icon (AppKit's y points up, so counter-clockwise).
-            let tilt = NSAffineTransform::new();
-            tilt.translateXBy_yBy(centre, centre);
-            tilt.rotateByDegrees(20.);
-            tilt.translateXBy_yBy(-centre, -centre);
-            path.transformUsingAffineTransform(&tilt);
-            path
+        let Some(context) = NSGraphicsContext::currentContext() else { return Bool::NO };
+        let tilt = NSAffineTransform::new();
+        tilt.translateXBy_yBy(CENTER, CENTER);
+        tilt.rotateByDegrees(18.);
+        tilt.translateXBy_yBy(-CENTER, -CENTER);
+        let ring = NSBezierPath::bezierPathWithOvalInRect(NSRect::new(
+            NSPoint::new(CENTER - RING_HALF_WIDTH, CENTER - RING_HALF_HEIGHT),
+            NSSize::new(RING_HALF_WIDTH * 2., RING_HALF_HEIGHT * 2.),
+        ));
+        ring.transformUsingAffineTransform(&tilt);
+        // The half of the ring nearer the viewer, below the planet's centre in the ring's frame.
+        let front = NSBezierPath::bezierPathWithRect(NSRect::new(NSPoint::new(-9., -9.), NSSize::new(36., 18.)));
+        front.transformUsingAffineTransform(&tilt);
+        let disc = |radius: f64| {
+            NSBezierPath::bezierPathWithOvalInRect(NSRect::new(
+                NSPoint::new(CENTER - radius, CENTER - radius),
+                NSSize::new(radius * 2., radius * 2.),
+            ))
         };
-        half(1.).stroke();
-        NSBezierPath::bezierPathWithOvalInRect(NSRect::new(NSPoint::new(5., 5.), NSSize::new(8., 8.))).fill();
-        // One colour can't put a ring in front of a planet, so the near half cuts a thin gap into
-        // the planet first, then is drawn in it.
-        let near = half(-1.);
-        if let Some(context) = objc2_app_kit::NSGraphicsContext::currentContext() {
-            context.setCompositingOperation(objc2_app_kit::NSCompositingOperation::Clear);
-            near.setLineWidth(3.);
-            near.stroke();
-            context.setCompositingOperation(objc2_app_kit::NSCompositingOperation::SourceOver);
-            near.setLineWidth(1.3);
-            // Where the halves meet at the ring's ends, the gap bit into the far half: mend it.
-            half(1.).stroke();
-        }
-        near.stroke();
+
+        NSColor::blackColor().set();
+        disc(PLANET).fill();
+        // In front, the ring cuts a gap through the planet and is drawn in it. The clip reaches a
+        // little past the gap so this and the far side overlap rather than meet in a seam.
+        context.saveGraphicsState();
+        front.addClip();
+        context.setCompositingOperation(NSCompositingOperation::Clear);
+        ring.setLineWidth(RING_STROKE + GAP * 2.);
+        ring.stroke();
+        context.setCompositingOperation(NSCompositingOperation::SourceOver);
+        disc(PLANET + GAP + RING_STROKE).addClip();
+        ring.setLineWidth(RING_STROKE);
+        ring.stroke();
+        context.restoreGraphicsState();
+        // Everywhere else the ring stops a gap short of the planet: behind it, it's hidden.
+        context.saveGraphicsState();
+        let outside = NSBezierPath::bezierPathWithRect(NSRect::new(NSPoint::new(0., 0.), NSSize::new(18., 18.)));
+        outside.appendBezierPath(&disc(PLANET + GAP));
+        outside.setWindingRule(NSWindingRule::EvenOdd);
+        outside.addClip();
+        ring.stroke();
+        context.restoreGraphicsState();
         Bool::YES
     });
     let image = NSImage::imageWithSize_flipped_drawingHandler(NSSize::new(18., 18.), false, &draw);
