@@ -19,6 +19,7 @@ use saturn_core::clickup::Ticket;
 use saturn_core::git;
 use saturn_core::layout::{Cell, CellId, Direction, Layout, RowId, TabId};
 use saturn_core::pull_request::{self, PrState, PullRequest};
+use saturn_core::recipe;
 use saturn_core::servers::{self, Server, Service};
 use saturn_core::session_name::rename_for_prompt;
 use saturn_core::shared_env;
@@ -80,6 +81,8 @@ actions!(
         TextBigger,
         TextSmaller,
         TextReset,
+        SetUpWorktree,
+        StartApp,
     ]
 );
 
@@ -124,6 +127,8 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("Usual text size", "scan", Box::new(TextReset)),
         ("History", "git-branch", Box::new(ShowHistory)),
         ("Impact of the changes", "waypoints", Box::new(ShowImpact)),
+        ("Set up this worktree", "wrench", Box::new(SetUpWorktree)),
+        ("Start the app", "play", Box::new(StartApp)),
         ("Database diagram", "database", Box::new(ShowSchema)),
         ("dbt lineage", "workflow", Box::new(ShowLineage)),
         ("Problems", "circle-x", Box::new(ShowProblems)),
@@ -505,6 +510,14 @@ fn server_chip(cell: CellId, server: &Server) -> impl IntoElement {
         .on_click(move |_, _, _| {
             let _ = std::process::Command::new("open").arg(&url).spawn();
         })
+}
+
+/// What a pane says when its repo has no recipe yet.
+fn no_recipe() -> String {
+    format!(
+        "No worktree recipe here yet. Add {} to the repo, for example:\n  {{ \"setup\": [\"pnpm install\"], \"run\": {{ \"web\": \"pnpm dev\" }} }}",
+        recipe::FILE
+    )
 }
 
 /// Where in a pane a dragged tab lands: within a quarter of an edge splits the pane on that side,
@@ -948,23 +961,23 @@ impl Workspace {
     /// Saturn to make one, running the project's ticket command.
     pub fn start_ticket(&mut self, ticket: &Ticket, window: &mut Window, cx: &mut Context<Self>) {
         let project = self.settings.project(&self.project);
-        let cwd = if project.create_worktree {
+        let (cwd, made) = if project.create_worktree {
             match git::ticket_worktree(&self.project, ticket.key()) {
-                Ok(dir) => {
+                Ok((dir, made)) => {
                     // Before the agent starts, so it finds the env files there.
                     if self.settings.share_env_files {
                         shared_env::share(&dir);
                         self.env_shared.insert(dir.clone());
                     }
-                    dir
+                    (dir, made)
                 }
                 Err(problem) => {
                     self.clickup.problem = Some(format!("No worktree for {}: {problem}", ticket.key()));
-                    self.project.clone()
+                    (self.project.clone(), false)
                 }
             }
         } else {
-            self.project.clone()
+            (self.project.clone(), false)
         };
         let Some(tab) = self.spawn_terminal(&cwd, window, cx) else { return };
         if self.layout.is_empty() {
@@ -972,16 +985,108 @@ impl Workspace {
         } else {
             self.layout.split_right(tab, None);
         }
-        let command = format!("{}\r", project.command_for(ticket.key(), &ticket.title));
-        if let Some(view) = self.terminals.get(&tab).cloned() {
-            // Once the shell has drawn its prompt.
-            cx.spawn(async move |_, cx| {
-                cx.background_executor().timer(std::time::Duration::from_millis(600)).await;
-                let () = view.update(cx, |view, _| view.write(command.into_bytes()));
-            })
-            .detach();
+        let mut command = project.command_for(ticket.key(), &ticket.title);
+        // A worktree made just now has the code and nothing else: the recipe's setup runs first,
+        // and the agent starts only once it has worked.
+        if made {
+            match recipe::load(&cwd) {
+                Some(Ok(recipe)) => {
+                    if let Some(setup) = recipe.setup_command() {
+                        command = format!("{setup} && {command}");
+                    }
+                }
+                Some(Err(problem)) => self.note(tab, &format!("The worktree recipe wasn't run: {problem}"), cx),
+                None => {}
+            }
         }
+        self.type_into(tab, command, cx);
         self.after_layout_change(window, cx);
+    }
+
+    /// Types `command` into a new tab's shell and runs it, once the shell has drawn its prompt.
+    fn type_into(&self, tab: TabId, command: String, cx: &mut Context<Self>) {
+        let Some(view) = self.terminals.get(&tab).cloned() else { return };
+        cx.spawn(async move |_, cx| {
+            cx.background_executor().timer(std::time::Duration::from_millis(600)).await;
+            let () = view.update(cx, |view, _| view.write(format!("{command}\r").into_bytes()));
+        })
+        .detach();
+    }
+
+    /// Shows a faint line from Saturn in a tab.
+    fn note(&self, tab: TabId, text: &str, cx: &mut Context<Self>) {
+        if let Some(view) = self.terminals.get(&tab) {
+            view.update(cx, |view, cx| view.note(text, cx));
+        }
+    }
+
+    /// The repo or worktree the focused pane works in.
+    fn focused_checkout(&self, cx: &gpui_kit::App) -> PathBuf {
+        let Some(tab) = self.layout.focused_tab() else { return self.project.clone() };
+        self.checkouts
+            .get(&tab)
+            .map(|checkout| checkout.root.clone())
+            .or_else(|| self.terminals.get(&tab).and_then(|view| git::toplevel(&view.read(cx).cwd)))
+            .unwrap_or_else(|| self.project.clone())
+    }
+
+    /// A new tab in the focused pane, at the top of `checkout`, named `name`.
+    fn recipe_tab(
+        &mut self,
+        checkout: &Path,
+        name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<TabId> {
+        let tab = self.spawn_terminal(checkout, window, cx)?;
+        self.names.insert(tab, name.to_owned());
+        self.layout.add_tab(tab, None);
+        self.after_layout_change(window, cx);
+        Some(tab)
+    }
+
+    /// Runs the recipe's setup in the focused pane's checkout, in a tab of its own. Safe to run again:
+    /// for a worktree made some other way, or after the recipe changed.
+    fn set_up_worktree(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let checkout = self.focused_checkout(cx);
+        let Some(tab) = self.recipe_tab(&checkout, "Setup", window, cx) else { return };
+        match recipe::load(&checkout) {
+            Some(Ok(recipe)) => match recipe.setup_command() {
+                Some(setup) => self.type_into(tab, setup, cx),
+                None => self.note(tab, &format!("{} has no \"setup\" steps.", recipe::FILE), cx),
+            },
+            Some(Err(problem)) => self.note(tab, &problem, cx),
+            None => self.note(tab, &no_recipe(), cx),
+        }
+    }
+
+    /// Starts each of the recipe's `run` commands in a tab of its own, named after it.
+    fn start_app(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let checkout = self.focused_checkout(cx);
+        match recipe::load(&checkout) {
+            Some(Ok(recipe)) if !recipe.run.is_empty() => {
+                for (name, command) in recipe.run {
+                    if let Some(tab) = self.recipe_tab(&checkout, &name, window, cx) {
+                        self.type_into(tab, command, cx);
+                    }
+                }
+            }
+            Some(Ok(_)) => {
+                if let Some(tab) = self.recipe_tab(&checkout, "Start", window, cx) {
+                    self.note(tab, &format!("{} has no \"run\" commands.", recipe::FILE), cx);
+                }
+            }
+            Some(Err(problem)) => {
+                if let Some(tab) = self.recipe_tab(&checkout, "Start", window, cx) {
+                    self.note(tab, &problem, cx);
+                }
+            }
+            None => {
+                if let Some(tab) = self.recipe_tab(&checkout, "Start", window, cx) {
+                    self.note(tab, &no_recipe(), cx);
+                }
+            }
+        }
     }
 
     /// Reads the branch each tab is on and the pull request each tab works on, off the main thread.
@@ -2480,6 +2585,8 @@ impl Workspace {
                 this.show_impact(&root, cx);
             }))
             .on_action(cx.listener(|this, _: &ShowSchema, _, cx| this.show_schema(cx)))
+            .on_action(cx.listener(|this, _: &SetUpWorktree, window, cx| this.set_up_worktree(window, cx)))
+            .on_action(cx.listener(|this, _: &StartApp, window, cx| this.start_app(window, cx)))
             .on_action(cx.listener(|this, _: &ShowLineage, _, cx| this.show_lineage(cx)))
             .on_action(cx.listener(|this, _: &ShowProblems, _, cx| this.show_problems(cx)))
     }

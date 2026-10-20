@@ -250,6 +250,14 @@ impl TerminalView {
         self.terminal.write(bytes);
     }
 
+    /// Shows a line from Saturn in the terminal, faint, without the shell seeing it: for a new
+    /// terminal, before its prompt draws.
+    pub fn note(&mut self, text: &str, cx: &mut Context<Self>) {
+        let text = text.replace('\n', "\r\n");
+        let _ = self.terminal.advance(format!("\x1b[2m{text}\x1b[0m\r\n").as_bytes());
+        cx.notify();
+    }
+
     /// Pastes text, wrapped in bracketed-paste markers when the program asked for them.
     pub fn paste(&mut self, text: &str) {
         let text = text.replace("\r\n", "\r").replace('\n', "\r");

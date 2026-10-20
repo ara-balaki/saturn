@@ -111,6 +111,8 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
 - Focus a pane that works in another git worktree, and the sidebar follows it there.
 - Worktrees share the main checkout's `.env` files: each one's is a link to main's, so a value added
   in any worktree is in all of them. A worktree's own, different file is left alone.
+- A [worktree recipe](#worktree-recipe) sets up each new worktree before its agent starts, and starts
+  the app (one tab per server) from the palette.
 
 ### Files and editor
 
@@ -197,6 +199,28 @@ Saturn doesn't change your Claude Code setup. Every shell it opens gets `SATURN_
 plugin in [`plugin/`](plugin) for that session only. The plugin's hooks tell the pane what the agent
 is doing (working, waiting for a permission, done, failed) and do nothing outside Saturn. Run
 `claude` in any other terminal and it's exactly as before.
+
+## Worktree recipe
+
+A fresh worktree has the code but nothing git ignores: no dependencies, no builds. Put the steps in
+`.saturn/worktree.json`, committed with the repo, and Saturn runs them:
+
+```json
+{
+  "setup": ["pnpm install", "pnpm --filter @acme/shared build"],
+  "run": { "api": "pnpm --filter api dev", "web": "pnpm --filter web dev" },
+  "cleanup": "docker compose down"
+}
+```
+
+- `setup` runs in a worktree Saturn makes for a ticket, before the agent starts (and the agent starts
+  only if it worked). "Set up this worktree" in the palette (⌘⇧P) runs it again, or in a worktree made
+  some other way.
+- `run` names the commands that start the app. "Start the app" opens a tab for each, named after it.
+- `cleanup` is for when a worktree goes away.
+
+A list of steps runs one after another and stops at the first that fails. Every field is optional. A
+branch made before the recipe existed uses the main checkout's.
 
 ## Settings
 

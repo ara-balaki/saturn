@@ -222,15 +222,16 @@ pub fn main_worktree(dir: &Path) -> Option<PathBuf> {
 }
 
 /// A worktree for `ticket` next to `repo` (`../<repo>-<ticket>`) on a branch named after the
-/// ticket, made from the current `HEAD`, or the one already there. Returns its folder.
-pub fn ticket_worktree(repo: &Path, ticket: &str) -> Result<PathBuf, String> {
+/// ticket, made from the current `HEAD`, or the one already there. Returns its folder, and whether
+/// it was made just now (and so still needs setting up).
+pub fn ticket_worktree(repo: &Path, ticket: &str) -> Result<(PathBuf, bool), String> {
     let branch: String =
         ticket.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' }).collect();
     let top = toplevel(repo).ok_or_else(|| format!("{} is not a git repository", repo.display()))?;
     let name = top.file_name().map_or_else(|| "repo".into(), |name| name.to_string_lossy().into_owned());
     let dir = top.parent().unwrap_or(&top).join(format!("{name}-{branch}"));
     if dir.join(".git").exists() {
-        return Ok(dir);
+        return Ok((dir, false));
     }
     let dir_arg = dir.to_string_lossy().into_owned();
     let branch_exists = run(&top, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")]).is_some();
@@ -241,7 +242,7 @@ pub fn ticket_worktree(repo: &Path, ticket: &str) -> Result<PathBuf, String> {
     };
     let output = git(&top).args(&args).output().map_err(|error| format!("git could not run: {error}"))?;
     if output.status.success() {
-        Ok(dir)
+        Ok((dir, true))
     } else {
         Err(String::from_utf8_lossy(&output.stderr).lines().next().unwrap_or("git worktree add failed").to_owned())
     }
@@ -383,10 +384,11 @@ mod tests {
     #[test]
     fn a_ticket_gets_a_sibling_worktree_once() {
         let dir = repo();
-        let first = ticket_worktree(dir.path(), "ABC-240").expect("created");
+        let (first, made) = ticket_worktree(dir.path(), "ABC-240").expect("created");
+        assert!(made, "made just now, so it gets set up");
         assert!(first.ends_with(format!("{}-abc-240", dir.path().file_name().expect("a name").to_string_lossy())));
         assert_eq!(branch(&first).as_deref(), Some("abc-240"));
-        assert_eq!(ticket_worktree(dir.path(), "ABC-240").expect("reused"), first);
+        assert_eq!(ticket_worktree(dir.path(), "ABC-240").expect("reused"), (first.clone(), false));
         let _ = std::fs::remove_dir_all(&first);
     }
 
@@ -394,7 +396,7 @@ mod tests {
     fn a_worktree_belongs_to_its_main_checkout() {
         let dir = repo();
         let main = toplevel(dir.path()).expect("a repository");
-        let worktree = ticket_worktree(dir.path(), "ABC-241").expect("created");
+        let (worktree, _) = ticket_worktree(dir.path(), "ABC-241").expect("created");
         assert_eq!(main_worktree(&worktree), Some(main.clone()));
         assert_eq!(main_worktree(&main), Some(main));
         let _ = std::fs::remove_dir_all(&worktree);
