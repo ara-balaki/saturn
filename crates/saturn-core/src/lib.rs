@@ -4,6 +4,7 @@
 
 pub mod agent_activity;
 pub mod agent_state;
+pub mod best_of;
 pub mod checks;
 pub mod clickup;
 pub mod dbt;

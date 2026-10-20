@@ -16,6 +16,7 @@ use gpui_kit::{
 };
 use saturn_bridge::{Bridge, HookCall};
 use saturn_core::agent_state::{AgentState, tab_title};
+use saturn_core::best_of;
 use saturn_core::checks;
 use saturn_core::clickup::Ticket;
 use saturn_core::git;
@@ -31,6 +32,7 @@ use saturn_core::shared_env;
 use saturn_core::snapshot::{self, Snapshot};
 use saturn_core::waiting::{self, Waiting};
 use saturn_core::worktree_include;
+use saturn_core::worktrees::Worktree;
 use saturn_design::{color, radius, shadow, space};
 use saturn_terminal::view::{TerminalView, TerminalViewEvent};
 
@@ -104,6 +106,8 @@ actions!(
         ShowContext,
         TeachRepo,
         SendToSeveral,
+        BestOfN,
+        CompareAttempts,
     ]
 );
 
@@ -141,6 +145,8 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("Go to the next agent that needs you", "bot", Box::new(NextAttention)),
         ("New agent", "square-plus", Box::new(OpenTicketPicker)),
         ("Send to several agents", "send", Box::new(SendToSeveral)),
+        ("Best of N: one task, several agents", "git-fork", Box::new(BestOfN)),
+        ("Compare attempts", "git-compare", Box::new(CompareAttempts)),
         ("Show or hide the sidebar", "panel-left", Box::new(ToggleSidebar)),
         ("Show or hide the editor", "panel-top", Box::new(ToggleEditor)),
         ("Show or hide your tickets", "panel-right", Box::new(ToggleTickets)),
@@ -1282,15 +1288,7 @@ impl Workspace {
         let (cwd, made) = if make_worktree {
             match git::work_worktree(&self.project, key) {
                 Ok((dir, made)) => {
-                    // Before the agent starts, so it finds the env files there.
-                    if self.settings.share_env_files {
-                        shared_env::share(&dir);
-                        self.env_shared.insert(dir.clone());
-                    }
-                    // Then what `.worktreeinclude` lists, around the links just made.
-                    if made {
-                        worktree_include::copy_into(&dir);
-                    }
+                    self.furnish_worktree(&dir, made);
                     (dir, made)
                 }
                 Err(why) => {
@@ -1318,6 +1316,110 @@ impl Workspace {
         }
         self.type_into(tab, command, cx);
         self.after_layout_change(window, cx);
+    }
+
+    /// Brings into a worktree what git leaves out, before an agent starts there: the shared env
+    /// files, and (once, when it was just made) what `.worktreeinclude` lists.
+    fn furnish_worktree(&mut self, dir: &Path, made: bool) {
+        if self.settings.share_env_files {
+            shared_env::share(dir);
+            self.env_shared.insert(dir.to_owned());
+        }
+        // After the links just made, so it copies around them.
+        if made {
+            worktree_include::copy_into(dir);
+        }
+    }
+
+    /// Best of N: makes a worktree for each of `count` attempts at `task` (off the main thread),
+    /// then opens a pane in each that sets it up and starts Claude with the task.
+    pub fn start_attempts(&mut self, task: String, count: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let repo = git::main_worktree(&self.project).unwrap_or_else(|| self.project.clone());
+        let names = best_of::work_names(&task, count);
+        cx.spawn_in(window, async move |this, cx| {
+            let made = cx
+                .background_spawn(async move {
+                    names.iter().map(|name| git::work_worktree(&repo, name)).collect::<Vec<_>>()
+                })
+                .await;
+            let _ = this.update_in(cx, |this, window, cx| this.open_attempts(&task, made, window, cx));
+        })
+        .detach();
+    }
+
+    fn open_attempts(
+        &mut self,
+        task: &str,
+        made: Vec<Result<(PathBuf, bool), String>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        for (number, attempt) in made.into_iter().enumerate() {
+            let (dir, fresh, problem) = match attempt {
+                Ok((dir, fresh)) => (dir, fresh, None),
+                Err(why) => (self.project.clone(), false, Some(why)),
+            };
+            if problem.is_some() {
+                // Without its own worktree an attempt would trample the others' work.
+                if let Some(tab) = self.spawn_terminal(&dir, window, cx) {
+                    self.place_new(tab);
+                    let why = problem.unwrap_or_default();
+                    self.note(tab, &format!("Attempt {} has no worktree, so it didn't start: {why}", number + 1), cx);
+                }
+                continue;
+            }
+            self.furnish_worktree(&dir, fresh);
+            let Some(tab) = self.spawn_terminal(&dir, window, cx) else { continue };
+            self.place_new(tab);
+            let mut command = format!("claude {}", settings::shell_quote(task));
+            if fresh && let Some(setup) = self.setup_for(tab, &dir, cx) {
+                command = format!("{setup} && {command}");
+            }
+            self.type_into(tab, command, cx);
+        }
+        self.after_layout_change(window, cx);
+    }
+
+    /// Puts a new pane into the grid, to the right of the focused one.
+    fn place_new(&mut self, tab: TabId) {
+        if self.layout.is_empty() {
+            self.layout.add_tab(tab, None);
+        } else {
+            self.layout.split_right(tab, None);
+        }
+    }
+
+    /// Where each attempt's agent is: its pane (the first working in its folder) and that pane's state.
+    pub fn attempt_panes(&self, folders: &[PathBuf], cx: &gpui_kit::App) -> Vec<Option<(TabId, AgentState)>> {
+        folders
+            .iter()
+            .map(|folder| {
+                let folder = folder.canonicalize().unwrap_or_else(|_| folder.clone());
+                self.layout.tabs().find_map(|tab| {
+                    let view = self.terminals.get(&tab)?.read(cx);
+                    let cwd = view.cwd.canonicalize().unwrap_or_else(|_| view.cwd.clone());
+                    cwd.starts_with(&folder).then_some((tab, view.state))
+                })
+            })
+            .collect()
+    }
+
+    /// Keeps one attempt: closes the panes working in the others and archives their worktrees, so
+    /// any of them can still be restored from Worktrees.
+    pub fn keep_attempt(&mut self, others: Vec<Worktree>, cx: &mut Context<Self>) {
+        let folders: Vec<PathBuf> = others.iter().map(|worktree| worktree.path.clone()).collect();
+        for (tab, _) in self.attempt_panes(&folders, cx).into_iter().flatten() {
+            if let Some(view) = self.terminals.get(&tab) {
+                view.update(cx, |view, _| view.kill());
+            }
+        }
+        let repo = git::main_worktree(&self.project).unwrap_or_else(|| self.project.clone());
+        cx.background_spawn(async move {
+            for worktree in &others {
+                let _ = crate::worktrees_view::archive_now(&repo, worktree);
+            }
+        })
+        .detach();
     }
 
     /// Gives `message` to the agent working in `checkout`: the focused pane when its agent works there,
@@ -3764,6 +3866,14 @@ impl Workspace {
             .on_action(cx.listener(|this, _: &RunCheck, window, cx| {
                 let checkout = this.focused_checkout(cx);
                 crate::palette::checks(cx.weak_entity(), checkout, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &BestOfN, window, cx| {
+                let repo = git::main_worktree(&this.project).unwrap_or_else(|| this.project.clone());
+                crate::best_of_view::start(cx.weak_entity(), &repo, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &CompareAttempts, window, cx| {
+                let repo = git::main_worktree(&this.project).unwrap_or_else(|| this.project.clone());
+                crate::best_of_view::compare(cx.weak_entity(), repo, window, cx);
             }))
             .on_action(cx.listener(|this, _: &SendToSeveral, window, cx| {
                 let panes = this.broadcast_panes(cx);

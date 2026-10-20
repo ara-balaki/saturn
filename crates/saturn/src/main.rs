@@ -3,6 +3,7 @@
 mod agents_view;
 mod app_view;
 mod assets;
+mod best_of_view;
 mod broadcast_view;
 mod changes_view;
 mod chrome;

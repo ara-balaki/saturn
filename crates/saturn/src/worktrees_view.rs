@@ -161,18 +161,9 @@ impl WorktreesView {
         cx.spawn(async move |this, cx| {
             let said = cx
                 .background_spawn(async move {
-                    let cleanup =
-                        recipe::load(&worktree.path).and_then(Result::ok).and_then(|recipe| recipe.cleanup_command());
                     let name = folder_name(&worktree.path);
-                    match worktrees::archive(&repo, &worktree, cleanup.as_deref(), now()) {
-                        Ok(archived) => {
-                            if let Some(file) = archives_file() {
-                                let mut list = Archives::load(&file);
-                                list.add(&repo, archived);
-                                let _ = list.save(&file);
-                            }
-                            format!("Archived {name}: Restore brings it back with its uncommitted work.")
-                        }
+                    match archive_now(&repo, &worktree) {
+                        Ok(()) => format!("Archived {name}: Restore brings it back with its uncommitted work."),
                         Err(problem) => format!("{name} stays: {problem}"),
                     }
                 })
@@ -510,6 +501,19 @@ fn read_rows(repo: &Path, pane_folders: &[PathBuf]) -> Vec<Row> {
             }
         })
         .collect()
+}
+
+/// Archives a worktree of the main checkout `repo` (its recipe's cleanup first) and lists it, so
+/// Restore can bring it back. Slow: off the main thread.
+pub fn archive_now(repo: &Path, worktree: &Worktree) -> Result<(), String> {
+    let cleanup = recipe::load(&worktree.path).and_then(Result::ok).and_then(|recipe| recipe.cleanup_command());
+    let archived = worktrees::archive(repo, worktree, cleanup.as_deref(), now())?;
+    if let Some(file) = archives_file() {
+        let mut list = Archives::load(&file);
+        list.add(repo, archived);
+        let _ = list.save(&file);
+    }
+    Ok(())
 }
 
 /// Where archived worktrees are listed, beside Saturn's settings.

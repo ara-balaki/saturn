@@ -98,6 +98,10 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
 - **Send to several agents** (⌘⇧P): one message, typed into every pane you pick. Panes with an agent
   are picked to begin with; a pane with only a shell starts Claude with it, and a busy one (a server,
   a build) is left alone.
+- **Best of N** (⌘⇧P): one task given to two to four agents at once, each in a worktree of its own
+  (branches `<task>-try-1`, `-try-2`…). **Compare attempts** lays them side by side: the files each
+  changed with their lines, its commits, and whether its agent is still at it. Keep one, and the
+  others' panes close and their worktrees are archived (Worktrees can restore them).
 - macOS notifies you while Saturn is in the background, and a small Saturn in the menu bar shows how
   many are waiting. The moon in the title bar (Focus) holds notifications while you concentrate;
   stopping it gives one that says what happened meanwhile.
