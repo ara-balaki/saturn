@@ -27,6 +27,8 @@
 //! - `SATURN_SESSIONS_QUERY=text` types that into Search sessions (`CLAUDE_CONFIG_DIR` points it at
 //!   made-up transcripts).
 //! - `SATURN_ROUTINES=1` lets routines run in an automated run (they never do otherwise).
+//! - `SATURN_TEAM=1` opens the first pane's agent team after 6 seconds.
+//! - `SATURN_START_NAMED=fix-login` starts work by name, also in the other repos `SATURN_ALSO_IN` names.
 //! - `SATURN_UNDO_TURN=6` presses the first pane's "Undo the agent's last turn" after 6 seconds.
 //! - `SATURN_ANSWER=allow|deny` answers the first pane's permission after 5 seconds.
 //! - `SATURN_RUN_CHECKS=1` runs every check of the focused pane's checkout.
@@ -157,6 +159,8 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
     rebind_from_env(workspace, cx);
     input_from_env(window, cx);
     run_command_from_env(window, cx);
+    team_from_env(window, cx);
+    start_named_from_env(window, cx);
     press_from_env(cx);
     if std::env::var_os("SATURN_TICKET_PICKER").is_some() {
         cx.spawn_in(window, async move |_, cx| {
@@ -272,6 +276,7 @@ fn press_from_env(cx: &mut Context<Workspace>) {
     }
     undo_turn_from_env(cx);
     answer_from_env(cx);
+
     if std::env::var_os("SATURN_RUN_CHECKS").is_some() {
         // Every check of the focused pane's checkout, as picking "All of them" would.
         cx.spawn(async move |workspace, cx| {
@@ -289,6 +294,43 @@ fn undo_turn_from_env(cx: &mut Context<Workspace>) {
     cx.spawn(async move |workspace, cx| {
         cx.background_executor().timer(Duration::from_secs(after)).await;
         let _ = workspace.update(cx, |workspace, cx| workspace.undo_turn(TabId(1), cx));
+    })
+    .detach();
+}
+
+/// Starts work by name in other repos too, as New agent would (`SATURN_START_NAMED=fix-login`,
+/// `SATURN_ALSO_IN=acme-api` naming the window's other repos to pick, comma separated).
+fn start_named_from_env(window: &mut Window, cx: &mut Context<Workspace>) {
+    let Ok(name) = std::env::var("SATURN_START_NAMED") else { return };
+    let also: Vec<String> = std::env::var("SATURN_ALSO_IN").unwrap_or_default().split(',').map(str::to_owned).collect();
+    cx.spawn_in(window, async move |workspace, cx| {
+        cx.background_executor().timer(Duration::from_secs(2)).await;
+        let _ = workspace.update_in(cx, |workspace, window, cx| {
+            for repo in workspace.other_repos() {
+                if repo.file_name().is_some_and(|folder| also.iter().any(|name| folder == name.as_str())) {
+                    workspace.toggle_also_in(&repo, cx);
+                }
+            }
+            workspace.start_named(&name, window, cx);
+        });
+    })
+    .detach();
+}
+
+/// Opens the first pane's agent team after 6 seconds (`SATURN_TEAM=1`).
+fn team_from_env(window: &mut Window, cx: &mut Context<Workspace>) {
+    if std::env::var_os("SATURN_TEAM").is_none() {
+        return;
+    }
+    cx.spawn_in(window, async move |workspace, cx| {
+        cx.background_executor().timer(Duration::from_secs(6)).await;
+        let _ = workspace.update_in(cx, |workspace, window, cx| {
+            let title = workspace.team(TabId(1)).map(|team| team.name.clone());
+            match title {
+                Some(title) => crate::team_view::open(cx.weak_entity(), TabId(1), title, window, cx),
+                None => eprintln!("SATURN_TEAM: the first pane leads no team"),
+            }
+        });
     })
     .detach();
 }

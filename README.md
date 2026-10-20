@@ -109,6 +109,12 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   is open it starts each one on time in a pane named after it, with its prompt, in its folder. Every
   run is listed; one whose time passed while Saturn was closed shows as missed, with Run now, and one
   that ran can be resumed. Kept in `routines.json` beside the settings.
+- **Agent teams**: a pane whose Claude session leads a team (Claude Code's agent teams) shows a
+  Team chip: how many are in it, how far its tasks are, and unread messages. It opens the members,
+  the shared task list with who has each task, and the messages they've sent each other.
+- **Work across repos**: with more than one repo in the window, New agent's "Also in" gives the work
+  a worktree in each picked repo, on the same branch, and the agent reaches them all (Claude's
+  `--add-dir`). A pane in such a worktree shows a chip for each other repo's, which goes to it.
 - macOS notifies you while Saturn is in the background, and a small Saturn in the menu bar shows how
   many are waiting. The moon in the title bar (Focus) holds notifications while you concentrate;
   stopping it gives one that says what happened meanwhile.
@@ -202,6 +208,8 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
 - **History**: every branch as a graph, with tags, authors and dates; click a commit for its diff.
 - **Impact**: every file that depends on what changed, nearest first. It follows imports in
   JavaScript and TypeScript (with `tsconfig` aliases and a monorepo's packages), Rust and Python.
+  In a dbt project it follows the lineage: the models built from a changed model, seed or snapshot,
+  however far down, and the exposures (dashboards, apps) that read any of them.
 - **Pull requests**: each pane shows the one it works on, with its state, from the `gh` CLI: an open
   one whose title or branch names the pane's ticket (`ABC-123`), else the last one linked in it, else
   its branch's, else one that only mentions the ticket (a subtask's). Its
@@ -330,7 +338,8 @@ pane before they run.
 ## Settings
 
 Open them with ⌘, or the gear in the title bar: sections on the left, with a search across all of
-them. They're stored in `~/Library/Application Support/Saturn/settings.json`.
+them. They're stored in `~/Library/Application Support/Saturn/settings.json`, along with which
+panels (sidebar, editor, tickets) were showing, so Saturn opens with the same ones.
 
 - **General**: notifications when an agent needs you while Saturn is in the background; the menu bar
   icon with how many agents wait for you; sharing `.env` and Claude's local files with worktrees; checking for updates now.

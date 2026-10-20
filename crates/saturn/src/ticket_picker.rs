@@ -62,11 +62,51 @@ pub fn open(workspace: WeakEntity<Workspace>, connected: bool, window: &mut Wind
             .bg(crate::chrome::dialog_surface())
             .w(px(600.))
             .child(Input::new(&search))
+            .children(also_in_row(&workspace, cx))
             .children(note.map(|note| {
                 div().py(len(space::SPACE_4)).text_size(px(14.)).text_color(theme::color(color::INK_MUTED)).child(note)
             }))
             .child(list(&workspace, &rows, cx))
     });
+}
+
+/// The window's other repos, to start the agent in them too: the work gets a worktree in each on
+/// the same branch, and the agent reaches them all. Only with more than one repo open.
+fn also_in_row(workspace: &Entity<Workspace>, cx: &App) -> Option<impl IntoElement + use<>> {
+    let others = workspace.read(cx).other_repos();
+    if others.is_empty() {
+        return None;
+    }
+    let picked = workspace.read(cx).also_in().to_vec();
+    let mut track = crate::chrome::track();
+    for (index, repo) in others.into_iter().enumerate() {
+        let name = repo.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+        let weak = workspace.downgrade();
+        track = track.child(
+            crate::chrome::track_item(("also-in", index), picked.contains(&repo))
+                .px(len(space::SPACE_3))
+                .text_size(px(12.))
+                .child(name)
+                .on_click(move |_, _, cx| {
+                    let _ = weak.update(cx, |workspace, cx| workspace.toggle_also_in(&repo, cx));
+                }),
+        );
+    }
+    Some(
+        div()
+            .flex()
+            .items_center()
+            .gap(len(space::SPACE_2))
+            .pt(len(space::SPACE_2))
+            .child(div().text_size(px(13.)).text_color(theme::color(color::INK_MUTED)).child("Also in"))
+            .child(track)
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(theme::color(color::INK_FAINT))
+                    .child("a worktree in each, on the same branch"),
+            ),
+    )
 }
 
 /// A row of the dialog: a ticket, or work named by what was typed.

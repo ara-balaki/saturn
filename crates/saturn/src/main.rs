@@ -39,6 +39,7 @@ mod spike;
 mod status_bar;
 mod status_line;
 mod teach_view;
+mod team_view;
 mod theme;
 mod ticket_picker;
 mod tickets_view;
