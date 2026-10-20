@@ -329,7 +329,8 @@ pane before they run.
 ## Settings
 
 Open them with ⌘, or the gear in the title bar: sections on the left, with a search across all of
-them. They're stored in `~/Library/Application Support/Saturn/settings.json`.
+them. They're stored in `~/Library/Application Support/Saturn/settings.json`, along with which
+panels (sidebar, editor, tickets) were showing, so Saturn opens with the same ones.
 
 - **General**: notifications when an agent needs you while Saturn is in the background; the menu bar
   icon with how many agents wait for you; sharing `.env` and Claude's local files with worktrees; checking for updates now.

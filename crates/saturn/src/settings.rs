@@ -40,6 +40,27 @@ pub struct Settings {
     /// A worktree's env files are links to the main checkout's, so every worktree has the same
     /// values (`saturn_core::shared_env`).
     pub share_env_files: bool,
+    /// The panels showing when Saturn last quit or one was shown or hidden; new windows open
+    /// with the same.
+    pub panels: Panels,
+}
+
+/// The window's panels around the grid, and whether each is showing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Panels {
+    /// The files and changes, on the left (⌘B).
+    pub sidebar: bool,
+    /// The editor, above the grid (⌘J).
+    pub editor: bool,
+    /// The ClickUp tickets, on the right (⌘⌥B).
+    pub tickets: bool,
+}
+
+impl Default for Panels {
+    fn default() -> Self {
+        Self { sidebar: true, editor: true, tickets: false }
+    }
 }
 
 /// How files look in the editor.
@@ -158,6 +179,7 @@ impl Default for Settings {
             show_usage: true,
             ticket_filter: saturn_core::clickup::Filter::default(),
             share_env_files: true,
+            panels: Panels::default(),
         }
     }
 }
@@ -257,6 +279,14 @@ mod tests {
         let settings: Settings = serde_json::from_str(r#"{"name_tabs_after_sessions": false}"#).expect("loads");
         assert_eq!(settings.appearance, AppearanceSetting::System);
         assert!(!settings.name_tabs_after_sessions);
+    }
+
+    #[test]
+    fn panels_open_as_they_were_left() {
+        let before: Settings = serde_json::from_str("{}").expect("loads");
+        assert_eq!(before.panels, Panels { sidebar: true, editor: true, tickets: false });
+        let closed: Settings = serde_json::from_str(r#"{"panels": {"editor": false}}"#).expect("loads");
+        assert_eq!(closed.panels, Panels { sidebar: true, editor: false, tickets: false });
     }
 
     #[test]
