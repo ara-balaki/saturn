@@ -254,6 +254,7 @@ impl Layout {
         let row = &mut self.rows[at.row];
         row.cells[at.cell].size = half;
         row.cells.insert(at.cell + 1, new_cell);
+        even_out_if_cramped(row.cells.iter_mut().map(|cell| &mut cell.size));
     }
 
     /// Opens a tab in a new row below a cell's row, sharing its height.
@@ -266,6 +267,7 @@ impl Layout {
         self.maximized = None;
         self.rows[at.row].size = half;
         self.rows.insert(at.row + 1, Row { id, cells: vec![new_cell], size: half });
+        even_out_if_cramped(self.rows.iter_mut().map(|row| &mut row.size));
     }
 
     /// Moves a tab out of its cell into a new cell beside `target`: left or right of it in its row,
@@ -288,6 +290,7 @@ impl Layout {
                 row.cells[at.cell].size = half;
                 let index = if side == Direction::Right { at.cell + 1 } else { at.cell };
                 row.cells.insert(index, new_cell);
+                even_out_if_cramped(row.cells.iter_mut().map(|cell| &mut cell.size));
             }
             Direction::Up | Direction::Down => {
                 let half = self.rows[at.row].size / 2.0;
@@ -297,6 +300,7 @@ impl Layout {
                 self.rows[at.row].size = half;
                 let index = if side == Direction::Down { at.row + 1 } else { at.row };
                 self.rows.insert(index, Row { id, cells: vec![new_cell], size: half });
+                even_out_if_cramped(self.rows.iter_mut().map(|row| &mut row.size));
             }
         }
         self.fill();
@@ -427,6 +431,21 @@ impl Layout {
 }
 
 /// The horizontal centre of each cell in a row, from 0 to 1.
+/// Splitting halves a pane, so splitting the same one again and again leaves slivers too narrow
+/// for a tab. Once a pane would be under half its even share, they all get the same share.
+fn even_out_if_cramped<'a>(sizes: impl Iterator<Item = &'a mut f32>) {
+    let mut sizes: Vec<&mut f32> = sizes.collect();
+    #[expect(clippy::cast_precision_loss, reason = "a row holds a handful of panes")]
+    let count = sizes.len() as f32;
+    let total: f32 = sizes.iter().map(|size| **size).sum();
+    let even = total / count;
+    if sizes.iter().any(|size| **size < even / 2.0) {
+        for size in &mut sizes {
+            **size = even;
+        }
+    }
+}
+
 fn centres(row: &Row) -> Vec<f32> {
     let total: f32 = row.cells.iter().map(|c| c.size).sum();
     let mut start = 0.0;
@@ -490,6 +509,17 @@ mod tests {
         assert_eq!(shape(&layout), [[[1], [2]]]);
         assert_eq!(layout.rows[0].cells.iter().map(|c| c.size).collect::<Vec<_>>(), [0.5, 0.5]);
         assert_eq!(layout.focused_tab(), Some(B));
+    }
+
+    #[test]
+    fn splitting_the_same_pane_again_and_again_evens_the_row_out() {
+        let mut layout = Layout::default();
+        layout.add_tab(A, None);
+        for tab in [B, C, D, E] {
+            layout.split_right(tab, None);
+        }
+        let sizes: Vec<f32> = layout.rows[0].cells.iter().map(|c| c.size).collect();
+        assert!(sizes.iter().all(|size| (size - 0.2).abs() < 1e-6), "{sizes:?}");
     }
 
     #[test]
