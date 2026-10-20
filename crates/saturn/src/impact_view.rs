@@ -12,6 +12,8 @@ use gpui_kit::{
     AnyElement, AppContext as _, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, Render,
     StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div, prelude::FluentBuilder as _, px,
 };
+use saturn_core::dbt;
+use saturn_core::dbt_impact::{self, Blast};
 use saturn_core::git::{self, Scope};
 use saturn_core::imports::{self, Affected, Graph};
 use saturn_design::{color, radius, space};
@@ -30,6 +32,9 @@ pub struct ImpactView {
     /// The changed files, relative to the repository's top.
     changed: Vec<PathBuf>,
     affected: Vec<Affected>,
+    /// For each dbt project a change touches (its folder, relative to the repository's top): the
+    /// models built from what changed, and the exposures reading them.
+    blasts: Vec<(PathBuf, Blast)>,
     /// The file in focus, and the ones focused before it, for Back.
     focus: Option<PathBuf>,
     trail: Vec<PathBuf>,
@@ -45,6 +50,7 @@ impl ImpactView {
             scope: Scope::Uncommitted,
             changed: Vec::new(),
             affected: Vec::new(),
+            blasts: Vec::new(),
             focus: None,
             trail: Vec::new(),
             loaded: false,
@@ -63,27 +69,29 @@ impl ImpactView {
         let load = move || {
             let graph = imports::build(&repo);
             let changed = changed_files(&repo, scope);
-            (graph, changed)
+            let blasts = dbt_blasts(&repo, &changed);
+            (graph, changed, blasts)
         };
         if std::env::var_os("SATURN_IMPACT").is_some() {
             // Screenshots: the test window stops drawing before a background read would land.
-            let (graph, changed) = load();
-            self.loaded(graph, changed);
+            let (graph, changed, blasts) = load();
+            self.loaded(graph, changed, blasts);
             self.focus = std::env::var_os("SATURN_IMPACT_FOCUS").map(PathBuf::from);
             return;
         }
         cx.spawn(async move |this, cx| {
-            let (graph, changed) = cx.background_spawn(async move { load() }).await;
+            let (graph, changed, blasts) = cx.background_spawn(async move { load() }).await;
             let _ = this.update(cx, |this, cx| {
-                this.loaded(graph, changed);
+                this.loaded(graph, changed, blasts);
                 cx.notify();
             });
         })
         .detach();
     }
 
-    fn loaded(&mut self, graph: Graph, changed: Vec<PathBuf>) {
+    fn loaded(&mut self, graph: Graph, changed: Vec<PathBuf>, blasts: Vec<(PathBuf, Blast)>) {
         self.affected = graph.impact(&changed);
+        self.blasts = blasts;
         self.graph = Arc::new(graph);
         self.changed = changed;
         self.loaded = true;
@@ -129,6 +137,7 @@ impl ImpactView {
             self.changed.iter().filter(|file| self.graph.imports.contains_key(*file)).collect();
         let headline = match (self.changed.len(), followed.len(), self.affected.len()) {
             (0, _, _) => "Nothing has changed here yet.".to_owned(),
+            (_, 0, _) if !self.blasts.is_empty() => dbt_headline(&self.blasts),
             (_, 0, _) => "None of the changed files are JavaScript, TypeScript, Rust or Python.".to_owned(),
             (_, n, 0) => format!("{} used by nothing else.", files(n, "changed file is", "changed files are")),
             (_, n, m) => {
@@ -165,6 +174,9 @@ impl ImpactView {
                 let via = several.then_some(item.because_of.as_path());
                 list = list.child(self.file_row(&item.file, note, via, cx));
             }
+        }
+        for (project, blast) in &self.blasts {
+            list = Self::render_blast(list, project, blast, cx);
         }
         div()
             .size_full()
@@ -205,6 +217,85 @@ impl ImpactView {
                     ),
             )
             .child(div().id("impact-list").flex_1().min_h_0().overflow_y_scroll().child(list))
+            .into_any_element()
+    }
+
+    /// A dbt project's part of the impact: the changed models, what's built from them, and the
+    /// exposures reading any of it. Each opens its file.
+    fn render_blast(mut list: gpui_kit::Div, project: &Path, blast: &Blast, cx: &mut Context<Self>) -> gpui_kit::Div {
+        let file = |path: Option<&PathBuf>| path.map(|path| project.join(path));
+        list = list.child(section_header(&format!("dbt {}: changed", blast.lineage.name), blast.changed.len()));
+        for &index in &blast.changed {
+            let node = &blast.lineage.nodes[index];
+            list = list.child(Self::dbt_row(
+                ("dbt-changed", index),
+                "workflow",
+                &node.name,
+                node.kind.name().to_owned(),
+                file(node.path.as_ref()),
+                cx,
+            ));
+        }
+        if !blast.downstream.is_empty() {
+            list = list.child(section_header("Built from them", blast.downstream.len()));
+            for reached in &blast.downstream {
+                let node = &blast.lineage.nodes[reached.node];
+                let distance =
+                    if reached.steps == 1 { "reads it".to_owned() } else { format!("{} steps away", reached.steps) };
+                list = list.child(Self::dbt_row(
+                    ("dbt-downstream", reached.node),
+                    "workflow",
+                    &node.name,
+                    distance,
+                    file(node.path.as_ref()),
+                    cx,
+                ));
+            }
+        }
+        if !blast.exposures.is_empty() {
+            list = list.child(section_header("Exposures that read them", blast.exposures.len()));
+            for (index, exposure) in blast.exposures.iter().enumerate() {
+                list = list.child(Self::dbt_row(
+                    ("dbt-exposure", index),
+                    "globe",
+                    &exposure.name,
+                    exposure.kind.clone(),
+                    file(Some(&exposure.path)),
+                    cx,
+                ));
+            }
+        }
+        list
+    }
+
+    /// A dbt model or exposure in the impact: its name, a note, and its file to open.
+    fn dbt_row(
+        id: (&'static str, usize),
+        icon: &'static str,
+        name: &str,
+        note: String,
+        file: Option<PathBuf>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .id(id)
+            .flex()
+            .items_center()
+            .gap(len(space::SPACE_2))
+            .h(px(ROW_HEIGHT))
+            .mx(len(space::SPACE_2))
+            .px(len(space::SPACE_2))
+            .rounded(len(radius::RADIUS_SM))
+            .text_size(px(13.))
+            .when(file.is_some(), |row| row.cursor_pointer().hover(|s| s.bg(theme::fill_hover())))
+            .child(chrome::icon(icon, 13., theme::color(color::INK_FAINT)))
+            .child(div().flex_1().min_w_0().truncate().text_color(theme::color(color::INK_BODY)).child(name.to_owned()))
+            .child(div().flex_none().text_size(px(12.)).text_color(theme::color(color::INK_MUTED)).child(note))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                if let Some(file) = &file {
+                    this.open(file, window, cx);
+                }
+            }))
             .into_any_element()
     }
 
@@ -336,6 +427,42 @@ fn changed_files(repo: &Path, scope: Scope) -> Vec<PathBuf> {
     changed.sort();
     changed.dedup();
     changed
+}
+
+/// What the `changed` files (relative to `repo`'s top) reach in each dbt project they touch.
+fn dbt_blasts(repo: &Path, changed: &[PathBuf]) -> Vec<(PathBuf, Blast)> {
+    let mut blasts = Vec::new();
+    for project in dbt::find_projects(repo) {
+        let Ok(folder) = project.strip_prefix(repo) else { continue };
+        let files: Vec<PathBuf> =
+            changed.iter().filter_map(|file| file.strip_prefix(folder).ok()).map(Path::to_owned).collect();
+        if files.is_empty() {
+            continue;
+        }
+        let exposures = dbt_impact::exposures(&project);
+        if let Some(blast) = dbt_impact::blast(dbt::load(&project), &exposures, &files) {
+            blasts.push((folder.to_owned(), blast));
+        }
+    }
+    blasts
+}
+
+/// "2 changed dbt models reach 5 others and 1 exposure."
+fn dbt_headline(blasts: &[(PathBuf, Blast)]) -> String {
+    let changed: usize = blasts.iter().map(|(_, blast)| blast.changed.len()).sum();
+    let downstream: usize = blasts.iter().map(|(_, blast)| blast.downstream.len()).sum();
+    let exposures: usize = blasts.iter().map(|(_, blast)| blast.exposures.len()).sum();
+    let what = files(changed, "changed dbt model", "changed dbt models");
+    let reach = if changed == 1 { "reaches" } else { "reach" };
+    match (downstream, exposures) {
+        (0, 0) => format!("{what}, and nothing is built from them."),
+        (_, 0) => format!("{what} {reach} {}.", files(downstream, "other", "others")),
+        _ => format!(
+            "{what} {reach} {} and {}.",
+            files(downstream, "other", "others"),
+            files(exposures, "exposure", "exposures")
+        ),
+    }
 }
 
 /// "1 changed file is" / "3 changed files are".

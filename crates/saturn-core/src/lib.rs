@@ -8,6 +8,7 @@ pub mod best_of;
 pub mod checks;
 pub mod clickup;
 pub mod dbt;
+pub mod dbt_impact;
 pub mod file_icon;
 pub mod files;
 pub mod format;

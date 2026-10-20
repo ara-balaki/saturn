@@ -207,6 +207,8 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
 - **History**: every branch as a graph, with tags, authors and dates; click a commit for its diff.
 - **Impact**: every file that depends on what changed, nearest first. It follows imports in
   JavaScript and TypeScript (with `tsconfig` aliases and a monorepo's packages), Rust and Python.
+  In a dbt project it follows the lineage: the models built from a changed model, seed or snapshot,
+  however far down, and the exposures (dashboards, apps) that read any of them.
 - **Pull requests**: each pane shows the one it works on, with its state, from the `gh` CLI: an open
   one whose title or branch names the pane's ticket (`ABC-123`), else the last one linked in it, else
   its branch's, else one that only mentions the ticket (a subtask's). Its
