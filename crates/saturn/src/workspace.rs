@@ -2150,11 +2150,13 @@ impl Workspace {
                     .on_click(cx.listener(move |this, _, window, cx| this.select_project(picked.clone(), window, cx))),
             );
         }
-        // Adding a repo belongs with the repos.
-        let track = track.child(
+        // Adding a repo belongs with the repos, set apart so it doesn't read as one. Square: a
+        // track item is otherwise at least a full control wide.
+        let track = track.child(chrome::track_separator()).child(
             chrome::track_item("add-repo", false)
                 .size(len(TITLEBAR_CONTROL))
-                .child(chrome::icon("plus", 15., theme::color(color::INK_MUTED)))
+                .min_w(len(TITLEBAR_CONTROL))
+                .child(chrome::icon("plus", 13., theme::color(color::INK_MUTED)))
                 .tooltip(chrome::tip_for("Add repo", OpenProject))
                 .on_click(cx.listener(|_, _, window, cx| Self::open_project(window, cx))),
         );
