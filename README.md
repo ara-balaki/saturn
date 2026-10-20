@@ -26,6 +26,7 @@ It isn't an IDE and doesn't try to replace yours. It's the place the agents live
 - **A grid of terminals.** Split right (⌘D) and down (⌘⇧D), or drag a tab onto a pane's edge to
   split it there. Tabs in every pane, dividers you drag, one pane maximised with ⌘⇧↩. A real
   terminal underneath (alacritty's engine), so TUIs, colours and the mouse work as they should.
+  Text you select is copied, in Claude too.
 - **Agents that tell you how they're doing.** Each tab shows whether its agent is working, waiting
   for you, done, or failed, and an agent that needs you rings its pane in orange. The title bar
   counts them, ⌘⇧A jumps to the next one that needs you, macOS notifies you while Saturn is in the

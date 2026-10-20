@@ -28,6 +28,9 @@ pub enum TerminalEvent {
     Status(ProgramStatus),
     Cwd(PathBuf),
     PromptStart,
+    /// The program put text on the clipboard (OSC 52), as Claude's full-screen view does with
+    /// what you select in it.
+    Copy(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,6 +113,7 @@ impl Terminal {
                 EngineEvent::Title(title) => out.push(TerminalEvent::Title(Some(title))),
                 EngineEvent::ResetTitle => out.push(TerminalEvent::Title(None)),
                 EngineEvent::Bell => out.push(TerminalEvent::Bell),
+                EngineEvent::ClipboardStore(_, text) => out.push(TerminalEvent::Copy(text)),
                 _ => {}
             }
         }
@@ -219,6 +223,14 @@ mod tests {
         assert_eq!(terminal.selected_text().as_deref(), Some("first line\nsecond"));
         terminal.clear_selection();
         assert_eq!(terminal.selected_text(), None);
+    }
+
+    #[test]
+    fn passes_on_what_a_program_copies() {
+        let size = GridSize { cols: 40, rows: 5 };
+        let (mut terminal, _output) = Terminal::spawn(Path::new("/tmp"), size, &[]).expect("a shell starts");
+        let events = terminal.advance(b"\x1b]52;c;aGVsbG8=\x07");
+        assert_eq!(events, vec![TerminalEvent::Copy("hello".into())]);
     }
 
     #[test]

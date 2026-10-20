@@ -9,9 +9,9 @@ use std::time::Instant;
 use alacritty_terminal::index::Side;
 use alacritty_terminal::term::TermMode;
 use gpui_kit::{
-    App, ClipboardItem, Context, EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement,
-    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render,
-    ScrollDelta, ScrollWheelEvent, Styled as _, Window, div,
+    App, ClipboardItem, Context, CursorStyle, EventEmitter, FocusHandle, Focusable, InteractiveElement as _,
+    IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels,
+    Point, Render, ScrollDelta, ScrollWheelEvent, Styled as _, Window, div,
 };
 use saturn_core::agent_state::AgentState;
 
@@ -151,6 +151,7 @@ impl TerminalView {
                     }
                 }
                 TerminalEvent::PromptStart => {}
+                TerminalEvent::Copy(text) => cx.write_to_clipboard(ClipboardItem::new_string(text)),
             }
         }
         self.schedule_sync_flush(cx);
@@ -245,9 +246,10 @@ impl TerminalView {
             && !modifiers.shift
     }
 
-    fn report_mouse(&mut self, row: usize, col: usize, pressed: bool) {
+    /// Tells the program about the left button: `button` is 0, plus 32 when it moves while held.
+    fn report_mouse(&mut self, button: u8, row: usize, col: usize, pressed: bool) {
         let kind = if pressed { 'M' } else { 'm' };
-        self.terminal.write(format!("\x1b[<0;{};{}{kind}", col + 1, row + 1).into_bytes());
+        self.terminal.write(format!("\x1b[<{button};{};{}{kind}", col + 1, row + 1).into_bytes());
     }
 
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -255,7 +257,7 @@ impl TerminalView {
         let Some((row, col, side)) = self.cell_at(event.position) else { return };
         if self.program_wants_mouse(event.modifiers) {
             self.drag = Drag::Reporting;
-            self.report_mouse(row, col, true);
+            self.report_mouse(0, row, col, true);
         } else {
             self.drag = Drag::Selecting;
             self.terminal.start_selection(row, col, side, event.click_count);
@@ -264,20 +266,35 @@ impl TerminalView {
     }
 
     fn mouse_move(&mut self, event: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        if self.drag != Drag::Selecting || event.pressed_button != Some(MouseButton::Left) {
+        if event.pressed_button != Some(MouseButton::Left) {
             return;
         }
-        if let Some((row, col, side)) = self.cell_at(event.position) {
-            self.terminal.extend_selection(row, col, side);
-            cx.notify();
+        let Some((row, col, side)) = self.cell_at(event.position) else { return };
+        match self.drag {
+            Drag::Selecting => {
+                self.terminal.extend_selection(row, col, side);
+                cx.notify();
+            }
+            // Claude's full-screen view selects text itself, so it needs to see the drag.
+            Drag::Reporting if self.terminal.mode().intersects(TermMode::MOUSE_DRAG | TermMode::MOUSE_MOTION) => {
+                self.report_mouse(32, row, col, true);
+            }
+            Drag::Reporting | Drag::None => {}
         }
     }
 
-    fn mouse_up(&mut self, event: &MouseUpEvent, _window: &mut Window, _cx: &mut Context<Self>) {
-        if self.drag == Drag::Reporting
-            && let Some((row, col, _)) = self.cell_at(event.position)
-        {
-            self.report_mouse(row, col, false);
+    fn mouse_up(&mut self, event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        match self.drag {
+            Drag::Reporting => {
+                if let Some((row, col, _)) = self.cell_at(event.position) {
+                    self.report_mouse(0, row, col, false);
+                }
+            }
+            // What you select is copied straight away, as in most terminals.
+            Drag::Selecting => {
+                self.copy_selection(cx);
+            }
+            Drag::None => {}
         }
         self.drag = Drag::None;
     }
@@ -335,6 +352,7 @@ impl Render for TerminalView {
         let focused = self.focus.is_focused(window);
         div()
             .size_full()
+            .cursor(CursorStyle::IBeam)
             .track_focus(&self.focus)
             .key_context("Terminal")
             .on_key_down(cx.listener(Self::key_down))
