@@ -158,6 +158,8 @@ const TITLEBAR_HEIGHT: f32 = 40.0;
 const TITLEBAR_CONTROL: f32 = 24.0;
 const TRAFFIC_LIGHTS_WIDTH: f32 = 76.0;
 const TAB_HEIGHT: f32 = chrome::CONTROL_HEIGHT;
+/// A tab's narrowest: its status, the start of its name and its ✕.
+const TAB_MIN_WIDTH: f32 = 64.0;
 /// No pane is dragged smaller than this share of its row or of the grid.
 const MIN_SHARE: f32 = 0.08;
 /// Programs a tab can close without asking, because nothing is lost.
@@ -1718,6 +1720,7 @@ impl Workspace {
         let close = div()
             .id(("close", tab.0))
             .flex()
+            .flex_none()
             .items_center()
             .justify_center()
             .size(px(20.))
@@ -1733,7 +1736,9 @@ impl Workspace {
             .id(("tab", tab.0))
             .group("tab")
             .flex()
-            .flex_none()
+            // A tab gives up its name before its ✕, so even a narrow pane can be closed.
+            .flex_shrink(1.)
+            .min_w(px(TAB_MIN_WIDTH))
             .items_center()
             .gap(len(6.))
             .h(len(TAB_HEIGHT))
@@ -1751,7 +1756,7 @@ impl Workspace {
             .child(status_dot(state))
             .map(|tab_element| match renaming {
                 Some(input) => tab_element.child(div().w(px(140.)).child(Input::new(&input).appearance(false))),
-                None => tab_element.child(div().truncate().child(name.clone())),
+                None => tab_element.child(div().min_w_0().truncate().child(name.clone())),
             })
             .child(close)
             .on_mouse_down(
@@ -1774,6 +1779,38 @@ impl Workspace {
             .into_any_element()
     }
 
+    /// The right of a pane's tab strip: its ticket and pull request, then split and new tab. In a
+    /// narrow pane these are cut off before the tabs are; the shortcuts still work.
+    fn render_pane_actions(&self, cell: &Cell, cx: &mut Context<Self>) -> impl IntoElement {
+        let cell_id: CellId = cell.id;
+        let header_button = |id: &'static str, icon: &str, placement: Placement, cx: &mut Context<Self>| {
+            let button = chrome::icon_button((id, cell_id.key()), icon, true)
+                .on_click(cx.listener(move |this, _, window, cx| this.open_in_cell(cell_id, placement, window, cx)));
+            match placement {
+                Placement::Right => {
+                    button.tooltip(chrome::tip_for("Split right: a new terminal beside this one", SplitRight))
+                }
+                Placement::Down => {
+                    button.tooltip(chrome::tip_for("Split down: a new terminal below this one", SplitDown))
+                }
+                Placement::Tab => button.tooltip(chrome::tip_for("New terminal, as a tab here", NewTab)),
+            }
+        };
+
+        div()
+            .flex()
+            .flex_shrink(1.)
+            .min_w_0()
+            .overflow_hidden()
+            .items_center()
+            .gap(len(space::SPACE_1))
+            .children(self.ticket_of(cell.active, cx).map(|ticket| ticket_chip(cell_id, ticket)))
+            .children(self.pull_request_of(cell.active).map(|pr| pull_request_chip(cell_id, pr)))
+            .child(header_button("split-right", "columns-2", Placement::Right, cx))
+            .child(header_button("split-down", "rows-2", Placement::Down, cx))
+            .child(header_button("new-tab", "plus", Placement::Tab, cx))
+    }
+
     fn render_cell(&self, cell: &Cell, cx: &mut Context<Self>) -> AnyElement {
         let focused = self.layout.focused == Some(cell.id);
         let unseen_states: Vec<AgentState> =
@@ -1791,20 +1828,6 @@ impl Workspace {
         };
         let terminal = self.terminals.get(&cell.active).cloned();
         let cell_id: CellId = cell.id;
-        let header_button = |id: &'static str, icon: &str, placement: Placement, cx: &mut Context<Self>| {
-            let button = chrome::icon_button((id, cell_id.key()), icon, true)
-                .on_click(cx.listener(move |this, _, window, cx| this.open_in_cell(cell_id, placement, window, cx)));
-            match placement {
-                Placement::Right => {
-                    button.tooltip(chrome::tip_for("Split right: a new terminal beside this one", SplitRight))
-                }
-                Placement::Down => {
-                    button.tooltip(chrome::tip_for("Split down: a new terminal below this one", SplitDown))
-                }
-                Placement::Tab => button.tooltip(chrome::tip_for("New terminal, as a tab here", NewTab)),
-            }
-        };
-
         // A panel like every other: the tabs in its strip, the terminal in its well.
         let mut pane = chrome::panel()
             .on_mouse_down(
@@ -1826,7 +1849,8 @@ impl Workspace {
                             .id(("tab-strip", cell_id.key()))
                             .flex()
                             .flex_1()
-                            .min_w_0()
+                            // Room for one tab, whatever the buttons beside it want.
+                            .min_w(px(TAB_MIN_WIDTH))
                             .gap(px(2.))
                             // Scrolling clips to the strip, which would cut the raised tab's shadow:
                             // the strip reaches a few pixels past its tabs on every side instead.
@@ -1838,11 +1862,7 @@ impl Workspace {
                                 this.drop_tab(dragged.tab, cell_id, None, window, cx);
                             })),
                     )
-                    .children(self.ticket_of(cell.active, cx).map(|ticket| ticket_chip(cell_id, ticket)))
-                    .children(self.pull_request_of(cell.active).map(|pr| pull_request_chip(cell_id, pr)))
-                    .child(header_button("split-right", "columns-2", Placement::Right, cx))
-                    .child(header_button("split-down", "rows-2", Placement::Down, cx))
-                    .child(header_button("new-tab", "plus", Placement::Tab, cx)),
+                    .child(self.render_pane_actions(cell, cx)),
             )
             .child(
                 chrome::well()
