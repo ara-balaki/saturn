@@ -29,6 +29,7 @@ pub mod servers;
 pub mod session_name;
 pub mod shared_env;
 pub mod shell_env;
+pub mod snapshot;
 pub mod status_line;
 pub mod usage;
 pub mod worktree_include;

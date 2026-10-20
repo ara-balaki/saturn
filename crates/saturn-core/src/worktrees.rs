@@ -188,27 +188,10 @@ pub fn archive(main: &Path, worktree: &Worktree, cleanup: Option<&str>, now: i64
     };
     let path = &worktree.path;
     let head = run(path, &["rev-parse", "HEAD"]).map(|out| out.trim().to_owned()).ok_or("git can't read its commit")?;
-    // Everything as it is, through an index of its own so the worktree's isn't touched.
-    let index = std::env::temp_dir().join(format!("saturn-archive-{}", std::process::id()));
-    let with_index = |args: &[&str]| -> Option<String> {
-        let output = crate::git::command(path).env("GIT_INDEX_FILE", &index).args(args).output().ok()?;
-        output.status.success().then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
-    };
-    let tree = with_index(&["read-tree", "HEAD"])
-        .and_then(|_| with_index(&["add", "-A"]))
-        .and_then(|_| with_index(&["write-tree"]));
-    let _ = std::fs::remove_file(&index);
-    let tree = tree.ok_or("git can't save its files")?;
+    let saved = crate::snapshot::take(path, &format!("archive/{branch}"))?;
     let head_tree = run(path, &["rev-parse", "HEAD^{tree}"]).map(|out| out.trim().to_owned());
-    let snapshot = if head_tree.as_deref() == Some(tree.as_str()) {
-        head.clone()
-    } else {
-        let message = format!("Work in progress in {}, archived by Saturn", path.display());
-        run(path, &["commit-tree", &tree, "-p", &head, "-m", &message])
-            .map(|out| out.trim().to_owned())
-            .ok_or("git can't save its uncommitted work")?
-    };
-    run(main, &["update-ref", &archive_ref(&branch), &snapshot]).ok_or("git can't keep the saved work")?;
+    // Nothing uncommitted: the branch's own commit is all there is to bring back.
+    let snapshot = if head_tree.as_deref() == Some(saved.tree.as_str()) { head.clone() } else { saved.commit };
     if let Some(cleanup) = cleanup {
         let _ = Command::new("/bin/sh").args(["-c", cleanup]).current_dir(path).output();
     }

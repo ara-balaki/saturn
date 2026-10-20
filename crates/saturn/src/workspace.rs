@@ -26,6 +26,7 @@ use saturn_core::recipe::{self, Source};
 use saturn_core::servers::{self, Server, Service};
 use saturn_core::session_name::rename_for_prompt;
 use saturn_core::shared_env;
+use saturn_core::snapshot::{self, Snapshot};
 use saturn_core::worktree_include;
 use saturn_design::{color, radius, shadow, space};
 use saturn_terminal::view::{TerminalView, TerminalViewEvent};
@@ -294,6 +295,23 @@ pub struct Workspace {
     overlaps: std::collections::BTreeMap<PathBuf, Vec<(PathBuf, Vec<String>)>>,
     /// Whether they're being read.
     reading_overlaps: bool,
+    /// Each tab's agent's last turn: its files before and after, to undo it.
+    turns: HashMap<TabId, Turn>,
+}
+
+/// An agent's turn, saved before and after (`saturn_core::snapshot`), so its files can go back.
+struct Turn {
+    checkout: PathBuf,
+    before: Option<Snapshot>,
+    /// Once the turn has ended.
+    after: Option<Snapshot>,
+    /// What it changed.
+    files: Vec<String>,
+    undone: bool,
+    /// Being undone or redone right now.
+    busy: bool,
+    /// What the last undo or redo said.
+    said: Option<String>,
 }
 
 /// A background refresh: not running, running, or running with another asked for meanwhile (a new
@@ -772,6 +790,7 @@ impl Workspace {
             ports: HashMap::new(),
             overlaps: std::collections::BTreeMap::new(),
             reading_overlaps: false,
+            turns: HashMap::new(),
             roots,
             root: project.clone(),
             follow_pane: true,
@@ -1397,6 +1416,112 @@ impl Workspace {
         .detach();
     }
 
+    /// Saves the files when a tab's agent starts a turn and when it ends it, so the turn can be undone.
+    /// Asking for a permission is part of a turn; it ends when the agent is done or idle.
+    fn follow_turn(&mut self, tab: TabId, cx: &mut Context<Self>) {
+        let Some(state) = self.terminals.get(&tab).map(|view| view.read(cx).state) else { return };
+        let in_turn = self.turns.get(&tab).is_some_and(|turn| turn.after.is_none());
+        let starts = state == AgentState::Working && !in_turn;
+        let ends =
+            in_turn && matches!(state, AgentState::YourTurn | AgentState::Idle | AgentState::Error | AgentState::Shell);
+        if !starts && !ends {
+            return;
+        }
+        let checkout = if starts {
+            self.checkouts
+                .get(&tab)
+                .map(|checkout| checkout.root.clone())
+                .or_else(|| self.terminals.get(&tab).and_then(|view| git::toplevel(&view.read(cx).cwd)))
+        } else {
+            self.turns.get(&tab).map(|turn| turn.checkout.clone())
+        };
+        let Some(checkout) = checkout else { return };
+        if starts {
+            self.turns.insert(
+                tab,
+                Turn {
+                    checkout: checkout.clone(),
+                    before: None,
+                    after: None,
+                    files: Vec::new(),
+                    undone: false,
+                    busy: false,
+                    said: None,
+                },
+            );
+        }
+        let name = format!("turns/{}/{}", tab.0, if starts { "before" } else { "after" });
+        cx.spawn(async move |this, cx| {
+            let saved = cx
+                .background_spawn({
+                    let checkout = checkout.clone();
+                    async move { snapshot::take(&checkout, &name).ok() }
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                let Some(turn) = this.turns.get_mut(&tab) else { return };
+                if starts {
+                    turn.before = saved;
+                } else {
+                    turn.files = match (&turn.before, &saved) {
+                        (Some(before), Some(after)) => snapshot::changed_between(&turn.checkout, before, after),
+                        _ => Vec::new(),
+                    };
+                    // A turn that ends without its start saved has nothing to go back to.
+                    turn.after = saved.or_else(|| Some(Snapshot { commit: String::new(), tree: String::new() }));
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Puts the files of a tab's agent's last turn back as they were before it (or, once undone, as
+    /// it left them). Refused when any of them changed since, so no later work is lost.
+    pub fn undo_turn(&mut self, tab: TabId, cx: &mut Context<Self>) {
+        let Some(turn) = self.turns.get_mut(&tab) else { return };
+        let (Some(before), Some(after)) = (turn.before.clone(), turn.after.clone()) else { return };
+        if turn.busy || turn.files.is_empty() {
+            return;
+        }
+        turn.busy = true;
+        let (checkout, files, undoing) = (turn.checkout.clone(), turn.files.clone(), !turn.undone);
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let done = cx
+                .background_spawn(async move {
+                    // Where the files should be now: as the turn left them, or as the undo did.
+                    let (expected, target) = if undoing { (&after, &before) } else { (&before, &after) };
+                    let now = snapshot::take(&checkout, &format!("turns/{}/now", tab.0))?;
+                    let moved: Vec<String> = snapshot::changed_between(&checkout, expected, &now)
+                        .into_iter()
+                        .filter(|file| files.contains(file))
+                        .collect();
+                    if !moved.is_empty() {
+                        return Err(format!("{} changed since, so nothing was put back", moved.join(", ")));
+                    }
+                    snapshot::put_back(&checkout, expected, target)
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                let Some(turn) = this.turns.get_mut(&tab) else { return };
+                turn.busy = false;
+                turn.said = Some(match &done {
+                    Ok(count) if undoing => {
+                        format!("Undid the last turn: {count} file{} as before", if *count == 1 { "" } else { "s" })
+                    }
+                    Ok(_) => "Redid the last turn".to_owned(),
+                    Err(problem) => problem.clone(),
+                });
+                if done.is_ok() {
+                    turn.undone = undoing;
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     /// Finds the panes' checkouts that change the same files as another of their repository's, off the
     /// main thread: after the branches are read, and when an agent finishes a turn.
     fn refresh_overlaps(&mut self, cx: &mut Context<Self>) {
@@ -2001,6 +2126,7 @@ impl Workspace {
                 if asks {
                     self.refresh_overlaps(cx);
                 }
+                self.follow_turn(tab, cx);
                 self.report_attention(window, cx);
                 cx.notify();
             }
@@ -2303,6 +2429,48 @@ impl Workspace {
             .into_any_element()
     }
 
+    /// Undo (or redo) the last turn of the pane's agent, once it changed files.
+    fn render_turn(&self, cell: &Cell, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let tab = cell.active;
+        let turn = self.turns.get(&tab).filter(|turn| turn.after.is_some() && !turn.files.is_empty())?;
+        let count = turn.files.len();
+        let files = turn.files.iter().take(6).cloned().collect::<Vec<_>>().join(", ");
+        let more = if count > 6 { format!(" and {} more", count - 6) } else { String::new() };
+        let (icon, tip) = if turn.undone {
+            ("redo-2", format!("Redo the agent's last turn: {files}{more} as it left them."))
+        } else {
+            (
+                "undo-2",
+                format!(
+                    "Undo the agent's last turn: {files}{more} back as they were before it, however they were changed. Tell the agent, so it doesn't count on them."
+                ),
+            )
+        };
+        let said = turn.said.clone();
+        Some(
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap(len(space::SPACE_1))
+                .children(said.map(|said| {
+                    div()
+                        .max_w(px(260.))
+                        .truncate()
+                        .text_size(px(12.))
+                        .text_color(theme::color(color::INK_MUTED))
+                        .child(said)
+                }))
+                .child(
+                    chrome::icon_button(("undo-turn", cell.id.key()), icon, true)
+                        .when(turn.busy, |button| button.opacity(0.4))
+                        .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+                        .on_click(cx.listener(move |this, _, _, cx| this.undo_turn(tab, cx))),
+                )
+                .into_any_element(),
+        )
+    }
+
     /// The right of a pane's tab strip: its ticket and pull request, then split and new tab. In a
     /// narrow pane these are cut off before the tabs are; the shortcuts still work.
     fn render_pane_actions(&self, cell: &Cell, cx: &mut Context<Self>) -> impl IntoElement {
@@ -2329,6 +2497,7 @@ impl Workspace {
             .items_center()
             .gap(len(space::SPACE_1))
             .children(self.ticket_of(cell.active, cx).map(|ticket| ticket_chip(cell_id, ticket)))
+            .children(self.render_turn(cell, cx))
             .children(
                 self.checkouts
                     .get(&cell.active)

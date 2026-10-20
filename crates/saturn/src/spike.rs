@@ -19,6 +19,7 @@
 //!   `SATURN_TICKET_FILTERS=1` opens the Tickets panel's filters.
 //! - `SATURN_DROP=path` drops that file on the middle of the window, as Finder would.
 //! - `SATURN_RUN_COMMAND="Start the app"` runs that command from the palette's list, by its name.
+//! - `SATURN_UNDO_TURN=6` presses the first pane's "Undo the agent's last turn" after 6 seconds.
 //! - `SATURN_KEYS="e c h tab"` presses those keys in the focused pane, through the window, and prints
 //!   the tab count after each; `SATURN_REBIND=new-tab=cmd-t` moves a shortcut first, as Settings
 //!   would. `SATURN_SETTINGS_SECTION=keyboard` opens Settings on that section.
@@ -144,6 +145,7 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
     rebind_from_env(workspace, cx);
     input_from_env(window, cx);
     run_command_from_env(window, cx);
+    undo_turn_from_env(cx);
     if std::env::var_os("SATURN_TICKET_PICKER").is_some() {
         cx.spawn_in(window, async move |_, cx| {
             cx.background_executor().timer(Duration::from_millis(800)).await;
@@ -231,6 +233,17 @@ fn review_from_env(window: &mut Window, cx: &mut Context<Workspace>) {
         })
         .detach();
     }
+}
+
+/// Presses the first pane's "Undo the agent's last turn" after that many seconds (`SATURN_UNDO_TURN=6`).
+fn undo_turn_from_env(cx: &mut Context<Workspace>) {
+    let Ok(after) = std::env::var("SATURN_UNDO_TURN") else { return };
+    let after = after.parse().unwrap_or(6);
+    cx.spawn(async move |workspace, cx| {
+        cx.background_executor().timer(Duration::from_secs(after)).await;
+        let _ = workspace.update(cx, |workspace, cx| workspace.undo_turn(TabId(1), cx));
+    })
+    .detach();
 }
 
 /// Runs a palette command by its name (`SATURN_RUN_COMMAND`), as picking it would.

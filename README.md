@@ -148,6 +148,10 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
 - **Compare with anything**: "Compare with a branch or commit" (⌘⇧P, or the button under Changes)
   lists the branches, tags and recent commits; pick one to review everything that differs from it,
   uncommitted work too. Comments and single changes work there as well.
+- **Undo a turn**: Saturn saves a worktree's files when its agent starts a turn and when it ends it
+  (in git, under its own `refs/saturn/`, touching no branch and running no hook). The pane's ↶ then
+  puts back exactly the files that turn changed, however it changed them (shell commands too), and
+  leaves the rest alone; ↷ redoes it. If one of them changed since, nothing is put back.
 - **Overlaps**: when two panes' worktrees of one repo change the same files, both panes say so
   (hover for which files and where), while it's still easy to merge one first or split the work.
 - **What was asked**: each file in the review says what you asked Claude Code that changed it (the
