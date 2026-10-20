@@ -95,6 +95,7 @@ actions!(
         ShowWorktrees,
         CompareWith,
         ShowWaiting,
+        ToggleFocus,
     ]
 );
 
@@ -145,6 +146,7 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("Worktrees", "folder-git", Box::new(ShowWorktrees)),
         ("Compare with a branch or commit", "git-compare", Box::new(CompareWith)),
         ("Agents waiting for you", "bot", Box::new(ShowWaiting)),
+        ("Focus: hold notifications, or stop", "moon", Box::new(ToggleFocus)),
         ("Database diagram", "database", Box::new(ShowSchema)),
         ("dbt lineage", "workflow", Box::new(ShowLineage)),
         ("Problems", "circle-x", Box::new(ShowProblems)),
@@ -307,6 +309,8 @@ pub struct Workspace {
     spent: HashMap<TabId, Tokens>,
     /// What each tab's agent waits for, from its hooks.
     waits: HashMap<TabId, Waiting>,
+    /// Focus mode: notifications held, and what they'd have said (by state) for one at the end.
+    focusing: Option<Vec<AgentState>>,
 }
 
 /// An agent's turn, saved before and after (`saturn_core::snapshot`), so its files can go back.
@@ -531,6 +535,22 @@ fn pull_request_chip(cell: CellId, pr: &PullRequest) -> impl IntoElement {
         .on_click(move |_, _, _| {
             let _ = std::process::Command::new("open").arg(&url).spawn();
         })
+}
+
+/// The one notification after focusing: what the held ones would have said, and what waits now.
+fn focus_summary(held: &[AgentState], waiting: usize) -> (String, String) {
+    let count = |states: &[AgentState]| held.iter().filter(|state| states.contains(state)).count();
+    let parts: Vec<String> = [
+        (count(&[AgentState::NeedsYou]), "needs you", "need you"),
+        (count(&[AgentState::Error]), "stopped", "stopped"),
+        (count(&[AgentState::YourTurn, AgentState::Idle]), "finished", "finished"),
+    ]
+    .into_iter()
+    .filter(|(n, _, _)| *n > 0)
+    .map(|(n, one, many)| if n == 1 { format!("1 agent {one}") } else { format!("{n} agents {many}") })
+    .collect();
+    let body = if waiting == 0 { "None is waiting now.".to_owned() } else { format!("{waiting} waiting for you now.") };
+    (format!("While you focused: {}", parts.join(", ")), body)
 }
 
 /// This pane's worktree changes files another worktree also changes: they'll meet at merge time.
@@ -810,6 +830,7 @@ impl Workspace {
             transcripts: HashMap::new(),
             spent: HashMap::new(),
             waits: HashMap::new(),
+            focusing: None,
             roots,
             root: project.clone(),
             follow_pane: true,
@@ -1581,6 +1602,20 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Starts focus mode, or ends it with one notification for what was held.
+    pub fn toggle_focus(&mut self, cx: &mut Context<Self>) {
+        match self.focusing.take() {
+            None => self.focusing = Some(Vec::new()),
+            Some(held) if !held.is_empty() => {
+                let waiting = self.terminals.values().filter(|view| view.read(cx).state.asks_for_you()).count();
+                let (title, body) = focus_summary(&held, waiting);
+                notify::post("focus-ended", &title, &body, false);
+            }
+            Some(_) => {}
+        }
+        cx.notify();
+    }
+
     /// Brings a tab to the front and gives it the keyboard.
     pub fn go_to_tab(&mut self, tab: TabId, window: &mut Window, cx: &mut Context<Self>) {
         self.update_layout(window, cx, |layout| layout.activate_tab(tab));
@@ -2301,12 +2336,17 @@ impl Workspace {
     }
 
     /// A macOS notification about a tab that needs you or finished, while Saturn is in the background.
-    fn notify_about(&self, tab: TabId, cx: &Context<Self>) {
+    fn notify_about(&mut self, tab: TabId, cx: &Context<Self>) {
         let Some(view) = self.terminals.get(&tab) else { return };
         let (state, message) = {
             let view = view.read(cx);
             (view.state, view.message.clone())
         };
+        // Focusing: kept for one word at the end instead.
+        if let Some(held) = &mut self.focusing {
+            held.push(state);
+            return;
+        }
         let name = self.tab_name(tab, cx);
         let (title, fallback, sound) = match state {
             AgentState::NeedsYou => (format!("{name} needs you"), "Waiting for your answer", true),
@@ -2935,6 +2975,23 @@ impl Workspace {
             .child(self.render_panel_toggles(cx))
             .child(self.render_repo_tabs(cx))
             .child(empty("titlebar-middle").flex_1())
+            .child(chrome::on_glass(
+                chrome::track().child(
+                    chrome::track_item("focus", self.focusing.is_some())
+                        .size(len(TITLEBAR_CONTROL))
+                        .min_w(len(TITLEBAR_CONTROL))
+                        .child(chrome::icon("moon", 15., theme::color(color::INK_MUTED)))
+                        .tooltip(chrome::tip_for(
+                            if self.focusing.is_some() {
+                                "Focusing: notifications are held. Click to stop and hear what happened."
+                            } else {
+                                "Focus: hold notifications until you're ready"
+                            },
+                            ToggleFocus,
+                        ))
+                        .on_click(cx.listener(|this, _, _, cx| this.toggle_focus(cx))),
+                ),
+            ))
             .children(activity)
             // New terminals come from each pane's ＋ (and ⌘N), repos from the ＋ after them. Starting
             // an agent on new work, named or from a ticket, is the one primary action; its shortcut
@@ -3191,6 +3248,7 @@ impl Workspace {
             .on_action(cx.listener(|this, _: &StartApp, window, cx| this.start_app(window, cx)))
             .on_action(cx.listener(|this, _: &CreateRecipe, window, cx| this.create_recipe(window, cx)))
             .on_action(cx.listener(|this, _: &ShowWorktrees, window, cx| this.show_worktrees(window, cx)))
+            .on_action(cx.listener(|this, _: &ToggleFocus, _, cx| this.toggle_focus(cx)))
             .on_action(cx.listener(|_, _: &ShowWaiting, window, cx| {
                 crate::queue_view::open(cx.weak_entity(), window, cx);
             }))
@@ -3313,6 +3371,14 @@ impl Render for Workspace {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn sums_up_what_focus_held() {
+        use saturn_core::agent_state::AgentState::{Error, NeedsYou, YourTurn};
+        let (title, body) = super::focus_summary(&[YourTurn, NeedsYou, YourTurn, Error], 2);
+        assert_eq!(title, "While you focused: 1 agent needs you, 1 agent stopped, 2 agents finished");
+        assert_eq!(body, "2 waiting for you now.");
+    }
+
     use super::{Direction, drop_side, even_divider, move_divider};
     use gpui_kit::{Bounds, point, px, size};
 
