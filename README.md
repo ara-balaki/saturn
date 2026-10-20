@@ -165,7 +165,8 @@ a tracker, New agent starts work you name, and the rest doesn't show up.
 ### Looks
 
 Panes, the sidebar and the editor are cards on Saturn's own blue backdrop: deep navy in dark mode,
-soft periwinkle in light. It follows macOS's appearance, or you pick one.
+soft periwinkle in light. It follows macOS's appearance, or you pick one. Terminals tell programs
+which it is when they ask, so Claude Code's "Auto" theme (`/theme`) matches, and switches with it.
 
 ## Shortcuts
 

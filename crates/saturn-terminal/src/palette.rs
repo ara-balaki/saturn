@@ -83,6 +83,28 @@ pub fn resolve(color: Color, overrides: &Colors) -> Rgb {
     }
 }
 
+/// The colour a program asks for by number (OSC 4, 10, 11, 12): 0–255 the palette, 256 the text,
+/// 257 the background, 258 the cursor. Programs ask for the background to tell a light terminal from
+/// a dark one, and choose their colours by it.
+pub fn requested(index: usize, overrides: &Colors) -> Rgb {
+    match u8::try_from(index) {
+        Ok(index) => resolve(Color::Indexed(index), overrides),
+        Err(_) => resolve(
+            Color::Named(match index {
+                256 => NamedColor::Foreground,
+                257 => NamedColor::Background,
+                _ => NamedColor::Cursor,
+            }),
+            overrides,
+        ),
+    }
+}
+
+/// Whether the terminal is dark now, for programs that ask (`COLORFGBG`, colour scheme reports).
+pub fn is_dark() -> bool {
+    saturn_design::appearance() == saturn_design::Appearance::Dark
+}
+
 fn named(name: NamedColor) -> Rgb {
     match name {
         NamedColor::Foreground | NamedColor::BrightForeground => foreground(),
@@ -105,6 +127,15 @@ fn named(name: NamedColor) -> Rgb {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn answers_for_the_background_the_text_and_the_palette() {
+        let colors = Colors::default();
+        assert_eq!(requested(257, &colors), background());
+        assert_eq!(requested(256, &colors), foreground());
+        assert_eq!(requested(1, &colors), ansi(1));
+        assert_eq!(requested(196, &colors), indexed(196));
+    }
 
     #[test]
     fn ansi_colours_are_the_design_tokens() {

@@ -1675,6 +1675,9 @@ impl Workspace {
             // (OSC 8), so Claude Code's links work even where the text wraps or hides the address.
             ("FORCE_HYPERLINK".into(), "1".into()),
             ("SATURN_PANE_ID".into(), tab.0.to_string()),
+            // The oldest way to tell programs whether the background is light or dark ("text;
+            // background" as ANSI colours); they ask the terminal itself for anything newer.
+            ("COLORFGBG".into(), if saturn_terminal::palette::is_dark() { "15;0" } else { "0;15" }.into()),
         ];
         // The checkout's own block of ports, the same in every terminal of it and across restarts.
         let checkout = git::toplevel(cwd).unwrap_or_else(|| cwd.to_owned());

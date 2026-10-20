@@ -475,6 +475,8 @@ impl TerminalView {
 
 impl Render for TerminalView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // A change of appearance redraws every terminal; programs that asked hear of it here.
+        self.terminal.report_scheme();
         let focused = self.focus.is_focused(window);
         div()
             .id("terminal")

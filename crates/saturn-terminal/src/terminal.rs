@@ -16,6 +16,7 @@ use saturn_core::links::{can_open, url_at};
 use saturn_core::program_status::{PROBE_REPLY, ProgramStatus};
 use saturn_core::pull_request::LinkScanner;
 
+use crate::palette;
 use crate::pty::{Pty, PtyEvent};
 use crate::signals::{Signal, SignalTap};
 
@@ -98,6 +99,9 @@ pub struct Terminal {
     events: EngineEvents,
     pty: Pty,
     size: GridSize,
+    /// The program asked to hear when the terminal turns light or dark (mode 2031), and the last
+    /// scheme it was told.
+    scheme_reports: Option<bool>,
 }
 
 impl Terminal {
@@ -112,7 +116,44 @@ impl Terminal {
         let config = Config { scrolling_history: SCROLLBACK_LINES, ..Config::default() };
         let term = Term::new(config, &size, events.clone());
         let tap = SignalTap::default();
-        Ok((Self { term, processor: Processor::new(), tap, links: LinkScanner::default(), events, pty, size }, output))
+        Ok((
+            Self {
+                term,
+                processor: Processor::new(),
+                tap,
+                links: LinkScanner::default(),
+                events,
+                pty,
+                size,
+                scheme_reports: None,
+            },
+            output,
+        ))
+    }
+
+    /// The colour scheme, light or dark, as programs ask for it: once (`CSI ? 996 n`), or every time
+    /// it changes once they turn reports on (`CSI ? 2031 h`). The engine doesn't know these.
+    fn answer_scheme_requests(&mut self, bytes: &[u8]) {
+        let has = |sequence: &[u8]| bytes.windows(sequence.len()).any(|window| window == sequence);
+        if has(b"\x1b[?2031h") {
+            self.scheme_reports = Some(palette::is_dark());
+        }
+        if has(b"\x1b[?2031l") {
+            self.scheme_reports = None;
+        }
+        if has(b"\x1b[?996n") {
+            self.pty.write(scheme_report(palette::is_dark()));
+        }
+    }
+
+    /// Tells a program that asked for reports that the terminal turned light or dark. Called as
+    /// frames are drawn; does nothing until the scheme actually changes.
+    pub fn report_scheme(&mut self) {
+        let dark = palette::is_dark();
+        if self.scheme_reports.is_some_and(|told| told != dark) {
+            self.scheme_reports = Some(dark);
+            self.pty.write(scheme_report(dark));
+        }
     }
 
     /// Feeds program output to the screen and returns what the app should know about.
@@ -127,11 +168,17 @@ impl Terminal {
             }
         }
         out.extend(self.links.feed(bytes).map(TerminalEvent::PullRequestLink));
+        self.answer_scheme_requests(bytes);
         self.processor.advance(&mut self.term, bytes);
         for event in self.events.drain() {
             match event {
                 // Replies the program asked for: device attributes, cursor position…
                 EngineEvent::PtyWrite(reply) => self.pty.write(reply.into_bytes()),
+                // "What colour is your background?": how programs tell a light terminal from a dark one.
+                EngineEvent::ColorRequest(index, reply) => {
+                    let rgb = palette::requested(index, self.term.colors());
+                    self.pty.write(reply(rgb).into_bytes());
+                }
                 EngineEvent::Title(title) => out.push(TerminalEvent::Title(Some(title))),
                 EngineEvent::ResetTitle => out.push(TerminalEvent::Title(None)),
                 EngineEvent::Bell => out.push(TerminalEvent::Bell),
@@ -280,8 +327,19 @@ impl Terminal {
     }
 }
 
+/// `CSI ? 997 ; 1 n` for dark, `; 2 n` for light.
+fn scheme_report(dark: bool) -> Vec<u8> {
+    format!("\x1b[?997;{}n", if dark { 1 } else { 2 }).into_bytes()
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reports_the_colour_scheme_as_programs_expect() {
+        assert_eq!(super::scheme_report(true), b"\x1b[?997;1n");
+        assert_eq!(super::scheme_report(false), b"\x1b[?997;2n");
+    }
+
     use super::*;
 
     #[test]
