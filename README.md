@@ -111,7 +111,9 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
 - Focus a pane that works in another git worktree, and the sidebar follows it there.
 - Worktrees (⌘⇧P): every worktree of the repo with its branch, last commit, pull request and whether
   its work is merged (squash merges too). The finished ones, with nothing uncommitted, no open pull
-  request and nothing running in them, go with one click.
+  request and nothing running in them, go with one click. One you're not working on now can be
+  archived: its branch and uncommitted work are kept, the folder goes, and Restore brings it back
+  where it was (so `claude --resume` finds its sessions) and sets it up again.
 - Worktrees share the main checkout's `.env` files: each one's is a link to main's, so a value added
   in any worktree is in all of them. `CLAUDE.local.md` and `.claude/settings.local.json` (the commands
   you allowed Claude for good) are shared the same way; Claude shares its own memory already. A

@@ -1031,20 +1031,47 @@ impl Workspace {
         let mut command = project.command_for(key, title);
         // A worktree made just now has the code and nothing else: the recipe's setup runs first,
         // and the agent starts only once it has worked.
-        if made {
-            match recipe::for_checkout(&cwd) {
-                Ok((recipe, source)) => {
-                    if let Some(setup) = recipe.setup_command() {
-                        if source == Source::Guessed {
-                            self.note(tab, &guessed(), cx);
-                        }
-                        command = format!("{setup} && {command}");
-                    }
-                }
-                Err(problem) => self.note(tab, &format!("The worktree recipe wasn't run: {problem}"), cx),
-            }
+        if made && let Some(setup) = self.setup_for(tab, &cwd, cx) {
+            command = format!("{setup} && {command}");
         }
         self.type_into(tab, command, cx);
+        self.after_layout_change(window, cx);
+    }
+
+    /// The recipe's setup for `checkout`, saying in `tab` when it was guessed or the recipe is wrong.
+    fn setup_for(&self, tab: TabId, checkout: &Path, cx: &mut Context<Self>) -> Option<String> {
+        match recipe::for_checkout(checkout) {
+            Ok((recipe, source)) => {
+                let setup = recipe.setup_command()?;
+                if source == Source::Guessed {
+                    self.note(tab, &guessed(), cx);
+                }
+                Some(setup)
+            }
+            Err(problem) => {
+                self.note(tab, &format!("The worktree recipe wasn't run: {problem}"), cx);
+                None
+            }
+        }
+    }
+
+    /// Opens a pane in a worktree just restored from the archive: its shared files back in place, and
+    /// its setup run, since what git ignores (`node_modules`) wasn't kept.
+    pub fn open_restored(&mut self, checkout: &Path, window: &mut Window, cx: &mut Context<Self>) {
+        if self.settings.share_env_files {
+            shared_env::share(checkout);
+            self.env_shared.insert(checkout.to_owned());
+        }
+        worktree_include::copy_into(checkout);
+        let Some(tab) = self.spawn_terminal(checkout, window, cx) else { return };
+        if self.layout.is_empty() {
+            self.layout.add_tab(tab, None);
+        } else {
+            self.layout.split_right(tab, None);
+        }
+        if let Some(setup) = self.setup_for(tab, checkout, cx) {
+            self.type_into(tab, setup, cx);
+        }
         self.after_layout_change(window, cx);
     }
 

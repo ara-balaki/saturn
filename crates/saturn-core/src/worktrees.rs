@@ -158,6 +158,132 @@ pub fn remove(main: &Path, worktree: &Worktree, cleanup: Option<&str>) -> Result
     Ok(said.join(" "))
 }
 
+/// A worktree put away: its branch, and its work as it was, so it can come back where it was.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Archived {
+    /// Where it was, and where it comes back.
+    pub path: PathBuf,
+    pub branch: String,
+    /// The branch's commit when it was put away.
+    pub head: String,
+    /// Its files as they were, uncommitted work and new files too: a commit on top of `head` (or
+    /// `head` itself when nothing was uncommitted), kept by a ref of Saturn's so git doesn't drop it.
+    pub snapshot: String,
+    /// When, in seconds since 1970.
+    pub at: i64,
+}
+
+/// The ref that keeps an archived worktree's snapshot.
+fn archive_ref(branch: &str) -> String {
+    format!("refs/saturn/archive/{branch}")
+}
+
+/// Puts a worktree away: saves its files as they are (without touching its branch or running any
+/// hook), runs its recipe's `cleanup`, and removes the folder. Ignored files (`node_modules`) go;
+/// setup makes them again. Refuses the main checkout, a missing one and a detached one.
+pub fn archive(main: &Path, worktree: &Worktree, cleanup: Option<&str>, now: i64) -> Result<Archived, String> {
+    let branch = match (&worktree.branch, worktree.main || worktree.missing) {
+        (Some(branch), false) => branch.clone(),
+        _ => return Err("Only a worktree on a branch can be archived.".to_owned()),
+    };
+    let path = &worktree.path;
+    let head = run(path, &["rev-parse", "HEAD"]).map(|out| out.trim().to_owned()).ok_or("git can't read its commit")?;
+    // Everything as it is, through an index of its own so the worktree's isn't touched.
+    let index = std::env::temp_dir().join(format!("saturn-archive-{}", std::process::id()));
+    let with_index = |args: &[&str]| -> Option<String> {
+        let output = crate::git::command(path).env("GIT_INDEX_FILE", &index).args(args).output().ok()?;
+        output.status.success().then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    };
+    let tree = with_index(&["read-tree", "HEAD"])
+        .and_then(|_| with_index(&["add", "-A"]))
+        .and_then(|_| with_index(&["write-tree"]));
+    let _ = std::fs::remove_file(&index);
+    let tree = tree.ok_or("git can't save its files")?;
+    let head_tree = run(path, &["rev-parse", "HEAD^{tree}"]).map(|out| out.trim().to_owned());
+    let snapshot = if head_tree.as_deref() == Some(tree.as_str()) {
+        head.clone()
+    } else {
+        let message = format!("Work in progress in {}, archived by Saturn", path.display());
+        run(path, &["commit-tree", &tree, "-p", &head, "-m", &message])
+            .map(|out| out.trim().to_owned())
+            .ok_or("git can't save its uncommitted work")?
+    };
+    run(main, &["update-ref", &archive_ref(&branch), &snapshot]).ok_or("git can't keep the saved work")?;
+    if let Some(cleanup) = cleanup {
+        let _ = Command::new("/bin/sh").args(["-c", cleanup]).current_dir(path).output();
+    }
+    // Forced: what it held is saved above.
+    let output = crate::git::command(main)
+        .args(["worktree", "remove", "--force"])
+        .arg(path)
+        .output()
+        .map_err(|error| format!("git could not run: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+    }
+    Ok(Archived { path: path.clone(), branch, head, snapshot, at: now })
+}
+
+/// Brings an archived worktree back where it was: its branch (made again from its commit if it was
+/// deleted meanwhile), then its saved files over it, uncommitted as they were.
+pub fn restore(main: &Path, archived: &Archived) -> Result<(), String> {
+    if archived.path.exists() {
+        return Err(format!("{} is in the way.", archived.path.display()));
+    }
+    let path = archived.path.to_string_lossy().into_owned();
+    let branch_exists =
+        run(main, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{}", archived.branch)]).is_some();
+    let args: Vec<&str> = if branch_exists {
+        vec!["worktree", "add", &path, &archived.branch]
+    } else {
+        vec!["worktree", "add", "-b", &archived.branch, &path, &archived.head]
+    };
+    let output =
+        crate::git::command(main).args(&args).output().map_err(|error| format!("git could not run: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+    }
+    if archived.snapshot != archived.head {
+        run(&archived.path, &["restore", "--source", &archived.snapshot, "--worktree", "--", "."])
+            .ok_or("The worktree is back, but git couldn't put its uncommitted work back.")?;
+    }
+    let _ = run(main, &["update-ref", "-d", &archive_ref(&archived.branch)]);
+    Ok(())
+}
+
+/// The archived worktrees of each repository, kept in a file beside Saturn's settings.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct Archives {
+    repos: std::collections::BTreeMap<PathBuf, Vec<Archived>>,
+}
+
+impl Archives {
+    pub fn load(file: &Path) -> Self {
+        std::fs::read_to_string(file).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default()
+    }
+
+    pub fn save(&self, file: &Path) -> std::io::Result<()> {
+        if let Some(folder) = file.parent() {
+            std::fs::create_dir_all(folder)?;
+        }
+        std::fs::write(file, serde_json::to_string_pretty(self).unwrap_or_default())
+    }
+
+    pub fn of(&self, repo: &Path) -> &[Archived] {
+        self.repos.get(repo).map_or(&[], Vec::as_slice)
+    }
+
+    pub fn add(&mut self, repo: &Path, archived: Archived) {
+        self.repos.entry(repo.to_owned()).or_default().push(archived);
+    }
+
+    pub fn forget(&mut self, repo: &Path, path: &Path) {
+        if let Some(list) = self.repos.get_mut(repo) {
+            list.retain(|archived| archived.path != path);
+        }
+    }
+}
+
 fn run(repo: &Path, args: &[&str]) -> Option<String> {
     let output = crate::git::command(repo).args(args).output().ok()?;
     output.status.success().then(|| String::from_utf8_lossy(&output.stdout).into_owned())
@@ -235,6 +361,54 @@ mod tests {
         assert!(said.contains("abc-1"), "{said}");
         assert_eq!(list(&main).len(), 1);
         assert!(remove(&main, &list(&main)[0], None).is_err(), "the main checkout stays");
+    }
+
+    #[test]
+    fn archives_a_worktree_with_its_unsaved_work_and_brings_it_back() {
+        let dir = tempfile::tempdir().expect("a temporary folder");
+        let main = dir.path().join("acme-web");
+        fs::create_dir_all(&main).expect("make folders");
+        git(&main, &["init", "-q", "-b", "main"]);
+        fs::write(main.join("a.txt"), "a\n").expect("write");
+        git(&main, &["add", "."]);
+        git(&main, &["commit", "-q", "-m", "start"]);
+        let path = dir.path().join("acme-web-abc-3");
+        git(&main, &["worktree", "add", "-q", "-b", "abc-3", &path.to_string_lossy()]);
+        fs::write(path.join("a.txt"), "edited\n").expect("write");
+        fs::write(path.join("new.txt"), "brand new\n").expect("write");
+        let worktree = list(&main).into_iter().find(|worktree| !worktree.main).expect("listed");
+
+        let archived = archive(&main, &worktree, None, 1).expect("archived");
+        assert!(!path.exists());
+        assert_ne!(archived.snapshot, archived.head, "the unsaved work is in a snapshot");
+        assert!(run(&main, &["rev-parse", "--verify", "refs/heads/abc-3"]).is_some(), "the branch stays");
+        assert_eq!(run(&main, &["rev-parse", "abc-3"]).map(|out| out.trim().to_owned()), Some(archived.head.clone()));
+
+        restore(&main, &archived).expect("restored");
+        assert_eq!(fs::read_to_string(path.join("a.txt")).expect("read"), "edited\n");
+        assert_eq!(fs::read_to_string(path.join("new.txt")).expect("read"), "brand new\n");
+        assert!(uncommitted(&path) > 0, "still uncommitted, as it was");
+        assert!(run(&main, &["rev-parse", "--verify", "--quiet", &archive_ref("abc-3")]).is_none());
+    }
+
+    #[test]
+    fn remembers_archives_per_repo() {
+        let dir = tempfile::tempdir().expect("a temporary folder");
+        let file = dir.path().join("archives.json");
+        let put_away = Archived {
+            path: "/code/acme-web-abc-1".into(),
+            branch: "abc-1".into(),
+            head: "1".into(),
+            snapshot: "1".into(),
+            at: 5,
+        };
+        let mut written = Archives::default();
+        written.add(Path::new("/code/acme-web"), put_away.clone());
+        written.save(&file).expect("saved");
+        let mut read = Archives::load(&file);
+        assert_eq!(read.of(Path::new("/code/acme-web")), [put_away]);
+        read.forget(Path::new("/code/acme-web"), Path::new("/code/acme-web-abc-1"));
+        assert_eq!(read.of(Path::new("/code/acme-web")), []);
     }
 
     #[test]
