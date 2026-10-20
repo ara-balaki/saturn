@@ -46,7 +46,7 @@ use crate::editor_view::EditorView;
 use crate::files_view::{FilesEvent, FilesView};
 use crate::review_comments::{SendToAgent, Touched};
 use crate::session::{self, SavedGrid, SavedTab};
-use crate::settings::{self, AppearanceSetting, Settings};
+use crate::settings::{self, AppearanceSetting, Panels, Settings};
 use crate::status_bar::StatusBar;
 use crate::theme::{self, len};
 use crate::tickets_view::TicketsView;
@@ -196,17 +196,6 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("Settings", "settings", Box::new(OpenSettings)),
         ("Check for updates", "square-arrow-right", Box::new(crate::CheckForUpdates)),
     ]
-}
-
-/// The window's panels around the grid, and whether each is showing.
-#[derive(Clone, Copy)]
-struct Panels {
-    /// The files and changes, on the left (⌘B).
-    sidebar: bool,
-    /// The editor, above the grid (⌘J).
-    editor: bool,
-    /// The ClickUp tickets, on the right (⌘⌥B).
-    tickets: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -956,6 +945,8 @@ impl Workspace {
             if let Some(token) = token {
                 let _ = this.update(cx, |this, cx| {
                     this.clickup.token = Some(token);
+                    // The Tickets panel waits for ClickUp before it reopens: without it, it's empty.
+                    this.panels.tickets |= this.settings.panels.tickets;
                     this.refresh_tickets(cx);
                 });
             }
@@ -1014,6 +1005,7 @@ impl Workspace {
         // Pane sizes change by dragging, which saves nothing on its own; quitting saves them.
         cx.on_app_quit(|this, cx| {
             this.save_session(cx);
+            this.remember_panels(cx);
             async {}
         })
         .detach();
@@ -1058,6 +1050,7 @@ impl Workspace {
             let (editor, workspace) = (editor.clone(), cx.weak_entity());
             cx.new(|cx| StatusBar::new(editor, workspace, &project, cx))
         };
+        let saved_settings = settings::load();
         Self {
             status_bar,
             tickets_view: None,
@@ -1100,8 +1093,8 @@ impl Workspace {
             renaming: None,
             next_tab: 0,
             focus: cx.focus_handle(),
-            panels: Panels { sidebar: true, editor: true, tickets: false },
-            settings: settings::load(),
+            panels: Panels { tickets: false, ..saved_settings.panels },
+            settings: saved_settings,
             bridge,
             session_names: HashMap::new(),
             badge: 0,
@@ -2352,6 +2345,29 @@ impl Workspace {
         }
     }
 
+    /// Shows or hides the sidebar (⌘B).
+    fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.panels.sidebar = !self.panels.sidebar;
+        self.remember_panels(cx);
+        cx.notify();
+    }
+
+    /// Shows or hides the editor (⌘J).
+    fn toggle_editor(&mut self, cx: &mut Context<Self>) {
+        self.panels.editor = !self.panels.editor;
+        self.remember_panels(cx);
+        cx.notify();
+    }
+
+    /// Saves which panels are showing, so the next window opens with the same. Only when they
+    /// changed: the settings file is written by every window.
+    fn remember_panels(&mut self, cx: &mut Context<Self>) {
+        let panels = self.panels;
+        if self.settings.panels != panels {
+            self.change_settings(|settings| settings.panels = panels, cx);
+        }
+    }
+
     /// Opens or closes the Tickets panel, reading the tickets again as it opens.
     pub fn toggle_tickets(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.panels.tickets = !self.panels.tickets;
@@ -2363,6 +2379,7 @@ impl Workspace {
             }
             self.refresh_tickets(cx);
         }
+        self.remember_panels(cx);
         cx.notify();
     }
 
@@ -3760,18 +3777,12 @@ impl Workspace {
                 .child(
                     toggle("toggle-sidebar", "panel-left", self.panels.sidebar)
                         .tooltip(chrome::tip_for("Show or hide the sidebar", ToggleSidebar))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.panels.sidebar = !this.panels.sidebar;
-                            cx.notify();
-                        })),
+                        .on_click(cx.listener(|this, _, _, cx| this.toggle_sidebar(cx))),
                 )
                 .child(
                     toggle("toggle-editor", "panel-top", self.panels.editor)
                         .tooltip(chrome::tip_for("Show or hide the editor", ToggleEditor))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.panels.editor = !this.panels.editor;
-                            cx.notify();
-                        })),
+                        .on_click(cx.listener(|this, _, _, cx| this.toggle_editor(cx))),
                 )
                 // Only with ClickUp connected: without it there's nothing to show.
                 .when(self.clickup.connected(), |track| {
@@ -4204,6 +4215,12 @@ impl Render for Workspace {
                 }
             });
         }
+        // The Tickets panel reopened at start, once ClickUp answered: its view is made here, where
+        // there's a window to make it in.
+        if self.panels.tickets && self.tickets_view.is_none() {
+            let workspace = cx.weak_entity();
+            self.tickets_view = Some(cx.new(|cx| TicketsView::new(workspace, window, cx)));
+        }
         div()
             .size_full()
             .flex()
@@ -4253,14 +4270,8 @@ impl Render for Workspace {
                 this.update_layout(window, cx, Layout::toggle_maximize);
             }))
             .on_action(cx.listener(|this, _: &NextAttention, window, cx| this.next_attention(window, cx)))
-            .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| {
-                this.panels.sidebar = !this.panels.sidebar;
-                cx.notify();
-            }))
-            .on_action(cx.listener(|this, _: &ToggleEditor, _, cx| {
-                this.panels.editor = !this.panels.editor;
-                cx.notify();
-            }))
+            .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
+            .on_action(cx.listener(|this, _: &ToggleEditor, _, cx| this.toggle_editor(cx)))
             .on_action(cx.listener(|_, _: &OpenProject, window, cx| Self::open_project(window, cx)))
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(window, cx)))
             .on_action(cx.listener(|this, _: &SaveFile, _, cx| this.save_file(cx)))
