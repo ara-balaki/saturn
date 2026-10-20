@@ -103,6 +103,8 @@ mod tests {
     use super::*;
 
     fn git(dir: &Path, args: &[&str]) {
+        // From a git hook, GIT_DIR names the hook's repository, and every git here would change it.
+        assert!(std::env::var_os("GIT_DIR").is_none(), "GIT_DIR is set: run the tests outside git hooks");
         let status = Command::new("git").args(args).current_dir(dir).output().expect("git runs").status;
         assert!(status.success(), "git {args:?}");
     }

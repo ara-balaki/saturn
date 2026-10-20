@@ -302,6 +302,8 @@ mod tests {
     }
 
     fn repo() -> tempfile::TempDir {
+        // From a git hook, GIT_DIR names the hook's repository, and every git here would change it.
+        assert!(std::env::var_os("GIT_DIR").is_none(), "GIT_DIR is set: run the tests outside git hooks");
         let dir = tempfile::tempdir().expect("a temp dir");
         let sh = |args: &[&str]| {
             let status = Command::new("git").args(args).current_dir(dir.path()).output().expect("git runs").status;

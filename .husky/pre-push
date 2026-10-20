@@ -1,1 +1,5 @@
+# Git hands its hooks the repository they run for (GIT_DIR and the like, which a worktree sets).
+# The tests run git in temporary repositories and would change this one instead: its config,
+# branches and commits. Clear them so every git the checks start finds its own repository.
+unset $(git rev-parse --local-env-vars)
 pnpm health
