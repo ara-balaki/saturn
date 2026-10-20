@@ -38,7 +38,7 @@ pub fn claude_home() -> Option<PathBuf> {
 /// The text of a prompt you typed, or `None` for anything else in a user entry: tool results,
 /// commands and notes Claude Code adds itself (`<command-name>…`, `<system-reminder>…`), a subagent's
 /// instructions.
-fn typed_prompt(entry: &Value) -> Option<String> {
+pub(crate) fn typed_prompt(entry: &Value) -> Option<String> {
     if entry.get("isSidechain").and_then(Value::as_bool) == Some(true)
         || entry.get("isMeta").and_then(Value::as_bool) == Some(true)
     {

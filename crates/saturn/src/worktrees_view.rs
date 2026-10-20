@@ -522,7 +522,7 @@ fn archives_file() -> Option<PathBuf> {
 }
 
 /// Seconds since 1970.
-fn now() -> i64 {
+pub fn now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |since| i64::try_from(since.as_secs()).unwrap_or(0))
@@ -533,7 +533,7 @@ fn folder_name(path: &Path) -> String {
 }
 
 /// How long ago, in words: "today", "3 days ago", "2 months ago".
-fn ago(seconds: i64) -> String {
+pub fn ago(seconds: i64) -> String {
     let days = seconds / 86_400;
     match days {
         ..=0 => "today".to_owned(),

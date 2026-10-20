@@ -24,6 +24,8 @@
 //!   two seconds after it opens).
 //! - `SATURN_BEST_OF=text` writes that in Best of N (`SATURN_BEST_OF_START=1` starts it); with Compare
 //!   attempts open, `SATURN_KEEP_ATTEMPT=2` keeps attempt 2.
+//! - `SATURN_SESSIONS_QUERY=text` types that into Search sessions (`CLAUDE_CONFIG_DIR` points it at
+//!   made-up transcripts).
 //! - `SATURN_UNDO_TURN=6` presses the first pane's "Undo the agent's last turn" after 6 seconds.
 //! - `SATURN_ANSWER=allow|deny` answers the first pane's permission after 5 seconds.
 //! - `SATURN_RUN_CHECKS=1` runs every check of the focused pane's checkout.

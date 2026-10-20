@@ -21,6 +21,7 @@ pub mod layout;
 pub mod links;
 pub mod lsp;
 pub mod overlap;
+pub mod past_sessions;
 pub mod pictures;
 pub mod ports;
 pub mod pr_body;

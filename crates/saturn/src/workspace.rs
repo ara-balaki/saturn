@@ -108,6 +108,7 @@ actions!(
         SendToSeveral,
         BestOfN,
         CompareAttempts,
+        SearchSessions,
     ]
 );
 
@@ -147,6 +148,7 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("Send to several agents", "send", Box::new(SendToSeveral)),
         ("Best of N: one task, several agents", "git-fork", Box::new(BestOfN)),
         ("Compare attempts", "git-compare", Box::new(CompareAttempts)),
+        ("Search sessions and resume one", "text-search", Box::new(SearchSessions)),
         ("Show or hide the sidebar", "panel-left", Box::new(ToggleSidebar)),
         ("Show or hide the editor", "panel-top", Box::new(ToggleEditor)),
         ("Show or hide your tickets", "panel-right", Box::new(ToggleTickets)),
@@ -1314,6 +1316,15 @@ impl Workspace {
         if made && let Some(setup) = self.setup_for(tab, &cwd, cx) {
             command = format!("{setup} && {command}");
         }
+        self.type_into(tab, command, cx);
+        self.after_layout_change(window, cx);
+    }
+
+    /// Resumes a Claude session in a new pane in the folder it ran in.
+    pub fn resume_session(&mut self, folder: &Path, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(command) = crate::session::resume_command(id) else { return };
+        let Some(tab) = self.spawn_terminal(folder, window, cx) else { return };
+        self.place_new(tab);
         self.type_into(tab, command, cx);
         self.after_layout_change(window, cx);
     }
@@ -3874,6 +3885,10 @@ impl Workspace {
             .on_action(cx.listener(|this, _: &CompareAttempts, window, cx| {
                 let repo = git::main_worktree(&this.project).unwrap_or_else(|| this.project.clone());
                 crate::best_of_view::compare(cx.weak_entity(), repo, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &SearchSessions, window, cx| {
+                let open = this.claude_sessions.iter().map(|(tab, id)| (id.clone(), *tab)).collect();
+                crate::sessions_view::open(cx.weak_entity(), open, window, cx);
             }))
             .on_action(cx.listener(|this, _: &SendToSeveral, window, cx| {
                 let panes = this.broadcast_panes(cx);

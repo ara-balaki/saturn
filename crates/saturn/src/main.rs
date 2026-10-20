@@ -31,6 +31,7 @@ mod references_view;
 mod review_comments;
 mod schema_view;
 mod session;
+mod sessions_view;
 mod settings;
 mod settings_view;
 mod spike;

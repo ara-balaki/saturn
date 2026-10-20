@@ -102,6 +102,9 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   (branches `<task>-try-1`, `-try-2`…). **Compare attempts** lays them side by side: the files each
   changed with their lines, its commits, and whether its agent is still at it. Keep one, and the
   others' panes close and their worktrees are archived (Worktrees can restore them).
+- **Search sessions** (⌘⇧P): every Claude Code session on this Mac, newest first, found by what you
+  asked in it, its title, its folder or its branch. Pick one to resume it in a new pane in its
+  folder, or to go to the pane it's open in.
 - macOS notifies you while Saturn is in the background, and a small Saturn in the menu bar shows how
   many are waiting. The moon in the title bar (Focus) holds notifications while you concentrate;
   stopping it gives one that says what happened meanwhile.
