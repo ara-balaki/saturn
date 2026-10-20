@@ -101,6 +101,7 @@ actions!(
         EditPrBody,
         ShowPictures,
         ShowPreview,
+        ShowContext,
     ]
 );
 
@@ -156,6 +157,7 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("Edit the pull request's description", "git-pull-request", Box::new(EditPrBody)),
         ("Pictures of the app", "camera", Box::new(ShowPictures)),
         ("Preview the app", "globe", Box::new(ShowPreview)),
+        ("What the agent is told", "book-open", Box::new(ShowContext)),
         ("Database diagram", "database", Box::new(ShowSchema)),
         ("dbt lineage", "workflow", Box::new(ShowLineage)),
         ("Problems", "circle-x", Box::new(ShowProblems)),
@@ -3673,6 +3675,17 @@ impl Workspace {
             .on_action(cx.listener(|this, _: &EditPrBody, window, cx| this.edit_pr_body(window, cx)))
             .on_action(cx.listener(|this, _: &ShowPictures, window, cx| this.show_pictures(window, cx)))
             .on_action(cx.listener(|this, _: &ShowPreview, window, cx| this.show_preview(window, cx)))
+            .on_action(cx.listener(|this, _: &ShowContext, window, cx| {
+                let checkout = this.focused_checkout(cx);
+                let folder = this
+                    .layout
+                    .focused_tab()
+                    .and_then(|tab| this.terminals.get(&tab))
+                    .map(|view| view.read(cx).cwd.clone())
+                    .filter(|folder| folder.starts_with(&checkout))
+                    .unwrap_or_else(|| checkout.clone());
+                crate::context_view::open(cx.weak_entity(), checkout, &folder, window, cx);
+            }))
             .on_action(cx.listener(|this, _: &RunCheck, window, cx| {
                 let checkout = this.focused_checkout(cx);
                 crate::palette::checks(cx.weak_entity(), checkout, window, cx);

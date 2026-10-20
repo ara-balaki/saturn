@@ -15,6 +15,7 @@ pub mod git;
 pub mod git_graph;
 pub mod hunks;
 pub mod imports;
+pub mod instructions;
 pub mod layout;
 pub mod links;
 pub mod lsp;

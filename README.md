@@ -168,6 +168,11 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   after. "Open folder" for a pull request or a ticket. "Preview the app" shows a pane's running page in the editor panel, drawn
   again every few seconds while it's open, at desktop or phone size: a picture to watch, since a
   browser engine doesn't live in Saturn; "Open in your browser" is a click away.
+- **What the agent is told** (⌘⇧P): for the focused pane's folder, everything Claude Code gives
+  its agent, found as it finds it: instruction files (`CLAUDE.md`, `AGENTS.md`, `CLAUDE.local.md`,
+  yours), rules and the files they're for, skills, commands, subagents, hooks and MCP servers. Long
+  instruction files get a word, and anything said in more than one file comes first, so the copies
+  can't drift apart. Each opens in the editor.
 - **Overlaps**: when two panes' worktrees of one repo change the same files, both panes say so
   (hover for which files and where), while it's still easy to merge one first or split the work.
 - **What was asked**: each file in the review says what you asked Claude Code that changed it (the

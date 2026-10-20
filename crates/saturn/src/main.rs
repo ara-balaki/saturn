@@ -6,6 +6,7 @@ mod assets;
 mod changes_view;
 mod chrome;
 mod clickup;
+mod context_view;
 mod dock;
 mod editor_view;
 mod files_view;
