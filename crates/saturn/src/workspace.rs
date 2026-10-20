@@ -33,7 +33,7 @@ use crate::chrome;
 use crate::clickup;
 use crate::editor_view::EditorView;
 use crate::files_view::{FilesEvent, FilesView};
-use crate::review_comments::SendToAgent;
+use crate::review_comments::{SendToAgent, Touched};
 use crate::session::{self, SavedGrid, SavedTab};
 use crate::settings::{self, AppearanceSetting, Settings};
 use crate::status_bar::StatusBar;
@@ -701,6 +701,13 @@ impl Workspace {
         // Review comments go to the agent working where the changes are.
         cx.subscribe_in(&editor, window, |this, _, event: &SendToAgent, window, cx| {
             this.send_to_agent(&event.repo, &event.message, window, cx);
+        })
+        .detach();
+        // A change staged or reverted from the review: the list of changes reads again.
+        cx.subscribe(&editor, |this, _, event: &Touched, cx| {
+            if let Some(views) = this.roots.get(&event.repo) {
+                views.changes.update(cx, ChangesView::reload);
+            }
         })
         .detach();
         let handle = window.window_handle();

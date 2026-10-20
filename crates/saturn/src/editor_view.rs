@@ -27,7 +27,7 @@ use crate::lineage_view::LineageView;
 use crate::lsp::{self, Provider, Servers, Status};
 use crate::problems_view::{self, ProblemsView};
 use crate::references_view::ReferencesView;
-use crate::review_comments::{ReviewComments, SendToAgent};
+use crate::review_comments::{ReviewComments, SendToAgent, Touched};
 use crate::schema_view::SchemaView;
 use crate::theme::{self, len};
 
@@ -74,7 +74,7 @@ struct Review {
     scope: Option<Scope>,
     label: String,
     /// Comments for the agent, on a review of changes still being made (not on an old commit).
-    comments: Option<(Entity<ReviewComments>, Subscription)>,
+    comments: Option<(Entity<ReviewComments>, [Subscription; 2])>,
 }
 
 /// What the editor panel tells the status bar.
@@ -803,13 +803,16 @@ impl EditorView {
         };
         self.show_review(files, Some(scope), label.to_owned(), path, cx);
         let Some(review) = &mut self.review else { return };
-        let same_repo = review.comments.as_ref().is_some_and(|(comments, _)| comments.read(cx).repo() == repo);
-        if !same_repo {
-            let comments = cx.new(|_| ReviewComments::new(repo.to_owned()));
-            let passed_on = cx.subscribe(&comments, |_, _, event: &SendToAgent, cx| {
+        let same = review.comments.as_ref().is_some_and(|(comments, _)| comments.read(cx).is_for(repo, scope));
+        if !same {
+            let comments = cx.new(|_| ReviewComments::new(repo.to_owned(), scope));
+            let sent = cx.subscribe(&comments, |_, _, event: &SendToAgent, cx| {
                 cx.emit(SendToAgent { repo: event.repo.clone(), message: event.message.clone() });
             });
-            review.comments = Some((comments, passed_on));
+            let touched = cx.subscribe(&comments, |_, _, event: &Touched, cx| {
+                cx.emit(Touched { repo: event.repo.clone() });
+            });
+            review.comments = Some((comments, [sent, touched]));
         }
     }
 
@@ -1353,8 +1356,32 @@ fn apply_settings(
 }
 
 impl EventEmitter<SendToAgent> for EditorView {}
+impl EventEmitter<Touched> for EditorView {}
 
 impl EditorView {
+    /// Clicks line `line` of the review's first file, or presses one of the picked change's buttons:
+    /// for spikes (`SATURN_REVIEW_PICK`, `SATURN_REVIEW_ACT`).
+    pub fn pick_in_review(&mut self, line: Option<usize>, press: Option<&str>, cx: &mut Context<Self>) {
+        let Some(review) = &self.review else { return };
+        let Some((comments, _)) = &review.comments else { return };
+        let Some(path) = review.state.read(cx).files().first().map(|file| file.path().clone()) else { return };
+        comments.update(cx, |comments, cx| {
+            if let Some(line) = line {
+                comments.pick(
+                    &gpui_kit::component::diff::DiffLinePosition::new(
+                        path,
+                        gpui_kit::component::diff::DiffSide::Modified,
+                        line,
+                    ),
+                    cx,
+                );
+            }
+            if let Some(name) = press {
+                comments.press(name, cx);
+            }
+        });
+    }
+
     /// Comments on line `line` of the review's first file, then sends the comments when `send`: for
     /// spikes (`SATURN_REVIEW_COMMENT`, `SATURN_REVIEW_SEND`).
     pub fn comment_on_review(&mut self, line: usize, text: &str, send: bool, cx: &mut Context<Self>) {
@@ -1382,10 +1409,13 @@ fn render_review(review: &Review, cx: &mut Context<EditorView>) -> AnyElement {
     let Some((comments, _)) = &review.comments else { return diff.into_any_element() };
     let bar = comments.update(cx, |comments, cx| comments.render_bar(cx));
     let annotations = comments.read(cx).annotations();
-    let (on_add, on_render) = (comments.clone(), comments.clone());
+    let (on_add, on_render, on_click) = (comments.clone(), comments.clone(), comments.clone());
     let diff = diff
         .on_add_annotation(move |range, window, cx| {
             on_add.update(cx, |comments, cx| comments.start(range.clone(), window, cx));
+        })
+        .on_line_click(move |position, _, _, cx| {
+            on_click.update(cx, |comments, cx| comments.pick(position, cx));
         })
         .annotations(annotations)
         .render_annotation(move |annotation, _, cx| {

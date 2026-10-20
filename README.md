@@ -143,6 +143,8 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   comment, as in a pull request review. "Send to the agent" gives them all to the agent working
   there in one message, each with its file, lines and code; with no agent there, a new pane starts
   Claude on them. They only ever go to a pane running an agent, never to a bare shell.
+- **One change at a time**: click a line in the review to pick its change, then stage just that one,
+  or revert it, leaving the file's other changes as they are. A revert can be undone.
 - **History**: every branch as a graph, with tags, authors and dates; click a commit for its diff.
 - **Impact**: every file that depends on what changed, nearest first. It follows imports in
   JavaScript and TypeScript (with `tsconfig` aliases and a monorepo's packages), Rust and Python.

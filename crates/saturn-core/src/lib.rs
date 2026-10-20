@@ -12,6 +12,7 @@ pub mod format;
 pub mod fuzzy;
 pub mod git;
 pub mod git_graph;
+pub mod hunks;
 pub mod imports;
 pub mod layout;
 pub mod links;

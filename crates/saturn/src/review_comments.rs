@@ -1,6 +1,9 @@
 //! Comments on a review, for the agent: the + beside a line (or a selection of lines) opens a box
 //! under it, comments gather under their lines as in a pull request review, and "Send to the agent"
 //! hands them all over in one message, each with its file, lines and code (`saturn_core::review`).
+//!
+//! Clicking a line picks the change (the hunk) it's in, to stage on its own or revert, leaving the
+//! file's other changes as they are; a revert can be undone until the next one.
 
 use std::path::PathBuf;
 
@@ -10,6 +13,8 @@ use gpui_kit::{
     AnyElement, AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _, IntoElement,
     ParentElement as _, StatefulInteractiveElement as _, Styled as _, Subscription, Window, div, px,
 };
+use saturn_core::git::{self, Scope};
+use saturn_core::hunks::{self, Hunk};
 use saturn_core::review::{self, Comment};
 use saturn_design::{color, radius, space};
 
@@ -17,6 +22,19 @@ use crate::chrome;
 use crate::theme::{self, len};
 
 /// The comments are ready for the agent working in `repo`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Action {
+    Stage,
+    Revert,
+    Undo,
+}
+
+/// Files in `repo` changed under the review (a change staged, reverted or put back), so the list of
+/// changes should be read again.
+pub struct Touched {
+    pub repo: PathBuf,
+}
+
 pub struct SendToAgent {
     pub repo: PathBuf,
     pub message: String,
@@ -38,20 +56,95 @@ struct Writing {
 pub struct ReviewComments {
     /// Where the reviewed files are.
     repo: PathBuf,
+    /// Which changes are reviewed: staging only makes sense for uncommitted ones.
+    scope: Scope,
+    /// The change the last clicked line is in.
+    picked: Option<Hunk>,
+    /// The change last reverted, to put back.
+    reverted: Option<Hunk>,
+    /// What the last stage or revert said.
+    said: Option<String>,
     written: Vec<Written>,
     writing: Option<Writing>,
     next: u64,
 }
 
 impl EventEmitter<SendToAgent> for ReviewComments {}
+impl EventEmitter<Touched> for ReviewComments {}
 
 impl ReviewComments {
-    pub fn new(repo: PathBuf) -> Self {
-        Self { repo, written: Vec::new(), writing: None, next: 0 }
+    pub fn new(repo: PathBuf, scope: Scope) -> Self {
+        Self { repo, scope, picked: None, reverted: None, said: None, written: Vec::new(), writing: None, next: 0 }
     }
 
-    pub fn repo(&self) -> &std::path::Path {
-        &self.repo
+    /// Whether this holds the comments for `scope`'s changes in `repo`.
+    pub fn is_for(&self, repo: &std::path::Path, scope: Scope) -> bool {
+        self.repo == repo && self.scope == scope
+    }
+
+    /// Picks the change that `position`'s line is in, reading the diff again so it's current.
+    pub fn pick(&mut self, position: &DiffLinePosition, cx: &mut Context<Self>) {
+        let (repo, scope) = (self.repo.clone(), self.scope);
+        let (path, line, removed) =
+            (position.path().to_string(), position.line(), position.side() == DiffSide::Original);
+        cx.spawn(async move |this, cx| {
+            let hunk =
+                cx.background_spawn(async move { hunks::at(&git::patch(&repo, scope), &path, line, removed) }).await;
+            let _ = this.update(cx, |this, cx| {
+                this.picked = hunk;
+                this.said = None;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Presses Stage, Revert or Undo by name: for spikes (`SATURN_REVIEW_ACT`).
+    pub fn press(&mut self, name: &str, cx: &mut Context<Self>) {
+        match name {
+            "stage" => self.act(Action::Stage, cx),
+            "revert" => self.act(Action::Revert, cx),
+            "undo" => self.act(Action::Undo, cx),
+            _ => {}
+        }
+    }
+
+    /// Stages, reverts or puts back a change, off the main thread. The review follows the files.
+    fn act(&mut self, action: Action, cx: &mut Context<Self>) {
+        let hunk = match action {
+            Action::Undo => self.reverted.take(),
+            Action::Stage | Action::Revert => self.picked.take(),
+        };
+        let Some(hunk) = hunk else { return };
+        let repo = self.repo.clone();
+        let applied = hunk.clone();
+        cx.spawn(async move |this, cx| {
+            let done = cx
+                .background_spawn(async move {
+                    match action {
+                        Action::Stage => hunks::stage(&repo, &applied),
+                        Action::Revert => hunks::revert(&repo, &applied),
+                        Action::Undo => hunks::reapply(&repo, &applied),
+                    }
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.said = Some(match (&done, action) {
+                    (Ok(()), Action::Stage) => format!("Staged the change in {}.", hunk.path),
+                    (Ok(()), Action::Revert) => format!("Reverted the change in {}.", hunk.path),
+                    (Ok(()), Action::Undo) => format!("Put the change in {} back.", hunk.path),
+                    (Err(problem), _) => format!("Couldn't: {problem}"),
+                });
+                if done.is_ok() && action == Action::Revert {
+                    this.reverted = Some(hunk);
+                }
+                if done.is_ok() {
+                    cx.emit(Touched { repo: this.repo.clone() });
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// Opens a box for a comment on `range`.
@@ -193,17 +286,12 @@ impl ReviewComments {
             .into_any_element()
     }
 
-    /// Above the review while there are comments: how many, and what to do with them.
+    /// Above the review: the picked change and what to do with it, and the comments waiting for the
+    /// agent. Nothing when there's neither.
     pub fn render_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let count = self.written.len();
-        if count == 0 {
-            return None;
-        }
-        let what =
-            if count == 1 { "1 comment for the agent".to_owned() } else { format!("{count} comments for the agent") };
-        Some(
+        let strip = |id: &'static str| {
             div()
-                .id("review-comments-bar")
+                .id(id)
                 .flex()
                 .flex_none()
                 .items_center()
@@ -213,16 +301,76 @@ impl ReviewComments {
                 .border_b_1()
                 .border_color(theme::separator())
                 .text_size(px(13.))
-                .child(div().flex_1().text_color(theme::color(color::INK_MUTED)).child(what))
-                .child(
-                    chrome::button("review-discard", "Discard", None, false)
-                        .on_click(cx.listener(|this, _, _, cx| this.discard(cx))),
-                )
-                .child(
-                    chrome::button("review-send", "Send to the agent", None, true)
-                        .on_click(cx.listener(|this, _, _, cx| this.send(cx))),
-                )
-                .into_any_element(),
-        )
+        };
+        let mut rows = Vec::new();
+        if let Some(hunk) = &self.picked {
+            let (start, end) = hunk.changed_lines();
+            let lines = if start == end { format!("line {start}") } else { format!("lines {start}–{end}") };
+            rows.push(
+                strip("review-change-bar")
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_color(theme::color(color::INK_MUTED))
+                            .child(format!("The change at {}, {lines}", hunk.path)),
+                    )
+                    .children((self.scope == Scope::Uncommitted).then(|| {
+                        chrome::button("review-stage", "Stage this change", None, false)
+                            .on_click(cx.listener(|this, _, _, cx| this.act(Action::Stage, cx)))
+                    }))
+                    .child(
+                        chrome::button("review-revert", "Revert this change", None, false)
+                            .on_click(cx.listener(|this, _, _, cx| this.act(Action::Revert, cx))),
+                    )
+                    .child(chrome::icon_button("review-unpick", "x", true).tooltip(chrome::tip("Leave it")).on_click(
+                        cx.listener(|this, _, _, cx| {
+                            this.picked = None;
+                            cx.notify();
+                        }),
+                    ))
+                    .into_any_element(),
+            );
+        } else if let Some(said) = &self.said {
+            rows.push(
+                strip("review-said")
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_color(theme::color(color::INK_MUTED))
+                            .child(said.clone()),
+                    )
+                    .children(self.reverted.is_some().then(|| {
+                        chrome::button("review-undo", "Undo", None, false)
+                            .on_click(cx.listener(|this, _, _, cx| this.act(Action::Undo, cx)))
+                    }))
+                    .into_any_element(),
+            );
+        }
+        let count = self.written.len();
+        if count > 0 {
+            let what = if count == 1 {
+                "1 comment for the agent".to_owned()
+            } else {
+                format!("{count} comments for the agent")
+            };
+            rows.push(
+                strip("review-comments-bar")
+                    .child(div().flex_1().text_color(theme::color(color::INK_MUTED)).child(what))
+                    .child(
+                        chrome::button("review-discard", "Discard", None, false)
+                            .on_click(cx.listener(|this, _, _, cx| this.discard(cx))),
+                    )
+                    .child(
+                        chrome::button("review-send", "Send to the agent", None, true)
+                            .on_click(cx.listener(|this, _, _, cx| this.send(cx))),
+                    )
+                    .into_any_element(),
+            );
+        }
+        (!rows.is_empty()).then(|| div().flex().flex_col().flex_none().children(rows).into_any_element())
     }
 }

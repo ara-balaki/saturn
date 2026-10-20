@@ -5,7 +5,8 @@
 //! - `SATURN_PERF=1` prints how long terminal frames take, every second.
 //! - `SATURN_OPEN_SETTINGS=1` opens the Settings dialog on start; `SATURN_OPEN_FILE=path` opens a file
 //!   in the editor (`SATURN_SAVE=1` saves it after a moment); `SATURN_REVIEW=1` shows the Changes tab and reviews the first change
-//!   (`SATURN_REVIEW_COMMENT="12:text"` comments on its line 12; `SATURN_REVIEW_SEND=1` sends it).
+//!   (`SATURN_REVIEW_COMMENT="12:text"` comments on its line 12; `SATURN_REVIEW_SEND=1` sends it;
+//!   `SATURN_REVIEW_PICK=12` clicks line 12, `SATURN_REVIEW_ACT=stage|revert|undo` presses that).
 //! - `SATURN_MORE_REPOS=a:b` adds more repos to the window, as ⌘O would; `SATURN_FAKE_AGENTS=1`
 //!   gives the panes made-up agents and pull requests (`SATURN_FAKE_STATES=working,needs-you,your-turn`
 //!   sets their states in order); `SATURN_HISTORY=1` opens the History tab, `SATURN_IMPACT=1` the Impact tab (focused on `SATURN_IMPACT_FOCUS`), `SATURN_SCHEMA=1`
@@ -195,6 +196,21 @@ fn review_from_env(window: &mut Window, cx: &mut Context<Workspace>) {
         return;
     }
     cx.defer_in(window, |workspace, _, cx| workspace.review_first_change(cx));
+    if let Ok(line) = std::env::var("SATURN_REVIEW_PICK") {
+        let press = std::env::var("SATURN_REVIEW_ACT").ok();
+        cx.spawn(async move |workspace, cx| {
+            cx.background_executor().timer(Duration::from_millis(3000)).await;
+            let _ = workspace.update(cx, |workspace, cx| {
+                workspace.editor().update(cx, |editor, cx| editor.pick_in_review(line.parse().ok(), None, cx));
+            });
+            // Once the pick has read the diff.
+            cx.background_executor().timer(Duration::from_millis(1000)).await;
+            let _ = workspace.update(cx, |workspace, cx| {
+                workspace.editor().update(cx, |editor, cx| editor.pick_in_review(None, press.as_deref(), cx));
+            });
+        })
+        .detach();
+    }
     if let Ok(comment) = std::env::var("SATURN_REVIEW_COMMENT") {
         let send = std::env::var_os("SATURN_REVIEW_SEND").is_some();
         cx.spawn(async move |workspace, cx| {
