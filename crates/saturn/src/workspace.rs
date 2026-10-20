@@ -1,6 +1,7 @@
 //! The window's root: the title bar and the grid of terminal panes, each with tabs.
 
 use std::collections::{HashMap, HashSet};
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -18,6 +19,7 @@ use saturn_core::agent_state::{AgentState, tab_title};
 use saturn_core::clickup::Ticket;
 use saturn_core::git;
 use saturn_core::layout::{Cell, CellId, Direction, Layout, RowId, TabId};
+use saturn_core::overlap;
 use saturn_core::ports;
 use saturn_core::pull_request::{self, PrState, PullRequest};
 use saturn_core::recipe::{self, Source};
@@ -288,6 +290,10 @@ pub struct Workspace {
     reading_servers: bool,
     /// Each checkout's first port (`SATURN_PORT`), as its terminals were given it.
     ports: HashMap<PathBuf, u16>,
+    /// For each pane's checkout, the others of its repository that change some of the same files.
+    overlaps: std::collections::BTreeMap<PathBuf, Vec<(PathBuf, Vec<String>)>>,
+    /// Whether they're being read.
+    reading_overlaps: bool,
 }
 
 /// A background refresh: not running, running, or running with another asked for meanwhile (a new
@@ -497,6 +503,36 @@ fn pull_request_chip(cell: CellId, pr: &PullRequest) -> impl IntoElement {
         .on_click(move |_, _, _| {
             let _ = std::process::Command::new("open").arg(&url).spawn();
         })
+}
+
+/// This pane's worktree changes files another worktree also changes: they'll meet at merge time.
+/// Read-only: what to do about it is a decision, not a click.
+fn overlap_chip(cell: CellId, others: &[(PathBuf, Vec<String>)]) -> impl IntoElement {
+    let count: usize = others.iter().map(|(_, files)| files.len()).sum();
+    let mut tip = String::from("Other worktrees change the same files, so merging both will meet here:");
+    for (other, files) in others {
+        let name =
+            other.file_name().map_or_else(|| other.display().to_string(), |name| name.to_string_lossy().into_owned());
+        let shown: Vec<&str> = files.iter().take(8).map(String::as_str).collect();
+        let more =
+            if files.len() > shown.len() { format!(" and {} more", files.len() - shown.len()) } else { String::new() };
+        let _ = write!(tip, "\n\n{name}: {}{more}", shown.join(", "));
+    }
+    let s = if count == 1 { "" } else { "s" };
+    div()
+        .id(("overlap-chip", cell.key()))
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(len(space::SPACE_1))
+        .h(len(TAB_HEIGHT))
+        .px(len(space::SPACE_2))
+        .text_size(px(12.))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(theme::color(color::INK_MUTED))
+        .child(chrome::icon("triangle-alert", 13., theme::color(color::AMBER_TEXT)))
+        .child(format!("{count} shared file{s}"))
+        .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
 }
 
 /// A server the pane's terminal runs: its name and port. Clicking opens it in the browser.
@@ -734,6 +770,8 @@ impl Workspace {
             services: Vec::new(),
             reading_servers: false,
             ports: HashMap::new(),
+            overlaps: std::collections::BTreeMap::new(),
+            reading_overlaps: false,
             roots,
             root: project.clone(),
             follow_pane: true,
@@ -1297,6 +1335,7 @@ impl Workspace {
                 this.checkout_refresh = Refresh::Idle;
                 this.checkouts = checkouts;
                 this.share_env_files(cx);
+                this.refresh_overlaps(cx);
                 // Made-up agents keep their made-up pull requests.
                 if std::env::var_os("SATURN_FAKE_AGENTS").is_none() {
                     this.pull_requests = pull_requests;
@@ -1351,6 +1390,40 @@ impl Workspace {
                 if this.servers != servers || this.services != services {
                     this.servers = servers;
                     this.services = services;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Finds the panes' checkouts that change the same files as another of their repository's, off the
+    /// main thread: after the branches are read, and when an agent finishes a turn.
+    fn refresh_overlaps(&mut self, cx: &mut Context<Self>) {
+        if self.reading_overlaps {
+            return;
+        }
+        let roots: std::collections::BTreeSet<PathBuf> =
+            self.checkouts.values().map(|checkout| checkout.root.clone()).collect();
+        if roots.len() < 2 {
+            if !self.overlaps.is_empty() {
+                self.overlaps.clear();
+                cx.notify();
+            }
+            return;
+        }
+        self.reading_overlaps = true;
+        cx.spawn(async move |this, cx| {
+            let found = cx
+                .background_spawn(async move {
+                    let changed = roots.into_iter().map(|root| (root.clone(), overlap::changed_files(&root))).collect();
+                    overlap::overlaps(&changed, git::main_worktree)
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.reading_overlaps = false;
+                if this.overlaps != found {
+                    this.overlaps = found;
                     cx.notify();
                 }
             });
@@ -1924,6 +1997,10 @@ impl Workspace {
                 } else if !asks {
                     self.unseen.remove(&tab);
                 }
+                // A turn just ended: its files may now meet another worktree's.
+                if asks {
+                    self.refresh_overlaps(cx);
+                }
                 self.report_attention(window, cx);
                 cx.notify();
             }
@@ -2252,6 +2329,12 @@ impl Workspace {
             .items_center()
             .gap(len(space::SPACE_1))
             .children(self.ticket_of(cell.active, cx).map(|ticket| ticket_chip(cell_id, ticket)))
+            .children(
+                self.checkouts
+                    .get(&cell.active)
+                    .and_then(|checkout| self.overlaps.get(&checkout.root))
+                    .map(|others| overlap_chip(cell_id, others)),
+            )
             .children(self.servers.get(&cell.active).into_iter().flatten().map(|server| server_chip(cell_id, server)))
             .children(self.pull_request_of(cell.active).map(|pr| pull_request_chip(cell_id, pr)))
             .child(header_button("split-right", "columns-2", Placement::Right, cx))

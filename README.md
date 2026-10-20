@@ -148,6 +148,8 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
 - **Compare with anything**: "Compare with a branch or commit" (⌘⇧P, or the button under Changes)
   lists the branches, tags and recent commits; pick one to review everything that differs from it,
   uncommitted work too. Comments and single changes work there as well.
+- **Overlaps**: when two panes' worktrees of one repo change the same files, both panes say so
+  (hover for which files and where), while it's still easy to merge one first or split the work.
 - **What was asked**: each file in the review says what you asked Claude Code that changed it (the
   latest prompt; hover for the ones before), read from its session transcripts on your Mac. Edits
   made through the shell can't be traced, so those files say nothing.
