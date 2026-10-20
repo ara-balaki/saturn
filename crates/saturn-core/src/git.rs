@@ -256,15 +256,23 @@ fn git(repo: &Path) -> Command {
 /// Git's variables that say which repository to work on. A hook sets them for its own repository
 /// (`GIT_DIR` in a worktree, `GIT_INDEX_FILE` before a commit), and a command that inherited them
 /// would work on that repository whatever folder it ran in: tests run by a hook once committed
-/// into the repository being pushed.
-const LOCATION_VARIABLES: [&str; 7] = [
+/// into the repository being pushed. The list is `git rev-parse --local-env-vars`.
+const LOCATION_VARIABLES: [&str; 15] = [
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CONFIG",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+    "GIT_OBJECT_DIRECTORY",
     "GIT_DIR",
     "GIT_WORK_TREE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_GRAFT_FILE",
     "GIT_INDEX_FILE",
-    "GIT_COMMON_DIR",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_REPLACE_REF_BASE",
     "GIT_PREFIX",
+    "GIT_SHALLOW_FILE",
+    "GIT_COMMON_DIR",
 ];
 
 /// `git` working on the repository in `dir`, and only that one.

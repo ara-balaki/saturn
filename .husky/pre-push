@@ -1,3 +1,4 @@
-# Git gives hooks its own variables (GIT_DIR in a worktree); tests that run git must not see them.
-unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_PREFIX
+# Git hands its hooks the repository they run for (GIT_DIR and the like, which a worktree sets).
+# Tests that run git must not see them, or they change this repository instead of their own.
+unset $(git rev-parse --local-env-vars)
 pnpm health
