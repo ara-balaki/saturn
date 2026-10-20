@@ -31,6 +31,7 @@ use saturn_core::session_name::rename_for_prompt;
 use saturn_core::session_usage::{self, Tokens};
 use saturn_core::shared_env;
 use saturn_core::snapshot::{self, Snapshot};
+use saturn_core::teams::{self, Team};
 use saturn_core::waiting::{self, Waiting};
 use saturn_core::worktree_include;
 use saturn_core::worktrees::Worktree;
@@ -317,6 +318,8 @@ pub struct Workspace {
     claude_sessions: HashMap<TabId, String>,
     /// Panes a routine started, until their session is known: the routine and its time.
     routine_tabs: HashMap<TabId, (String, i64)>,
+    /// The agent team each pane's session leads, if any.
+    teams: HashMap<TabId, Team>,
     /// ClickUp, when a token is set; nothing about it shows otherwise.
     clickup: ClickUpState,
     /// Where a dragged tab would land: a cell, and the side to split it on (`None`: into the cell).
@@ -702,6 +705,41 @@ fn mode_chip(cell: CellId, mode: &str) -> Option<impl IntoElement> {
     )
 }
 
+/// A pane whose session leads an agent team: how many are in it, how far its tasks are, and
+/// whether messages wait unread. It opens the team.
+fn team_chip(cell: CellId, tab: TabId, team: &Team, cx: &mut Context<Workspace>) -> impl IntoElement {
+    let (done, all) = team.progress();
+    let mut label = format!("Team of {}", team.members.len());
+    if all > 0 {
+        let _ = write!(label, " · {done}/{all} tasks");
+    }
+    let unread = team.unread();
+    div()
+        .id(("team-chip", cell.key()))
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(len(space::SPACE_1))
+        .h(len(chrome::CONTROL_HEIGHT))
+        .px(len(space::SPACE_2))
+        .rounded(len(radius::RADIUS_SM))
+        .text_size(px(12.))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(theme::color(color::INK_MUTED))
+        .cursor_pointer()
+        .hover(|s| s.bg(theme::fill_hover()))
+        .child(chrome::icon("users", 13., theme::color(color::INK_MUTED)))
+        .child(label)
+        .when(unread > 0, |chip| {
+            chip.child(div().text_color(theme::color(color::BLUE)).child(format!("· {unread} unread")))
+        })
+        .tooltip(chrome::tip("The team's members, tasks and messages"))
+        .on_click(cx.listener(move |this: &mut Workspace, _, window, cx| {
+            let title = this.teams.get(&tab).map(|team| team.name.clone()).unwrap_or_default();
+            crate::team_view::open(cx.weak_entity(), tab, title, window, cx);
+        }))
+}
+
 /// The one notification after focusing: what the held ones would have said, and what waits now.
 fn focus_summary(held: &[AgentState], waiting: usize) -> (String, String) {
     let count = |states: &[AgentState]| held.iter().filter(|state| states.contains(state)).count();
@@ -912,6 +950,17 @@ impl Workspace {
             }
         })
         .detach();
+        // Agent teams message each other inside a pane without a hook for every message; their
+        // files are small, so every few seconds keeps the team chips current.
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(5)).await;
+                if this.update(cx, Workspace::refresh_teams).is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
         // Servers start and stop without telling anyone; reading them takes a few hundredths of a
         // second, so every few seconds keeps the chips current.
         cx.spawn(async move |this, cx| {
@@ -980,6 +1029,7 @@ impl Workspace {
             sidebar_tab: SidebarTab::Files,
             claude_sessions: HashMap::new(),
             routine_tabs: HashMap::new(),
+            teams: HashMap::new(),
             clickup: ClickUpState::default(),
             checkouts: HashMap::new(),
             drop_target: None,
@@ -1356,6 +1406,37 @@ impl Workspace {
             self.note(tab, &format!("{} didn't start: {gone} isn't there any more.", routine.name), cx);
         }
         self.after_layout_change(window, cx);
+    }
+
+    /// Reads the team each pane's session leads, off the main thread.
+    fn refresh_teams(&mut self, cx: &mut Context<Self>) {
+        if self.claude_sessions.is_empty() && self.teams.is_empty() {
+            return;
+        }
+        let sessions: Vec<(TabId, String)> = self.claude_sessions.iter().map(|(tab, id)| (*tab, id.clone())).collect();
+        cx.spawn(async move |this, cx| {
+            let teams = cx
+                .background_spawn(async move {
+                    let Some(home) = saturn_core::prompts::claude_home() else { return HashMap::new() };
+                    sessions
+                        .into_iter()
+                        .filter_map(|(tab, session)| Some((tab, teams::for_session(&home, &session)?)))
+                        .collect::<HashMap<_, _>>()
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.teams != teams {
+                    this.teams = teams;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// The team a pane's session leads, as last read.
+    pub fn team(&self, tab: TabId) -> Option<&Team> {
+        self.teams.get(&tab)
     }
 
     /// Resumes a Claude session in a new pane in the folder it ran in.
@@ -2479,6 +2560,9 @@ impl Workspace {
         if self.claude_sessions.get(&tab) != session_before.as_ref() {
             self.save_session(cx);
         }
+        if matches!(call.event(), "SessionStart" | "TaskCreated" | "TaskCompleted" | "TeammateIdle") {
+            self.refresh_teams(cx);
+        }
         match waiting::from_hook(call.event(), &call.input) {
             Some(Some(waiting)) => {
                 self.waits.insert(tab, waiting);
@@ -3311,6 +3395,7 @@ impl Workspace {
             .gap(len(space::SPACE_1))
             .children(self.ticket_of(cell.active, cx).map(|ticket| ticket_chip(cell_id, ticket)))
             .children(self.modes.get(&cell.active).and_then(|mode| mode_chip(cell_id, mode)))
+            .children(self.teams.get(&cell.active).map(|team| team_chip(cell_id, cell.active, team, cx)))
             .children(self.render_spent(cell, cx))
             .children(self.render_turn(cell, cx))
             .children(

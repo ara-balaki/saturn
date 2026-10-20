@@ -39,6 +39,7 @@ pub mod shared_env;
 pub mod shell_env;
 pub mod snapshot;
 pub mod status_line;
+pub mod teams;
 pub mod usage;
 pub mod waiting;
 pub mod worktree_include;

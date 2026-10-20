@@ -109,6 +109,9 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   is open it starts each one on time in a pane named after it, with its prompt, in its folder. Every
   run is listed; one whose time passed while Saturn was closed shows as missed, with Run now, and one
   that ran can be resumed. Kept in `routines.json` beside the settings.
+- **Agent teams**: a pane whose Claude session leads a team (Claude Code's agent teams) shows a
+  Team chip: how many are in it, how far its tasks are, and unread messages. It opens the members,
+  the shared task list with who has each task, and the messages they've sent each other.
 - macOS notifies you while Saturn is in the background, and a small Saturn in the menu bar shows how
   many are waiting. The moon in the title bar (Focus) holds notifications while you concentrate;
   stopping it gives one that says what happened meanwhile.
