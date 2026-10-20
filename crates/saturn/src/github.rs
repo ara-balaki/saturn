@@ -13,6 +13,27 @@ pub fn pull_request(root: &Path, which: &str) -> Option<PullRequest> {
     pull_request::parse(&String::from_utf8_lossy(&output.stdout))
 }
 
+/// What reviewers left open on a pull request: its unresolved threads and requests for changes.
+pub fn review_notes(root: &Path, pr: &PullRequest) -> Option<pull_request::ReviewNotes> {
+    let (owner, name) = pull_request::owner_and_name(&pr.url)?;
+    let output = gh(
+        root,
+        &[
+            "api",
+            "graphql",
+            "-f",
+            &format!("query={}", pull_request::REVIEW_QUERY),
+            "-F",
+            &format!("owner={owner}"),
+            "-F",
+            &format!("name={name}"),
+            "-F",
+            &format!("number={}", pr.number),
+        ],
+    )?;
+    pull_request::parse_review_notes(&String::from_utf8_lossy(&output.stdout))
+}
+
 /// Every branch's pull request in the repository at `root` (the newest 200), in one call.
 pub fn pull_requests_by_branch(root: &Path) -> std::collections::HashMap<String, PullRequest> {
     gh(root, &["pr", "list", "--state", "all", "--limit", "200", "--json", GH_LIST_FIELDS])

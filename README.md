@@ -172,7 +172,9 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
 - **Pull requests**: each pane shows the one it works on, with its state, from the `gh` CLI: an open
   one that names the pane's ticket (`ABC-123`), else the last one linked in it, else its branch's. Its
   checks show beside it (✓ passed, ● running, ✕ failed; hover for which), and when they fail, the
-  wrench hands them to the pane's agent with where to read why.
+  wrench hands them to the pane's agent with where to read why. Open review threads count beside it
+  (💬 2): click to hand them to the agent too, each with its file, line and conversation, and any
+  request for changes.
 - **Status bar**: errors and warnings, the cursor, the language, and the branch with how many
   commits wait to be pushed and pulled.
 

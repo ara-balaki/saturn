@@ -21,7 +21,7 @@ use saturn_core::git;
 use saturn_core::layout::{Cell, CellId, Direction, Layout, RowId, TabId};
 use saturn_core::overlap;
 use saturn_core::ports;
-use saturn_core::pull_request::{self, ChecksState, PrState, PullRequest};
+use saturn_core::pull_request::{self, ChecksState, PrState, PullRequest, ReviewNotes};
 use saturn_core::recipe::{self, Source};
 use saturn_core::servers::{self, Server, Service};
 use saturn_core::session_name::rename_for_prompt;
@@ -311,6 +311,8 @@ pub struct Workspace {
     waits: HashMap<TabId, Waiting>,
     /// Focus mode: notifications held, and what they'd have said (by state) for one at the end.
     focusing: Option<Vec<AgentState>>,
+    /// What reviewers left open on each tab's pull request.
+    review_notes: HashMap<TabId, ReviewNotes>,
     /// Each tab's session's permission mode (`default`, `plan`, `bypassPermissions`…), as its hooks
     /// report it.
     modes: HashMap<TabId, String>,
@@ -368,7 +370,9 @@ enum PrLookup {
 /// The branch each tab is on, and the pull request each works on: an open one that names its
 /// ticket, else the one last linked in it (the agent opened it, or you pasted it), else its branch's,
 /// else a merged or closed one for the ticket. Slow: runs `git` and `gh`.
-fn read_checkouts(tabs: Vec<TabSources>) -> (HashMap<TabId, Checkout>, HashMap<TabId, PullRequest>) {
+fn read_checkouts(
+    tabs: Vec<TabSources>,
+) -> (HashMap<TabId, Checkout>, HashMap<TabId, PullRequest>, HashMap<TabId, ReviewNotes>) {
     let mut checkouts = HashMap::new();
     let mut pull_requests = HashMap::new();
     let mut found: HashMap<PrLookup, Option<PullRequest>> = HashMap::new();
@@ -405,7 +409,18 @@ fn read_checkouts(tabs: Vec<TabSources>) -> (HashMap<TabId, Checkout>, HashMap<T
             pull_requests.insert(sources.tab, pull_request);
         }
     }
-    (checkouts, pull_requests)
+    // What reviewers left open, for open pull requests only, once each.
+    let mut notes_of: HashMap<u64, Option<ReviewNotes>> = HashMap::new();
+    let notes = pull_requests
+        .iter()
+        .filter(|(_, pr)| matches!(pr.state, PrState::Open | PrState::Draft))
+        .filter_map(|(tab, pr)| {
+            let root = checkouts.get(tab).map(|checkout: &Checkout| checkout.root.clone())?;
+            let found = notes_of.entry(pr.number).or_insert_with(|| github::review_notes(&root, pr)).clone()?;
+            (found.count() > 0).then_some((*tab, found))
+        })
+        .collect();
+    (checkouts, pull_requests, notes)
 }
 
 /// The ClickUp connection as the window knows it.
@@ -881,6 +896,7 @@ impl Workspace {
             waits: HashMap::new(),
             focusing: None,
             modes: HashMap::new(),
+            review_notes: HashMap::new(),
             roots,
             root: project.clone(),
             follow_pane: true,
@@ -1438,7 +1454,7 @@ impl Workspace {
             })
             .collect();
         cx.spawn(async move |this, cx| {
-            let (checkouts, pull_requests) = cx.background_spawn(async move { read_checkouts(tabs) }).await;
+            let (checkouts, pull_requests, notes) = cx.background_spawn(async move { read_checkouts(tabs) }).await;
             let _ = this.update(cx, |this, cx| {
                 let stale = this.checkout_refresh == Refresh::RunningStale;
                 this.checkout_refresh = Refresh::Idle;
@@ -1448,6 +1464,7 @@ impl Workspace {
                 // Made-up agents keep their made-up pull requests.
                 if std::env::var_os("SATURN_FAKE_AGENTS").is_none() {
                     this.pull_requests = pull_requests;
+                    this.review_notes = notes;
                 }
                 cx.notify();
                 if stale {
@@ -2070,6 +2087,23 @@ impl Workspace {
                     _ => pull_request::Checks { passed: 4, ..Default::default() },
                 };
                 self.pull_requests.insert(tab, PullRequest { number, title, url, state, checks, head: None });
+                if pull_requests == 2 {
+                    let thread = |path: &str, line, said: &str| pull_request::Thread {
+                        path: path.to_owned(),
+                        line: Some(line),
+                        comments: vec![("reviewer".to_owned(), said.to_owned())],
+                    };
+                    self.review_notes.insert(
+                        tab,
+                        ReviewNotes {
+                            threads: vec![
+                                thread("src/vat.ts", 12, "Round half up, not to even."),
+                                thread("src/vat.test.ts", 4, "Add a case for 0.005."),
+                            ],
+                            changes_requested: Vec::new(),
+                        },
+                    );
+                }
             }
             if let Some(view) = self.terminals.get(&tab) {
                 view.update(cx, |view, _| {
@@ -2697,6 +2731,50 @@ impl Workspace {
         )
     }
 
+    /// When reviewers left things open on the pane's pull request: how many, and a button that hands
+    /// them to its agent.
+    fn render_review_notes(&self, cell: &Cell, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let tab = cell.active;
+        let count = self.review_notes.get(&tab)?.count();
+        let s = if count == 1 { "" } else { "s" };
+        let tip = format!("{count} open review comment{s} on the pull request: send them to this pane's agent.");
+        Some(
+            div()
+                .id(("review-notes", cell.id.key()))
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap(len(space::SPACE_1))
+                .h(len(TAB_HEIGHT))
+                .px(len(space::SPACE_2))
+                .rounded(len(radius::RADIUS_SM))
+                .cursor_pointer()
+                .text_size(px(12.))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme::color(color::INK_MUTED))
+                .hover(|s| s.bg(theme::fill_hover()))
+                .child(chrome::icon("message-square", 13., theme::color(color::INK_MUTED)))
+                .child(count.to_string())
+                .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+                .on_click(cx.listener(move |this, _, window, cx| this.send_review_notes(tab, window, cx)))
+                .into_any_element(),
+        )
+    }
+
+    /// Hands what reviewers left open to the agent working in the pane.
+    fn send_review_notes(&mut self, tab: TabId, window: &mut Window, cx: &mut Context<Self>) {
+        let (Some(pr), Some(notes)) = (self.pull_request_of(tab), self.review_notes.get(&tab)) else { return };
+        let message = pull_request::review_notes_message(pr, notes);
+        let checkout = self
+            .checkouts
+            .get(&tab)
+            .map(|checkout| checkout.root.clone())
+            .or_else(|| self.terminals.get(&tab).map(|view| view.read(cx).cwd.clone()));
+        if let Some(checkout) = checkout {
+            self.send_to_agent(&checkout, &message, window, cx);
+        }
+    }
+
     /// Hands a pane's failed checks to the agent working there.
     fn fix_ci(&mut self, tab: TabId, window: &mut Window, cx: &mut Context<Self>) {
         let Some(pr) = self.pull_request_of(tab) else { return };
@@ -2791,6 +2869,7 @@ impl Workspace {
             .children(self.servers.get(&cell.active).into_iter().flatten().map(|server| server_chip(cell_id, server)))
             .children(self.pull_request_of(cell.active).map(|pr| pull_request_chip(cell_id, pr)))
             .children(self.render_fix_ci(cell, cx))
+            .children(self.render_review_notes(cell, cx))
             .child(header_button("split-right", "columns-2", Placement::Right, cx))
             .child(header_button("split-down", "rows-2", Placement::Down, cx))
             .child(header_button("new-tab", "plus", Placement::Tab, cx))

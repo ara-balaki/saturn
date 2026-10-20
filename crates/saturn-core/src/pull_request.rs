@@ -135,6 +135,116 @@ pub fn failed_checks_message(pr: &PullRequest) -> String {
     out
 }
 
+/// What reviewers asked of a pull request that isn't settled: open review threads on lines, and
+/// reviews that requested changes.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReviewNotes {
+    pub threads: Vec<Thread>,
+    /// Reviews that requested changes, with what they said: (author, text).
+    pub changes_requested: Vec<(String, String)>,
+}
+
+/// An open review thread: the file and line it's on, and its comments, (author, text) in order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Thread {
+    pub path: String,
+    pub line: Option<u64>,
+    pub comments: Vec<(String, String)>,
+}
+
+impl ReviewNotes {
+    /// How many things there are to address.
+    pub fn count(&self) -> usize {
+        self.threads.len() + self.changes_requested.len()
+    }
+}
+
+/// GitHub's GraphQL query for a pull request's reviews and review threads, for `gh api graphql`
+/// with `owner`, `name` and `number`.
+pub const REVIEW_QUERY: &str = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviews(last:30){nodes{state body author{login}}} reviewThreads(first:100){nodes{isResolved isOutdated path line comments(first:30){nodes{body author{login}}}}}}}}";
+
+/// The owner and name of the repository a pull request's address is in.
+pub fn owner_and_name(url: &str) -> Option<(String, String)> {
+    let mut parts = url.split("github.com/").nth(1)?.split('/');
+    Some((parts.next()?.to_owned(), parts.next()?.to_owned()))
+}
+
+/// Reads the answer to `REVIEW_QUERY`: open threads that still apply to the code, and the latest
+/// review of each reviewer when it requested changes.
+pub fn parse_review_notes(json: &str) -> Option<ReviewNotes> {
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    let pr = value.get("data")?.get("repository")?.get("pullRequest")?;
+    let nodes = |key: &str| {
+        pr.get(key)
+            .and_then(|list| list.get("nodes"))
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    };
+    let said = |node: &serde_json::Value| {
+        let author = node.get("author").and_then(|author| author.get("login")).and_then(serde_json::Value::as_str);
+        let body = node.get("body").and_then(serde_json::Value::as_str).unwrap_or_default().trim().to_owned();
+        (author.unwrap_or("someone").to_owned(), body)
+    };
+    let threads = nodes("reviewThreads")
+        .iter()
+        .filter(|thread| {
+            let flag = |key: &str| thread.get(key).and_then(serde_json::Value::as_bool).unwrap_or(false);
+            !flag("isResolved") && !flag("isOutdated")
+        })
+        .map(|thread| Thread {
+            path: thread.get("path").and_then(serde_json::Value::as_str).unwrap_or_default().to_owned(),
+            line: thread.get("line").and_then(serde_json::Value::as_u64),
+            comments: thread
+                .get("comments")
+                .and_then(|comments| comments.get("nodes"))
+                .and_then(serde_json::Value::as_array)
+                .map(|comments| comments.iter().map(said).filter(|(_, body)| !body.is_empty()).collect())
+                .unwrap_or_default(),
+        })
+        .collect();
+    // Each reviewer's latest review decides; an approval after a request for changes settles it.
+    let mut latest: Vec<(String, String, String)> = Vec::new();
+    for review in nodes("reviews") {
+        let state = review.get("state").and_then(serde_json::Value::as_str).unwrap_or_default().to_owned();
+        if state == "COMMENTED" || state == "PENDING" {
+            continue;
+        }
+        let (author, body) = said(&review);
+        latest.retain(|(who, _, _)| *who != author);
+        latest.push((author, state, body));
+    }
+    let changes_requested = latest
+        .into_iter()
+        .filter(|(_, state, _)| state == "CHANGES_REQUESTED")
+        .map(|(author, _, body)| (author, body))
+        .collect();
+    Some(ReviewNotes { threads, changes_requested })
+}
+
+/// What to tell an agent about a pull request's open review: each thread with its file, line and
+/// conversation, then the reviews that requested changes.
+pub fn review_notes_message(pr: &PullRequest, notes: &ReviewNotes) -> String {
+    let mut out =
+        format!("Reviewers left these on pull request #{} ({}). Please address each one:\n", pr.number, pr.title);
+    for (index, thread) in notes.threads.iter().enumerate() {
+        let place = thread.line.map_or_else(|| thread.path.clone(), |line| format!("{}, line {line}", thread.path));
+        let _ = writeln!(out, "\n{}. {place}:", index + 1);
+        for (author, body) in &thread.comments {
+            let _ = writeln!(out, "   {author}: {body}");
+        }
+    }
+    for (author, body) in &notes.changes_requested {
+        let _ = writeln!(
+            out,
+            "\n{author} requested changes{}",
+            if body.is_empty() { ".".to_owned() } else { format!(": {body}") }
+        );
+    }
+    out.push_str("\nWhen a thread is handled, say so in your reply, so I can resolve it.\n");
+    out
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Raw {
@@ -318,6 +428,36 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reads_what_reviewers_left_open() {
+        let json = r#"{"data":{"repository":{"pullRequest":{
+            "reviews":{"nodes":[
+                {"state":"CHANGES_REQUESTED","body":"Needs a test.","author":{"login":"alice"}},
+                {"state":"COMMENTED","body":"Nice","author":{"login":"carol"}},
+                {"state":"CHANGES_REQUESTED","body":"Rename it.","author":{"login":"bob"}},
+                {"state":"APPROVED","body":"","author":{"login":"bob"}}
+            ]},
+            "reviewThreads":{"nodes":[
+                {"isResolved":false,"isOutdated":false,"path":"src/cart.ts","line":12,"comments":{"nodes":[
+                    {"body":"Round to cents here.","author":{"login":"alice"}},{"body":"Agreed","author":{"login":"bob"}}]}},
+                {"isResolved":true,"isOutdated":false,"path":"src/a.ts","line":1,"comments":{"nodes":[{"body":"done","author":{"login":"alice"}}]}},
+                {"isResolved":false,"isOutdated":true,"path":"src/b.ts","line":2,"comments":{"nodes":[{"body":"old","author":{"login":"alice"}}]}}
+            ]}}}}}"#;
+        let notes = super::parse_review_notes(json).expect("notes");
+        assert_eq!(notes.threads.len(), 1);
+        assert_eq!(notes.threads[0].comments[1], ("bob".to_owned(), "Agreed".to_owned()));
+        assert_eq!(notes.changes_requested, [("alice".to_owned(), "Needs a test.".to_owned())], "bob approved after");
+        assert_eq!(notes.count(), 2);
+        let pr = super::parse(
+            r#"{"number": 160, "state": "OPEN", "url": "https://github.com/acme/acme-web/pull/160", "title": "Cart"}"#,
+        )
+        .expect("pr");
+        assert_eq!(super::owner_and_name(&pr.url), Some(("acme".to_owned(), "acme-web".to_owned())));
+        let message = super::review_notes_message(&pr, &notes);
+        assert!(message.contains("1. src/cart.ts, line 12:\n   alice: Round to cents here.\n   bob: Agreed\n"));
+        assert!(message.contains("alice requested changes: Needs a test."));
+    }
+
     #[test]
     fn reads_how_the_checks_went() {
         let json = r#"{"number": 160, "state": "OPEN", "url": "u", "title": "Faster cube loads", "headRefOid": "abc",
