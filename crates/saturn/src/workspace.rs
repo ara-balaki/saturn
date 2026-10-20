@@ -3693,19 +3693,31 @@ impl Workspace {
 }
 
 impl Workspace {
-    /// Copy and paste in the focused terminal.
+    /// Copy and paste: in the focused terminal, unless the keyboard is in a text field (the editor,
+    /// a dialog's input), which gets them instead. ⌘V and ⌘C reach Saturn first, through the Edit
+    /// menu, so without this a token pasted into `.env` would be typed into the agent's pane.
     fn clipboard_actions(element: gpui_kit::Div, cx: &mut Context<Self>) -> gpui_kit::Div {
         element
-            .on_action(cx.listener(|this, _: &Copy, _, cx| {
-                if let Some(view) = this.focused_view() {
+            .on_action(cx.listener(|this, _: &Copy, window, cx| match this.terminal_for_keys(window, cx) {
+                Some(view) => {
                     view.update(cx, |view, cx| view.copy_selection(cx));
                 }
+                None => window.dispatch_action(Box::new(gpui_kit::component::input::Copy), cx),
             }))
-            .on_action(cx.listener(|this, _: &Paste, _, cx| {
-                if let Some(view) = this.focused_view() {
-                    view.update(cx, TerminalView::paste_from_clipboard);
-                }
+            .on_action(cx.listener(|this, _: &Paste, window, cx| match this.terminal_for_keys(window, cx) {
+                Some(view) => view.update(cx, TerminalView::paste_from_clipboard),
+                None => window.dispatch_action(Box::new(gpui_kit::component::input::Paste), cx),
             }))
+    }
+
+    /// The terminal the keyboard is in: the focused pane's, when it has the keyboard or nothing
+    /// else does (the workspace holds it after a dialog closes). `None` when something else has
+    /// it, a text field say.
+    fn terminal_for_keys(&self, window: &Window, cx: &gpui_kit::App) -> Option<Entity<TerminalView>> {
+        let view = self.focused_view()?;
+        let terminal_has_keys = view.read(cx).focus_handle(cx).is_focused(window);
+        let nothing_else = window.focused(cx).is_none_or(|focused| focused == self.focus);
+        (terminal_has_keys || nothing_else).then_some(view)
     }
 
     /// The palettes, and the views the command palette opens by name.
