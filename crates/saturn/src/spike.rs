@@ -14,6 +14,7 @@
 //!   `SATURN_PALETTE_QUERY` typed in it; `SATURN_TICKET_PICKER=1` opens New agent;
 //!   `SATURN_TICKET_FILTERS=1` opens the Tickets panel's filters.
 //! - `SATURN_DROP=path` drops that file on the middle of the window, as Finder would.
+//! - `SATURN_RUN_COMMAND="Start the app"` runs that command from the palette's list, by its name.
 //! - `SATURN_KEYS="e c h tab"` presses those keys in the focused pane, through the window, and prints
 //!   the tab count after each; `SATURN_REBIND=new-tab=cmd-t` moves a shortcut first, as Settings
 //!   would. `SATURN_SETTINGS_SECTION=keyboard` opens Settings on that section.
@@ -140,6 +141,7 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
     }
     rebind_from_env(workspace, cx);
     input_from_env(window, cx);
+    run_command_from_env(window, cx);
     if std::env::var_os("SATURN_TICKET_PICKER").is_some() {
         cx.spawn_in(window, async move |_, cx| {
             cx.background_executor().timer(Duration::from_millis(800)).await;
@@ -182,6 +184,22 @@ fn open_lineage(cx: &mut Context<Workspace>) {
     cx.spawn(async move |workspace, cx| {
         cx.background_executor().timer(Duration::from_millis(1500)).await;
         let _ = workspace.update(cx, Workspace::show_lineage);
+    })
+    .detach();
+}
+
+/// Runs a palette command by its name (`SATURN_RUN_COMMAND`), as picking it would.
+fn run_command_from_env(window: &mut Window, cx: &mut Context<Workspace>) {
+    let Ok(name) = std::env::var("SATURN_RUN_COMMAND") else { return };
+    cx.spawn_in(window, async move |_, cx| {
+        cx.background_executor().timer(Duration::from_millis(1500)).await;
+        let _ = cx.update(|window, cx| {
+            let command = crate::workspace::commands().into_iter().find(|(label, _, _)| *label == name);
+            match command {
+                Some((_, _, action)) => window.dispatch_action(action, cx),
+                None => eprintln!("SATURN_RUN_COMMAND: no command named {name:?}"),
+            }
+        });
     })
     .detach();
 }
