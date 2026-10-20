@@ -73,6 +73,22 @@ pub fn parse(json: &str) -> Option<PullRequest> {
     serde_json::from_str::<Raw>(json).ok()?.into_pull_request()
 }
 
+/// The pull request of each branch from `gh pr list --state all --json …`: an open one before a
+/// merged or closed one, the newest first.
+pub fn by_branch(json: &str) -> std::collections::HashMap<String, PullRequest> {
+    let mut found: Vec<(String, PullRequest)> = serde_json::from_str::<Vec<Raw>>(json)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|raw| {
+            let branch = raw.head_ref_name.clone();
+            raw.into_pull_request().map(|pr| (branch, pr))
+        })
+        .collect();
+    // Best last, so it's the one the map keeps.
+    found.sort_by_key(|(_, pr)| (!matches!(pr.state, PrState::Merged | PrState::Closed), pr.number));
+    found.into_iter().collect()
+}
+
 /// The pull request for a ticket from `gh pr list --search <ticket> --json …`: one whose title,
 /// branch or description names it (GitHub's search also matches the ticket's parts on their own),
 /// an open one before a merged or closed one, the newest first.
@@ -194,6 +210,18 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn finds_each_branch_its_best_pull_request() {
+        let json = r#"[
+            {"number": 3, "state": "CLOSED", "url": "u3", "headRefName": "abc-1"},
+            {"number": 7, "state": "OPEN", "isDraft": true, "url": "u7", "headRefName": "abc-1"},
+            {"number": 5, "state": "MERGED", "url": "u5", "headRefName": "abc-2"}
+        ]"#;
+        let found = super::by_branch(json);
+        assert_eq!(found["abc-1"].number, 7);
+        assert_eq!(found["abc-2"].state, super::PrState::Merged);
+    }
+
     use super::*;
 
     fn view(state: &str, draft: bool) -> String {

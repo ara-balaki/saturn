@@ -13,6 +13,13 @@ pub fn pull_request(root: &Path, which: &str) -> Option<PullRequest> {
     pull_request::parse(&String::from_utf8_lossy(&output.stdout))
 }
 
+/// Every branch's pull request in the repository at `root` (the newest 200), in one call.
+pub fn pull_requests_by_branch(root: &Path) -> std::collections::HashMap<String, PullRequest> {
+    gh(root, &["pr", "list", "--state", "all", "--limit", "200", "--json", GH_LIST_FIELDS])
+        .map(|output| pull_request::by_branch(&String::from_utf8_lossy(&output.stdout)))
+        .unwrap_or_default()
+}
+
 /// The pull request about a ticket in the repository at `root`: one that names it, open first.
 pub fn pull_request_for_ticket(root: &Path, ticket: &str) -> Option<PullRequest> {
     let output =
