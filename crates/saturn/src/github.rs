@@ -52,7 +52,7 @@ pub fn pull_requests_by_branch(root: &Path) -> std::collections::HashMap<String,
 }
 
 /// The pull request about a ticket in the repository at `root`: one that names it, open first.
-pub fn pull_request_for_ticket(root: &Path, ticket: &str) -> Option<PullRequest> {
+pub fn pull_request_for_ticket(root: &Path, ticket: &str) -> Option<(PullRequest, bool)> {
     let output =
         gh(root, &["pr", "list", "--state", "all", "--limit", "20", "--search", ticket, "--json", GH_LIST_FIELDS])?;
     pull_request::for_ticket(&String::from_utf8_lossy(&output.stdout), ticket)

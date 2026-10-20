@@ -170,7 +170,8 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
 - **Impact**: every file that depends on what changed, nearest first. It follows imports in
   JavaScript and TypeScript (with `tsconfig` aliases and a monorepo's packages), Rust and Python.
 - **Pull requests**: each pane shows the one it works on, with its state, from the `gh` CLI: an open
-  one that names the pane's ticket (`ABC-123`), else the last one linked in it, else its branch's. Its
+  one whose title or branch names the pane's ticket (`ABC-123`), else the last one linked in it, else
+  its branch's, else one that only mentions the ticket (a subtask's). Its
   checks show beside it (✓ passed, ● running, ✕ failed; hover for which), and when they fail, the
   wrench hands them to the pane's agent with where to read why. Open review threads count beside it
   (💬 2): click to hand them to the agent too, each with its file, line and conversation, and any

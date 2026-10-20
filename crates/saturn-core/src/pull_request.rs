@@ -363,16 +363,23 @@ pub fn by_branch(json: &str) -> std::collections::HashMap<String, PullRequest> {
     found.into_iter().collect()
 }
 
-/// The pull request for a ticket from `gh pr list --search <ticket> --json …`: one whose title,
-/// branch or description names it (GitHub's search also matches the ticket's parts on their own),
-/// an open one before a merged or closed one, the newest first.
-pub fn for_ticket(json: &str, ticket: &str) -> Option<PullRequest> {
+/// The pull request for a ticket from `gh pr list --search <ticket> --json …`, and whether it's
+/// truly the ticket's. One whose title or branch names it is (`true`); one whose description only
+/// mentions it (a subtask's "part of ABC-12") is a guess (`false`), so it comes after those. GitHub's
+/// search also matches the ticket's parts on their own, so only whole mentions count. Open before
+/// merged or closed, the newest first.
+pub fn for_ticket(json: &str, ticket: &str) -> Option<(PullRequest, bool)> {
     let found: Vec<Raw> = serde_json::from_str(json).ok()?;
     found
         .into_iter()
-        .filter(|raw| [&raw.title, &raw.head_ref_name, &raw.body].iter().any(|text| names_ticket(text, ticket)))
-        .filter_map(Raw::into_pull_request)
-        .min_by_key(|pr| (matches!(pr.state, PrState::Merged | PrState::Closed), std::cmp::Reverse(pr.number)))
+        .filter_map(|raw| {
+            let own = names_ticket(&raw.title, ticket) || names_ticket(&raw.head_ref_name, ticket);
+            let mentioned = own || names_ticket(&raw.body, ticket);
+            mentioned.then_some(raw).and_then(Raw::into_pull_request).map(|pr| (pr, own))
+        })
+        .min_by_key(|(pr, own)| {
+            (!own, matches!(pr.state, PrState::Merged | PrState::Closed), std::cmp::Reverse(pr.number))
+        })
 }
 
 /// Whether `text` names `ticket` as a whole word, in any case: `ABC-12` is in "abc-12-fix" and
@@ -656,9 +663,20 @@ mod tests {
             {"number":11,"state":"OPEN","isDraft":false,"url":"u11","title":"Dark mode","headRefName":"abc-12-dark","body":""},
             {"number":12,"state":"OPEN","isDraft":false,"url":"u12","title":"ABC-123 is another ticket","headRefName":"y","body":""}
         ]"#;
-        assert_eq!(for_ticket(list, "ABC-12").map(|pr| pr.number), Some(11));
+        assert_eq!(for_ticket(list, "ABC-12").map(|(pr, own)| (pr.number, own)), Some((11, true)));
         assert_eq!(for_ticket(list, "ABC-99"), None);
         assert_eq!(for_ticket("[]", "ABC-12"), None);
+    }
+
+    #[test]
+    fn a_subtask_mentioning_the_ticket_is_not_its_pull_request() {
+        let list = r#"[
+            {"number":163,"state":"OPEN","isDraft":true,"url":"u163","title":"Rewrite comments","headRefName":"feat/ABC-276-comments","body":"Part of ABC-274."},
+            {"number":162,"state":"OPEN","isDraft":true,"url":"u162","title":"ABC-274: writing standard","headRefName":"feat/ABC-274-standard","body":""}
+        ]"#;
+        assert_eq!(for_ticket(list, "ABC-274").map(|(pr, own)| (pr.number, own)), Some((162, true)));
+        let only_mentioned = r#"[{"number":163,"state":"OPEN","isDraft":false,"url":"u","title":"Comments","headRefName":"x","body":"Part of ABC-274."}]"#;
+        assert_eq!(for_ticket(only_mentioned, "ABC-274").map(|(pr, own)| (pr.number, own)), Some((163, false)));
     }
 
     #[test]
