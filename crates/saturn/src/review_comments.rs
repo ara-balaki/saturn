@@ -143,13 +143,13 @@ impl ReviewComments {
     }
 
     /// Whether this holds the comments for `scope`'s changes in `repo`.
-    pub fn is_for(&self, repo: &std::path::Path, scope: Scope) -> bool {
-        self.repo == repo && self.scope == scope
+    pub fn is_for(&self, repo: &std::path::Path, scope: &Scope) -> bool {
+        self.repo == repo && &self.scope == scope
     }
 
     /// Picks the change that `position`'s line is in, reading the diff again so it's current.
     pub fn pick(&mut self, position: &DiffLinePosition, cx: &mut Context<Self>) {
-        let (repo, scope) = (self.repo.clone(), self.scope);
+        let (repo, scope) = (self.repo.clone(), self.scope.clone());
         let (path, line, removed) =
             (position.path().to_string(), position.line(), position.side() == DiffSide::Original);
         cx.spawn(async move |this, cx| {

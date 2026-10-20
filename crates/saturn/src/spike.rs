@@ -6,7 +6,8 @@
 //! - `SATURN_OPEN_SETTINGS=1` opens the Settings dialog on start; `SATURN_OPEN_FILE=path` opens a file
 //!   in the editor (`SATURN_SAVE=1` saves it after a moment); `SATURN_REVIEW=1` shows the Changes tab and reviews the first change
 //!   (`SATURN_REVIEW_COMMENT="12:text"` comments on its line 12; `SATURN_REVIEW_SEND=1` sends it;
-//!   `SATURN_REVIEW_PICK=12` clicks line 12, `SATURN_REVIEW_ACT=stage|revert|undo` presses that).
+//!   `SATURN_REVIEW_PICK=12` clicks line 12, `SATURN_REVIEW_ACT=stage|revert|undo` presses that);
+//!   `SATURN_COMPARE=main` reviews everything that differs from `main`.
 //! - `SATURN_MORE_REPOS=a:b` adds more repos to the window, as ⌘O would; `SATURN_FAKE_AGENTS=1`
 //!   gives the panes made-up agents and pull requests (`SATURN_FAKE_STATES=working,needs-you,your-turn`
 //!   sets their states in order); `SATURN_HISTORY=1` opens the History tab, `SATURN_IMPACT=1` the Impact tab (focused on `SATURN_IMPACT_FOCUS`), `SATURN_SCHEMA=1`
@@ -192,6 +193,12 @@ fn open_lineage(cx: &mut Context<Workspace>) {
 /// Reviews the first change (`SATURN_REVIEW`), and comments on it and sends the comment to the agent
 /// (`SATURN_REVIEW_COMMENT`, `SATURN_REVIEW_SEND`).
 fn review_from_env(window: &mut Window, cx: &mut Context<Workspace>) {
+    if let Ok(target) = std::env::var("SATURN_COMPARE") {
+        cx.defer_in(window, move |workspace, _, cx| {
+            let repo = workspace.root().to_owned();
+            workspace.review_against(&repo, target, cx);
+        });
+    }
     if std::env::var_os("SATURN_REVIEW").is_none() {
         return;
     }

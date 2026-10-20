@@ -88,6 +88,7 @@ actions!(
         StartApp,
         CreateRecipe,
         ShowWorktrees,
+        CompareWith,
     ]
 );
 
@@ -135,7 +136,8 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("Set up this worktree", "wrench", Box::new(SetUpWorktree)),
         ("Start the app", "play", Box::new(StartApp)),
         ("Create worktree recipe", "file-code", Box::new(CreateRecipe)),
-        ("Worktrees", "git-branch", Box::new(ShowWorktrees)),
+        ("Worktrees", "folder-git", Box::new(ShowWorktrees)),
+        ("Compare with a branch or commit", "git-compare", Box::new(CompareWith)),
         ("Database diagram", "database", Box::new(ShowSchema)),
         ("dbt lineage", "workflow", Box::new(ShowLineage)),
         ("Problems", "circle-x", Box::new(ShowProblems)),
@@ -779,7 +781,7 @@ impl Workspace {
                 }
             })
         };
-        let changes_events = Self::follow_changes(&changes, cx);
+        let changes_events = Self::follow_changes(&changes, window, cx);
         // Whether there's a schema to draw is a walk of the folder: off the main thread.
         let folder = root.to_owned();
         cx.spawn(async move |this, cx| {
@@ -844,16 +846,16 @@ impl Workspace {
     }
 
     /// Reviewing a change opens it in the editor panel; new changes refresh an open review.
-    fn follow_changes(changes: &Entity<ChangesView>, cx: &mut Context<Self>) -> Subscription {
-        cx.subscribe(changes, |this, changes, event: &ChangesEvent, cx| match event {
+    fn follow_changes(changes: &Entity<ChangesView>, window: &mut Window, cx: &mut Context<Self>) -> Subscription {
+        cx.subscribe_in(changes, window, |this, changes, event: &ChangesEvent, window, cx| match event {
             ChangesEvent::Open { files, scope, path } => {
                 let repo = changes.read(cx).repo().to_owned();
-                this.editor.update(cx, |editor, cx| editor.review(files.clone(), *scope, path, &repo, cx));
+                this.editor.update(cx, |editor, cx| editor.review(files.clone(), scope, path, &repo, cx));
                 this.panels.editor = true;
                 cx.notify();
             }
             ChangesEvent::Updated { files, scope } => {
-                this.editor.update(cx, |editor, cx| editor.refresh_review(files.clone(), *scope, cx));
+                this.editor.update(cx, |editor, cx| editor.refresh_review(files.clone(), scope.clone(), cx));
             }
             ChangesEvent::History { repo } => {
                 this.editor.update(cx, |editor, cx| editor.show_history(repo, cx));
@@ -863,7 +865,31 @@ impl Workspace {
             ChangesEvent::Impact { repo } => {
                 this.show_impact(repo, cx);
             }
+            ChangesEvent::Compare { repo } => {
+                crate::palette::compare(cx.weak_entity(), repo.clone(), window, cx);
+            }
         })
+    }
+
+    /// Reviews everything in `repo` that differs from `target` (a branch, tag or commit).
+    pub fn review_against(&mut self, repo: &Path, target: String, cx: &mut Context<Self>) {
+        // The panel opens at once, so the review is seen arriving.
+        self.panels.editor = true;
+        cx.notify();
+        let (repo, scope) = (repo.to_owned(), git::Scope::Against(target));
+        cx.spawn(async move |this, cx| {
+            let files = cx
+                .background_spawn({
+                    let (repo, scope) = (repo.clone(), scope.clone());
+                    async move { gpui_kit::component::diff::DiffFile::parse(&git::patch(&repo, scope)).unwrap_or_default() }
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                let path = files.first().map(|file| file.path().to_string()).unwrap_or_default();
+                this.editor.update(cx, |editor, cx| editor.review(files, &scope, &path, &repo, cx));
+            });
+        })
+        .detach();
     }
 
     pub fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -2760,6 +2786,9 @@ impl Workspace {
             .on_action(cx.listener(|this, _: &StartApp, window, cx| this.start_app(window, cx)))
             .on_action(cx.listener(|this, _: &CreateRecipe, window, cx| this.create_recipe(window, cx)))
             .on_action(cx.listener(|this, _: &ShowWorktrees, window, cx| this.show_worktrees(window, cx)))
+            .on_action(cx.listener(|this, _: &CompareWith, window, cx| {
+                crate::palette::compare(cx.weak_entity(), this.root.clone(), window, cx);
+            }))
             .on_action(cx.listener(|this, _: &ShowLineage, _, cx| this.show_lineage(cx)))
             .on_action(cx.listener(|this, _: &ShowProblems, _, cx| this.show_problems(cx)))
     }

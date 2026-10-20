@@ -794,22 +794,24 @@ impl EditorView {
         )
     }
 
-    /// Shows `files` in the Changes tab, scrolled to `path`.
-    /// Shows the changes in `repo` as a review, which takes comments for the agent working there.
-    pub fn review(&mut self, files: Vec<DiffFile>, scope: Scope, path: &str, repo: &Path, cx: &mut Context<Self>) {
+    /// Shows the changes in `repo` as a review, scrolled to `path`, which takes comments for the agent
+    /// working there.
+    pub fn review(&mut self, files: Vec<DiffFile>, scope: &Scope, path: &str, repo: &Path, cx: &mut Context<Self>) {
         let label = match scope {
-            Scope::Uncommitted => "Uncommitted changes",
-            Scope::Branch => "Branch changes",
+            Scope::Uncommitted => "Uncommitted changes".to_owned(),
+            Scope::Branch => "Branch changes".to_owned(),
+            Scope::Against(target) => format!("Changes since {target}"),
         };
-        self.show_review(files, Some(scope), label.to_owned(), path, cx);
+        self.show_review(files, Some(scope.clone()), label, path, cx);
         let Some(review) = &mut self.review else { return };
         let same = review.comments.as_ref().is_some_and(|(comments, _)| comments.read(cx).is_for(repo, scope));
         if !same {
-            let comments = cx.new(|_| ReviewComments::new(repo.to_owned(), scope));
+            let comments = cx.new(|_| ReviewComments::new(repo.to_owned(), scope.clone()));
             let sent = cx.subscribe(&comments, |_, _, event: &SendToAgent, cx| {
                 cx.emit(SendToAgent { repo: event.repo.clone(), message: event.message.clone() });
             });
-            let touched = cx.subscribe(&comments, |_, _, event: &Touched, cx| {
+            let touched = cx.subscribe(&comments, |this, _, event: &Touched, cx| {
+                this.reread_review(&event.repo, cx);
                 cx.emit(Touched { repo: event.repo.clone() });
             });
             review.comments = Some((comments, [sent, touched]));
@@ -928,6 +930,22 @@ impl EditorView {
     }
 
     /// Keeps an open review current while agents keep working.
+    /// Reads the review's changes again, after Saturn itself changed files under it.
+    fn reread_review(&mut self, repo: &Path, cx: &mut Context<Self>) {
+        let Some(scope) = self.review.as_ref().and_then(|review| review.scope.clone()) else { return };
+        let repo = repo.to_owned();
+        cx.spawn(async move |this, cx| {
+            let files = cx
+                .background_spawn({
+                    let scope = scope.clone();
+                    async move { DiffFile::parse(&git::patch(&repo, scope)).unwrap_or_default() }
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| this.refresh_review(files, scope, cx));
+        })
+        .detach();
+    }
+
     pub fn refresh_review(&mut self, files: Vec<DiffFile>, scope: Scope, cx: &mut Context<Self>) {
         if let Some(review) = self.review.as_ref().filter(|review| review.scope == Some(scope)) {
             review.state.update(cx, |state, cx| state.set_files(files, cx));

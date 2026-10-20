@@ -132,7 +132,10 @@ impl Palette {
     /// Lists the recent picks while nothing is typed, else what matches.
     fn filter(&mut self, cx: &mut Context<Self>) {
         let query = self.query(cx);
-        self.shown = if query.is_empty() {
+        self.shown = if query.is_empty() && self.kind == "compare" {
+            // Branches and commits are few and in an order that matters: all of them, newest first.
+            (0..self.entries.len().min(SHOWN)).collect()
+        } else if query.is_empty() {
             recents(self.kind)
                 .iter()
                 .filter_map(|text| self.entries.iter().position(|entry| entry.text == *text))
@@ -315,6 +318,48 @@ pub fn go_to_file(workspace: WeakEntity<Workspace>, root: PathBuf, window: &mut 
     })
     .detach();
     open("Go to file", palette, window, cx);
+}
+
+/// What to compare `repo`'s work with: its branches, tags and recent commits. Picking one reviews
+/// everything that differs from it.
+pub fn compare(workspace: WeakEntity<Workspace>, repo: PathBuf, window: &mut Window, cx: &mut App) {
+    let targets: Rc<std::cell::RefCell<Vec<saturn_core::git::Target>>> = Rc::default();
+    let pick: Pick = {
+        let (targets, repo) = (targets.clone(), repo.clone());
+        Rc::new(move |index, _, cx| {
+            let Some(target) = targets.borrow().get(index).cloned() else { return };
+            let _ = workspace.update(cx, |workspace, cx| workspace.review_against(&repo, target.name, cx));
+        })
+    };
+    let words = Words {
+        hint: "Type part of a branch, tag or commit.",
+        loading: "Reading the branches…",
+        none: "Nothing matches.",
+    };
+    let palette =
+        cx.new(|cx| Palette::new("compare", "Search branches, tags and commits", words, None, pick, window, cx));
+    let weak = palette.downgrade();
+    cx.spawn(async move |cx| {
+        let found = cx.background_spawn(async move { saturn_core::git::compare_targets(&repo) }).await;
+        let entries = found
+            .iter()
+            .map(|target| Entry {
+                text: format!("{} {}", target.name, target.detail),
+                label: target.name.clone(),
+                detail: Some(target.detail.clone()),
+                icon: match target.kind {
+                    saturn_core::git::TargetKind::Branch => "git-branch",
+                    saturn_core::git::TargetKind::Tag => "tag",
+                    saturn_core::git::TargetKind::Commit => "git-commit-horizontal",
+                },
+                action: None,
+            })
+            .collect();
+        *targets.borrow_mut() = found;
+        let _ = weak.update(cx, |palette, cx| palette.set_entries(entries, cx));
+    })
+    .detach();
+    open("Compare with", palette, window, cx);
 }
 
 fn file_entry(file: &Path) -> Entry {

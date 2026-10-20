@@ -145,6 +145,9 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   Claude on them. They only ever go to a pane running an agent, never to a bare shell.
 - **One change at a time**: click a line in the review to pick its change, then stage just that one,
   or revert it, leaving the file's other changes as they are. A revert can be undone.
+- **Compare with anything**: "Compare with a branch or commit" (⌘⇧P, or the button under Changes)
+  lists the branches, tags and recent commits; pick one to review everything that differs from it,
+  uncommitted work too. Comments and single changes work there as well.
 - **What was asked**: each file in the review says what you asked Claude Code that changed it (the
   latest prompt; hover for the ones before), read from its session transcripts on your Mac. Edits
   made through the shell can't be traced, so those files say nothing.

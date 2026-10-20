@@ -149,7 +149,7 @@ fn change_index(repo: &Path, command: &[&str], paths: &[String]) -> Result<(), S
 }
 
 /// What a review covers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Scope {
     /// Everything not committed yet: staged, unstaged and new files, against `HEAD`.
     #[default]
@@ -157,6 +157,8 @@ pub enum Scope {
     /// Everything the branch changed since it left the default branch, committed or not: what a
     /// pull request would show, plus work in progress.
     Branch,
+    /// Everything that differs from a branch, tag or commit, uncommitted work too.
+    Against(String),
 }
 
 /// The unified diff for `scope` in `repo`, new files included. Empty outside a repository.
@@ -164,6 +166,7 @@ pub fn patch(repo: &Path, scope: Scope) -> String {
     let base = match scope {
         Scope::Uncommitted => "HEAD".to_owned(),
         Scope::Branch => merge_base(repo).unwrap_or_else(|| "HEAD".to_owned()),
+        Scope::Against(target) => target,
     };
     let mut patch = run(repo, &["diff", "--no-color", "--no-ext-diff", "-M", &base]).unwrap_or_default();
     // `git diff` leaves out files git does not track yet; show them as added in full.
@@ -175,6 +178,60 @@ pub fn patch(repo: &Path, scope: Scope) -> String {
         }
     }
     patch
+}
+
+/// Something to compare with: a branch, a tag or a recent commit, with how old it is and what it says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Target {
+    /// What git calls it: `main`, `origin/main`, `v1.2.0`, or a short commit hash.
+    pub name: String,
+    pub detail: String,
+    pub kind: TargetKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetKind {
+    Branch,
+    Tag,
+    Commit,
+}
+
+/// What `repo` can be compared with: its branches (local and remote) and tags, newest first, then the
+/// last 30 commits.
+pub fn compare_targets(repo: &Path) -> Vec<Target> {
+    let refs = run(
+        repo,
+        &[
+            "for-each-ref",
+            "--sort=-committerdate",
+            "--format=%(refname)%09%(refname:short)%09%(committerdate:relative)%09%(subject)",
+            "refs/heads",
+            "refs/remotes",
+            "refs/tags",
+        ],
+    )
+    .unwrap_or_default();
+    let mut targets: Vec<Target> = refs
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.splitn(4, '\t');
+            let (full, name, when, subject) =
+                (fields.next()?, fields.next()?, fields.next()?, fields.next().unwrap_or(""));
+            // `origin/HEAD` only points at another branch.
+            if full.ends_with("/HEAD") {
+                return None;
+            }
+            let kind = if full.starts_with("refs/tags/") { TargetKind::Tag } else { TargetKind::Branch };
+            Some(Target { name: name.to_owned(), detail: format!("{when} · {subject}"), kind })
+        })
+        .collect();
+    let commits = run(repo, &["log", "-30", "--format=%h%x09%cr%x09%s"]).unwrap_or_default();
+    targets.extend(commits.lines().filter_map(|line| {
+        let mut fields = line.splitn(3, '\t');
+        let (hash, when, subject) = (fields.next()?, fields.next()?, fields.next().unwrap_or(""));
+        Some(Target { name: hash.to_owned(), detail: format!("{when} · {subject}"), kind: TargetKind::Commit })
+    }));
+    targets
 }
 
 /// What one commit changed: against its first parent (so a merge shows what it brought in), or
@@ -394,6 +451,22 @@ mod tests {
         assert_eq!(branch_for("  Fix the login page! "), "fix-the-login-page");
         assert_eq!(branch_for("feat/new  thing"), "feat-new-thing");
         assert_eq!(branch_for("???"), "");
+    }
+
+    #[test]
+    fn lists_branches_tags_and_commits_to_compare_with() {
+        let dir = repo();
+        let sh = |args: &[&str]| assert!(command(dir.path()).args(args).status().is_ok_and(|status| status.success()));
+        sh(&["tag", "v1.0.0", "main"]);
+        let targets = compare_targets(dir.path());
+        let named = |name: &str| targets.iter().find(|target| target.name == name).map(|target| target.kind);
+        assert_eq!(named("main"), Some(TargetKind::Branch));
+        assert_eq!(named("abc-236"), Some(TargetKind::Branch));
+        assert_eq!(named("v1.0.0"), Some(TargetKind::Tag));
+        assert_eq!(targets.iter().filter(|target| target.kind == TargetKind::Commit).count(), 2);
+        assert!(targets.iter().any(|target| target.detail.ends_with("· on the branch")));
+        let against = patch(dir.path(), Scope::Against("main".to_owned()));
+        assert!(against.contains("+export const f = 2;") && against.contains("+PORT=4000"), "{against}");
     }
 
     #[test]

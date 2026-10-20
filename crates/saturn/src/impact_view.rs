@@ -59,7 +59,7 @@ impl ImpactView {
 
     /// Reads the imports and the changes again, off the main thread.
     pub fn reload(&mut self, cx: &mut Context<Self>) {
-        let (repo, scope) = (self.repo.clone(), self.scope);
+        let (repo, scope) = (self.repo.clone(), self.scope.clone());
         let load = move || {
             let graph = imports::build(&repo);
             let changed = changed_files(&repo, scope);

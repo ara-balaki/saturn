@@ -31,6 +31,8 @@ pub enum ChangesEvent {
     History { repo: PathBuf },
     /// Show what the changes reach.
     Impact { repo: PathBuf },
+    /// Pick a branch, tag or commit to compare with.
+    Compare { repo: PathBuf },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -349,6 +351,11 @@ impl ChangesView {
             .child(
                 chrome::button("branch-diff", "Branch diff", None, false)
                     .on_click(cx.listener(|this, _, _, cx| this.review_branch(cx))),
+            )
+            .child(
+                chrome::icon_button("compare", "git-compare", true)
+                    .tooltip(chrome::tip("Compare with a branch, tag or commit"))
+                    .on_click(cx.listener(|this, _, _, cx| cx.emit(ChangesEvent::Compare { repo: this.repo.clone() }))),
             )
     }
 }
