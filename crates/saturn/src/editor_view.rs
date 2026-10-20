@@ -25,6 +25,7 @@ use crate::history_view::{HistoryEvent, HistoryView};
 use crate::impact_view::ImpactView;
 use crate::lineage_view::LineageView;
 use crate::lsp::{self, Provider, Servers, Status};
+use crate::preview_view::PreviewView;
 use crate::problems_view::{self, ProblemsView};
 use crate::references_view::ReferencesView;
 use crate::review_comments::{ReviewComments, SendToAgent, Touched};
@@ -118,6 +119,7 @@ enum Front {
     Impact,
     References,
     Problems,
+    Preview,
 }
 
 #[derive(Default)]
@@ -134,6 +136,8 @@ pub struct EditorView {
     history_events: Option<Subscription>,
     /// The database diagram, once opened.
     schema: Option<Entity<SchemaView>>,
+    /// The running app's page, once opened.
+    preview: Option<Entity<PreviewView>>,
     /// The dbt project's lineage graph, once opened.
     lineage: Option<Entity<LineageView>>,
     /// What the changes reach, once opened.
@@ -855,6 +859,59 @@ impl EditorView {
     }
 
     /// Opens the Database tab for `repo`, reading its schema afresh.
+    /// Opens the Preview tab on a pane's servers, or points the open one at them.
+    pub fn show_preview(
+        &mut self,
+        servers: Vec<saturn_core::servers::Server>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match &self.preview {
+            Some(preview) => preview.update(cx, |preview, cx| preview.set_servers(servers, cx)),
+            None => self.preview = Some(cx.new(|cx| PreviewView::new(servers, window, cx))),
+        }
+        self.front = Front::Preview;
+        cx.notify();
+    }
+
+    fn render_preview_tab(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.preview.as_ref()?;
+        let in_front = self.front == Front::Preview;
+        Some(
+            chrome::track_item("preview-tab", in_front)
+                .group("preview-tab")
+                .pl(len(space::SPACE_3))
+                .pr(len(space::SPACE_1))
+                .child(chrome::icon("globe", 13., theme::color(color::INK_MUTED)))
+                .child("Preview")
+                .child(
+                    div()
+                        .id("preview-close")
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .size(px(20.))
+                        .rounded(len(radius::RADIUS_XS))
+                        .hover(|s| s.bg(theme::fill_control()))
+                        .child(chrome::icon("x", 11., theme::color(color::INK_MUTED)))
+                        .tooltip(chrome::tip("Close"))
+                        .when(!in_front, |slot| slot.invisible().group_hover("preview-tab", gpui_kit::Styled::visible))
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            // Closing it stops it drawing the page again.
+                            this.preview = None;
+                            this.front = if this.review.is_some() { Front::Review } else { Front::File };
+                            cx.notify();
+                        })),
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.front = Front::Preview;
+                    cx.notify();
+                }))
+                .into_any_element(),
+        )
+    }
+
     pub fn show_schema(&mut self, repo: &Path, cx: &mut Context<Self>) {
         match &self.schema {
             Some(schema) if schema.read(cx).repo() == repo => schema.update(cx, SchemaView::reload),
@@ -1453,6 +1510,31 @@ fn render_review(review: &Review, cx: &mut Context<EditorView>) -> AnyElement {
     div().flex().flex_col().size_full().children(bar).child(div().flex_1().min_h_0().child(diff)).into_any_element()
 }
 
+/// A view of the panel, when it's open.
+fn shown<V: Render>(view: Option<&Entity<V>>) -> Option<AnyElement> {
+    view.cloned().map(gpui_kit::IntoElement::into_any_element)
+}
+
+impl EditorView {
+    /// What the tab in front shows: a file, a review, a diagram, the history, the preview…
+    fn render_front(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        match self.front {
+            Front::Review => self.review.as_ref().map(|review| render_review(review, cx)),
+            Front::History => shown(self.history.as_ref()),
+            Front::Schema => shown(self.schema.as_ref()),
+            Front::Preview => shown(self.preview.as_ref()),
+            Front::Lineage => shown(self.lineage.as_ref()),
+            Front::Impact => shown(self.impact.as_ref()),
+            Front::References => shown(self.references.as_ref()),
+            Front::Problems => shown(self.problems_view.as_ref()),
+            Front::File => self
+                .files
+                .get(self.active)
+                .map(|file| Editor::new(&file.state).appearance(false).bordered(false).size_full().into_any_element()),
+        }
+    }
+}
+
 impl Render for EditorView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let wanted = cx.try_global::<crate::settings::EditorSettings>().cloned().unwrap_or_default();
@@ -1462,25 +1544,7 @@ impl Render for EditorView {
             }
             self.applied = Some(wanted);
         }
-        let body: Option<AnyElement> = if self.front == Front::Review {
-            self.review.as_ref().map(|review| render_review(review, cx))
-        } else if self.front == Front::History {
-            self.history.clone().map(gpui_kit::IntoElement::into_any_element)
-        } else if self.front == Front::Schema {
-            self.schema.clone().map(gpui_kit::IntoElement::into_any_element)
-        } else if self.front == Front::Lineage {
-            self.lineage.clone().map(gpui_kit::IntoElement::into_any_element)
-        } else if self.front == Front::Impact {
-            self.impact.clone().map(gpui_kit::IntoElement::into_any_element)
-        } else if self.front == Front::References {
-            self.references.clone().map(gpui_kit::IntoElement::into_any_element)
-        } else if self.front == Front::Problems {
-            self.problems_view.clone().map(gpui_kit::IntoElement::into_any_element)
-        } else {
-            self.files
-                .get(self.active)
-                .map(|file| Editor::new(&file.state).appearance(false).bordered(false).size_full().into_any_element())
-        };
+        let body = self.render_front(cx);
         let Some(body) = body else {
             return chrome::card()
                 .child(
@@ -1516,6 +1580,7 @@ impl Render for EditorView {
                     .items_center()
                     .gap(px(2.))
                     .h(len(chrome::CONTROL_HEIGHT))
+                    .children(self.render_preview_tab(cx))
                     .children(self.render_schema_tab(cx))
                     .children(self.render_lineage_tab(cx))
                     .children(self.render_history_tab(cx))

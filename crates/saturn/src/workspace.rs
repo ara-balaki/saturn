@@ -100,6 +100,7 @@ actions!(
         RunCheck,
         EditPrBody,
         ShowPictures,
+        ShowPreview,
     ]
 );
 
@@ -154,6 +155,7 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("Run a check", "play", Box::new(RunCheck)),
         ("Edit the pull request's description", "git-pull-request", Box::new(EditPrBody)),
         ("Pictures of the app", "camera", Box::new(ShowPictures)),
+        ("Preview the app", "globe", Box::new(ShowPreview)),
         ("Database diagram", "database", Box::new(ShowSchema)),
         ("dbt lineage", "workflow", Box::new(ShowLineage)),
         ("Problems", "circle-x", Box::new(ShowProblems)),
@@ -2822,6 +2824,31 @@ impl Workspace {
         .detach();
     }
 
+    /// The focused pane's servers, else those of another pane in its checkout.
+    fn focused_servers(&self, cx: &gpui_kit::App) -> Vec<Server> {
+        let checkout = self.focused_checkout(cx);
+        let tab = self.layout.focused_tab();
+        tab.and_then(|tab| self.servers.get(&tab).cloned())
+            .filter(|servers| !servers.is_empty())
+            .or_else(|| {
+                self.servers
+                    .iter()
+                    .find(|(tab, servers)| {
+                        !servers.is_empty() && self.checkouts.get(tab).is_some_and(|other| other.root == checkout)
+                    })
+                    .map(|(_, servers)| servers.clone())
+            })
+            .unwrap_or_default()
+    }
+
+    /// The focused pane's running app, in the editor panel's Preview tab.
+    pub fn show_preview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let servers = self.focused_servers(cx);
+        self.editor.update(cx, |editor, cx| editor.show_preview(servers, window, cx));
+        self.panels.editor = true;
+        cx.notify();
+    }
+
     /// Pictures of the focused pane's running app, kept for its repository, all worktrees together.
     pub fn show_pictures(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let checkout = self.focused_checkout(cx);
@@ -2832,19 +2859,7 @@ impl Workspace {
         let tab = self.layout.focused_tab();
         let branch =
             tab.and_then(|tab| self.checkouts.get(&tab)).map(|checkout| checkout.branch.clone()).unwrap_or_default();
-        // The focused pane's servers, else any in the same checkout.
-        let servers = tab
-            .and_then(|tab| self.servers.get(&tab).cloned())
-            .filter(|servers| !servers.is_empty())
-            .or_else(|| {
-                self.servers
-                    .iter()
-                    .find(|(tab, servers)| {
-                        !servers.is_empty() && self.checkouts.get(tab).is_some_and(|other| other.root == checkout)
-                    })
-                    .map(|(_, servers)| servers.clone())
-            })
-            .unwrap_or_default();
+        let servers = self.focused_servers(cx);
         crate::pictures_view::open(root, branch, servers, window, cx);
     }
 
@@ -3657,6 +3672,7 @@ impl Workspace {
             .on_action(cx.listener(|this, _: &ToggleFocus, _, cx| this.toggle_focus(cx)))
             .on_action(cx.listener(|this, _: &EditPrBody, window, cx| this.edit_pr_body(window, cx)))
             .on_action(cx.listener(|this, _: &ShowPictures, window, cx| this.show_pictures(window, cx)))
+            .on_action(cx.listener(|this, _: &ShowPreview, window, cx| this.show_preview(window, cx)))
             .on_action(cx.listener(|this, _: &RunCheck, window, cx| {
                 let checkout = this.focused_checkout(cx);
                 crate::palette::checks(cx.weak_entity(), checkout, window, cx);

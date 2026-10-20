@@ -18,7 +18,8 @@
 //!   `SATURN_NEW_AGENT_QUERY` typed in it);
 //!   `SATURN_TICKET_FILTERS=1` opens the Tickets panel's filters.
 //! - `SATURN_DROP=path` drops that file on the middle of the window, as Finder would.
-//! - `SATURN_RUN_COMMAND="Start the app"` runs that command from the palette's list, by its name.
+//! - `SATURN_RUN_COMMAND="Start the app"` runs that command from the palette's list, by its name
+//!   (after `SATURN_RUN_COMMAND_AFTER` seconds, else 1.5).
 //! - `SATURN_UNDO_TURN=6` presses the first pane's "Undo the agent's last turn" after 6 seconds.
 //! - `SATURN_ANSWER=allow|deny` answers the first pane's permission after 5 seconds.
 //! - `SATURN_RUN_CHECKS=1` runs every check of the focused pane's checkout.
@@ -289,8 +290,13 @@ fn answer_from_env(cx: &mut Context<Workspace>) {
 /// Runs a palette command by its name (`SATURN_RUN_COMMAND`), as picking it would.
 fn run_command_from_env(window: &mut Window, cx: &mut Context<Workspace>) {
     let Ok(name) = std::env::var("SATURN_RUN_COMMAND") else { return };
+    // Later for commands about a pane's server, which takes a few seconds to be seen.
+    let after = std::env::var("SATURN_RUN_COMMAND_AFTER")
+        .ok()
+        .and_then(|seconds| seconds.parse().ok())
+        .map_or(Duration::from_millis(1500), Duration::from_secs);
     cx.spawn_in(window, async move |_, cx| {
-        cx.background_executor().timer(Duration::from_millis(1500)).await;
+        cx.background_executor().timer(after).await;
         let _ = cx.update(|window, cx| {
             let command = crate::workspace::commands().into_iter().find(|(label, _, _)| *label == name);
             match command {

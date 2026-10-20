@@ -165,7 +165,9 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   and a phone's by a Chromium browser already on your Mac (Chrome, Brave, Edge, Chromium or Arc;
   invisibly, with a profile of its own). Each set is kept with its branch and time, for the whole
   repo, so two lie side by side: the default branch against an agent's, or before a turn against
-  after. "Open folder" for a pull request or a ticket.
+  after. "Open folder" for a pull request or a ticket. "Preview the app" shows a pane's running page in the editor panel, drawn
+  again every few seconds while it's open, at desktop or phone size: a picture to watch, since a
+  browser engine doesn't live in Saturn; "Open in your browser" is a click away.
 - **Overlaps**: when two panes' worktrees of one repo change the same files, both panes say so
   (hover for which files and where), while it's still easy to merge one first or split the work.
 - **What was asked**: each file in the review says what you asked Claude Code that changed it (the
