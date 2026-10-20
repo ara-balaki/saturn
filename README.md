@@ -112,6 +112,9 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
 - **Agent teams**: a pane whose Claude session leads a team (Claude Code's agent teams) shows a
   Team chip: how many are in it, how far its tasks are, and unread messages. It opens the members,
   the shared task list with who has each task, and the messages they've sent each other.
+- **Work across repos**: with more than one repo in the window, New agent's "Also in" gives the work
+  a worktree in each picked repo, on the same branch, and the agent reaches them all (Claude's
+  `--add-dir`). A pane in such a worktree shows a chip for each other repo's, which goes to it.
 - macOS notifies you while Saturn is in the background, and a small Saturn in the menu bar shows how
   many are waiting. The moon in the title bar (Focus) holds notifications while you concentrate;
   stopping it gives one that says what happened meanwhile.

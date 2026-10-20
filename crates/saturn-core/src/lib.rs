@@ -20,6 +20,7 @@ pub mod instructions;
 pub mod layout;
 pub mod links;
 pub mod lsp;
+pub mod multi_repo;
 pub mod overlap;
 pub mod past_sessions;
 pub mod pictures;

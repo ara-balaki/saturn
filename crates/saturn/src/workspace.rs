@@ -21,6 +21,7 @@ use saturn_core::checks;
 use saturn_core::clickup::Ticket;
 use saturn_core::git;
 use saturn_core::layout::{Cell, CellId, Direction, Layout, RowId, TabId};
+use saturn_core::multi_repo;
 use saturn_core::overlap;
 use saturn_core::ports;
 use saturn_core::pull_request::{self, ChecksState, PrState, PullRequest, ReviewNotes};
@@ -320,6 +321,11 @@ pub struct Workspace {
     routine_tabs: HashMap<TabId, (String, i64)>,
     /// The agent team each pane's session leads, if any.
     teams: HashMap<TabId, Team>,
+    /// The window's other repos the next agent also works in, picked in New agent.
+    also_in: Vec<PathBuf>,
+    /// For each pane in a worktree, the same work's worktrees in the window's other repos: their
+    /// folders and their repos' names.
+    links: HashMap<TabId, Vec<(PathBuf, String)>>,
     /// ClickUp, when a token is set; nothing about it shows otherwise.
     clickup: ClickUpState,
     /// Where a dragged tab would land: a cell, and the side to split it on (`None`: into the cell).
@@ -705,6 +711,35 @@ fn mode_chip(cell: CellId, mode: &str) -> Option<impl IntoElement> {
     )
 }
 
+/// The same work in another repo, linked by its branch: goes to it.
+fn link_chip(
+    cell: CellId,
+    index: usize,
+    folder: &Path,
+    repo: &str,
+    cx: &mut Context<Workspace>,
+) -> impl IntoElement + use<> {
+    let folder = folder.to_owned();
+    div()
+        .id(gpui_kit::SharedString::from(format!("link-chip-{}-{index}", cell.key())))
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(len(space::SPACE_1))
+        .h(len(chrome::CONTROL_HEIGHT))
+        .px(len(space::SPACE_2))
+        .rounded(len(radius::RADIUS_SM))
+        .text_size(px(12.))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(theme::color(color::INK_MUTED))
+        .cursor_pointer()
+        .hover(|s| s.bg(theme::fill_hover()))
+        .child(chrome::icon("link-2", 13., theme::color(color::INK_MUTED)))
+        .child(repo.to_owned())
+        .tooltip(chrome::tip("The same work in another repo: go to it"))
+        .on_click(cx.listener(move |this: &mut Workspace, _, window, cx| this.go_to_folder(&folder, window, cx)))
+}
+
 /// A pane whose session leads an agent team: how many are in it, how far its tasks are, and
 /// whether messages wait unread. It opens the team.
 fn team_chip(cell: CellId, tab: TabId, team: &Team, cx: &mut Context<Workspace>) -> impl IntoElement {
@@ -1030,6 +1065,8 @@ impl Workspace {
             claude_sessions: HashMap::new(),
             routine_tabs: HashMap::new(),
             teams: HashMap::new(),
+            also_in: Vec::new(),
+            links: HashMap::new(),
             clickup: ClickUpState::default(),
             checkouts: HashMap::new(),
             drop_target: None,
@@ -1380,6 +1417,10 @@ impl Workspace {
             self.note(tab, &problem, cx);
         }
         let mut command = project.command_for(key, title);
+        if make_worktree && cwd != self.project {
+            let folders = self.also_in_worktrees(key, tab, cx);
+            command = multi_repo::with_folders(&command, &folders, settings::shell_quote);
+        }
         // A worktree made just now has the code and nothing else: the recipe's setup runs first,
         // and the agent starts only once it has worked.
         if made && let Some(setup) = self.setup_for(tab, &cwd, cx) {
@@ -1446,6 +1487,119 @@ impl Workspace {
         self.place_new(tab);
         self.type_into(tab, command, cx);
         self.after_layout_change(window, cx);
+    }
+
+    /// The window's other repos, for New agent's "Also in".
+    pub fn other_repos(&self) -> Vec<PathBuf> {
+        self.projects.iter().filter(|repo| **repo != self.project).cloned().collect()
+    }
+
+    /// The other repos the next agent also works in.
+    pub fn also_in(&self) -> &[PathBuf] {
+        &self.also_in
+    }
+
+    pub fn toggle_also_in(&mut self, repo: &Path, cx: &mut Context<Self>) {
+        if let Some(index) = self.also_in.iter().position(|picked| picked == repo) {
+            self.also_in.remove(index);
+        } else {
+            self.also_in.push(repo.to_owned());
+        }
+        cx.notify();
+    }
+
+    /// Makes the work's worktree in each repo picked in "Also in", for the agent in `tab` to reach,
+    /// and says in the pane what it reaches. The pick is used up.
+    fn also_in_worktrees(&mut self, key: &str, tab: TabId, cx: &mut Context<Self>) -> Vec<PathBuf> {
+        let repos: Vec<PathBuf> =
+            std::mem::take(&mut self.also_in).into_iter().filter(|repo| self.projects.contains(repo)).collect();
+        let mut folders = Vec::new();
+        for repo in repos {
+            match git::work_worktree(&repo, key) {
+                Ok((dir, made)) => {
+                    self.furnish_worktree(&dir, made);
+                    folders.push(dir);
+                }
+                Err(why) => {
+                    let name = repo.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+                    self.note(tab, &format!("No worktree for {key} in {name}: {why}"), cx);
+                }
+            }
+        }
+        if !folders.is_empty() {
+            let names: Vec<String> = folders.iter().map(|dir| dir.display().to_string()).collect();
+            self.note(tab, &format!("The agent also works in {}.", names.join(", ")), cx);
+        }
+        folders
+    }
+
+    /// Finds, for each pane in a worktree, the same work in the window's other repos, off the main
+    /// thread.
+    fn refresh_links(&mut self, cx: &mut Context<Self>) {
+        if self.projects.len() < 2 {
+            if !self.links.is_empty() {
+                self.links.clear();
+                cx.notify();
+            }
+            return;
+        }
+        let repos = self.projects.clone();
+        let checkouts: Vec<(TabId, PathBuf, String)> = self
+            .checkouts
+            .iter()
+            .map(|(tab, checkout)| (*tab, checkout.root.clone(), checkout.branch.clone()))
+            .collect();
+        cx.spawn(async move |this, cx| {
+            let links = cx
+                .background_spawn(async move {
+                    checkouts
+                        .into_iter()
+                        .filter(|(_, root, _)| git::main_worktree(root).is_some_and(|main| main != *root))
+                        .filter_map(|(tab, root, branch)| {
+                            let found: Vec<(PathBuf, String)> = multi_repo::linked(&branch, &repos, &root)
+                                .into_iter()
+                                .map(|dir| {
+                                    let repo = git::main_worktree(&dir).unwrap_or_else(|| dir.clone());
+                                    let name = repo.file_name().map(|name| name.to_string_lossy().into_owned());
+                                    (dir, name.unwrap_or_default())
+                                })
+                                .collect();
+                            (!found.is_empty()).then_some((tab, found))
+                        })
+                        .collect::<HashMap<_, _>>()
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.links != links {
+                    this.links = links;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// The pane's linked worktrees in other repos, as chips.
+    fn render_links(&self, cell: &Cell, cx: &mut Context<Self>) -> Vec<impl IntoElement + use<>> {
+        let cell_id = cell.id;
+        let mut chips = Vec::new();
+        for (index, (folder, repo)) in self.links.get(&cell.active).into_iter().flatten().enumerate() {
+            chips.push(link_chip(cell_id, index, folder, repo, cx));
+        }
+        chips
+    }
+
+    /// Goes to a pane working in `folder`, or opens one there.
+    fn go_to_folder(&mut self, folder: &Path, window: &mut Window, cx: &mut Context<Self>) {
+        let existing = self.attempt_panes(&[folder.to_owned()], cx).into_iter().flatten().next();
+        if let Some((tab, _)) = existing {
+            self.go_to_tab(tab, window, cx);
+            return;
+        }
+        if let Some(tab) = self.spawn_terminal(folder, window, cx) {
+            self.place_new(tab);
+            self.after_layout_change(window, cx);
+        }
     }
 
     /// Brings into a worktree what git leaves out, before an agent starts there: the shared env
@@ -1769,6 +1923,7 @@ impl Workspace {
                 this.checkouts = checkouts;
                 this.share_env_files(cx);
                 this.refresh_overlaps(cx);
+                this.refresh_links(cx);
                 // Made-up agents keep their made-up pull requests.
                 if std::env::var_os("SATURN_FAKE_AGENTS").is_none() {
                     this.pull_requests = pull_requests;
@@ -3396,6 +3551,7 @@ impl Workspace {
             .children(self.ticket_of(cell.active, cx).map(|ticket| ticket_chip(cell_id, ticket)))
             .children(self.modes.get(&cell.active).and_then(|mode| mode_chip(cell_id, mode)))
             .children(self.teams.get(&cell.active).map(|team| team_chip(cell_id, cell.active, team, cx)))
+            .children(self.render_links(cell, cx))
             .children(self.render_spent(cell, cx))
             .children(self.render_turn(cell, cx))
             .children(
