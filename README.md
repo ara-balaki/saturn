@@ -89,6 +89,8 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
 
 - A pane that needs you rings **orange**, one that's done rings **green**, until you type or click
   in it.
+- A pane whose agent isn't in the usual permission mode says which (Plan mode, Accepts edits, Auto
+  mode, Doesn't ask), and warns in amber when it skips permissions altogether.
 - The title bar counts them, and ⌘⇧A jumps to the next one that needs you. Click a count for what
   each waits for: a permission with the command or file it's for, a question, a finished turn with
   the start of its last words, a failure. Allow or deny a permission right there (Saturn presses the

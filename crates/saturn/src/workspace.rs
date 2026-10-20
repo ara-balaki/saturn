@@ -311,6 +311,9 @@ pub struct Workspace {
     waits: HashMap<TabId, Waiting>,
     /// Focus mode: notifications held, and what they'd have said (by state) for one at the end.
     focusing: Option<Vec<AgentState>>,
+    /// Each tab's session's permission mode (`default`, `plan`, `bypassPermissions`…), as its hooks
+    /// report it.
+    modes: HashMap<TabId, String>,
 }
 
 /// An agent's turn, saved before and after (`saturn_core::snapshot`), so its files can go back.
@@ -535,6 +538,37 @@ fn pull_request_chip(cell: CellId, pr: &PullRequest) -> impl IntoElement {
         .on_click(move |_, _, _| {
             let _ = std::process::Command::new("open").arg(&url).spawn();
         })
+}
+
+/// The pane's permission mode, when it isn't the usual one; a warning when it skips permissions.
+fn mode_chip(cell: CellId, mode: &str) -> Option<impl IntoElement> {
+    let (label, tip, warn) = match mode {
+        "plan" => ("Plan mode", "Plans without changing anything until you approve the plan.", false),
+        "acceptEdits" => ("Accepts edits", "Edits files without asking; still asks before running commands.", false),
+        "auto" => ("Auto mode", "Decides itself what needs your permission.", false),
+        "dontAsk" => ("Doesn't ask", "Runs what its settings allow and refuses the rest, without asking.", false),
+        "bypassPermissions" => (
+            "Skips permissions",
+            "Runs anything without asking: commands, edits, deletions. Keep it to throwaway work, or a sandbox.",
+            true,
+        ),
+        _ => return None,
+    };
+    Some(
+        div()
+            .id(("mode-chip", cell.key()))
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(len(space::SPACE_1))
+            .px(len(space::SPACE_2))
+            .text_size(px(12.))
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(theme::color(if warn { color::AMBER_TEXT } else { color::INK_MUTED }))
+            .when(warn, |chip| chip.child(chrome::icon("triangle-alert", 13., theme::color(color::AMBER_TEXT))))
+            .child(label)
+            .tooltip(chrome::tip(tip)),
+    )
 }
 
 /// The one notification after focusing: what the held ones would have said, and what waits now.
@@ -831,6 +865,7 @@ impl Workspace {
             spent: HashMap::new(),
             waits: HashMap::new(),
             focusing: None,
+            modes: HashMap::new(),
             roots,
             root: project.clone(),
             follow_pane: true,
@@ -2103,6 +2138,15 @@ impl Workspace {
             }
             None => {}
         }
+        match (call.event(), call.field("permission_mode")) {
+            ("SessionEnd", _) => {
+                self.modes.remove(&tab);
+            }
+            (_, Some(mode)) => {
+                self.modes.insert(tab, mode.to_owned());
+            }
+            _ => {}
+        }
         if let Some(path) = call.field("transcript_path").filter(|path| !path.is_empty()) {
             self.transcripts.insert(tab, PathBuf::from(path));
         }
@@ -2680,6 +2724,7 @@ impl Workspace {
             .items_center()
             .gap(len(space::SPACE_1))
             .children(self.ticket_of(cell.active, cx).map(|ticket| ticket_chip(cell_id, ticket)))
+            .children(self.modes.get(&cell.active).and_then(|mode| mode_chip(cell_id, mode)))
             .children(self.render_spent(cell, cx))
             .children(self.render_turn(cell, cx))
             .children(
