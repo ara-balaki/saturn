@@ -227,6 +227,10 @@ To change the steps, "Create worktree recipe" in the palette saves the guess to
 - `run` names the commands that start the app. "Start the app" opens a tab for each, named after it.
 - `cleanup` is for when a worktree goes away.
 
+Files git ignores that worktrees should still get (local config, certificates) go in
+`.worktreeinclude`, written like `.gitignore`, as for `claude --worktree`: Saturn copies them from the
+main checkout into a worktree it makes, and "Set up this worktree" fills in any that are missing.
+
 Each checkout also gets its own block of ten ports, the same every time: `SATURN_PORT` in its
 terminals is the first (42000, 42010…), and the sidebar shows the block. Use it where two worktrees'
 servers would otherwise clash; shell arithmetic gives the rest:

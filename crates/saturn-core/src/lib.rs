@@ -27,3 +27,4 @@ pub mod shared_env;
 pub mod shell_env;
 pub mod status_line;
 pub mod usage;
+pub mod worktree_include;

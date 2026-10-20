@@ -24,6 +24,7 @@ use saturn_core::recipe::{self, Source};
 use saturn_core::servers::{self, Server, Service};
 use saturn_core::session_name::rename_for_prompt;
 use saturn_core::shared_env;
+use saturn_core::worktree_include;
 use saturn_design::{color, radius, shadow, space};
 use saturn_terminal::view::{TerminalView, TerminalViewEvent};
 
@@ -1002,6 +1003,10 @@ impl Workspace {
                         shared_env::share(&dir);
                         self.env_shared.insert(dir.clone());
                     }
+                    // Then what `.worktreeinclude` lists, around the links just made.
+                    if made {
+                        worktree_include::copy_into(&dir);
+                    }
                     (dir, made)
                 }
                 Err(why) => {
@@ -1087,6 +1092,7 @@ impl Workspace {
     /// for a worktree made some other way, or after the recipe changed.
     fn set_up_worktree(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let checkout = self.focused_checkout(cx);
+        worktree_include::copy_into(&checkout);
         let Some(tab) = self.recipe_tab(&checkout, "Setup", window, cx) else { return };
         match recipe::for_checkout(&checkout) {
             Ok((recipe, source)) => match (recipe.setup_command(), source) {
