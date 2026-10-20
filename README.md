@@ -104,6 +104,7 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   divider to change that, or double-click it to even out its two panes.
 - A real terminal underneath (alacritty's engine), so TUIs, colours and the mouse work as they should.
 - Drop a file, a screenshot say, on a terminal to type its path, so Claude attaches it.
+- ⌘-click a link to open it, a pull request Claude links as `#123` too.
 - Each pane shows the servers its agent runs, named after their app and port (`web :5173`); click one
   to open it. The repo's Docker Compose services (`postgres :5432`) sit in the bar at the bottom.
 - Several repos in one window, as tabs in the title bar (the + after them, or ⌘O, adds one). Their agents share one grid.
@@ -181,7 +182,7 @@ soft periwinkle in light. It follows macOS's appearance, or you pick one.
 | ⌘O           | Add a repo                                           |
 | ⌘S           | Save the open file                                   |
 | ⌘+ / ⌘− / ⌘0 | Text in terminals and files bigger / smaller / usual |
-| ⌘-click      | Go to definition                                     |
+| ⌘-click      | Go to definition; open a link in a terminal          |
 | ⌘.           | Quick fixes, Find references, Rename                 |
 | ⌘,           | Settings                                             |
 | ⌘⇧N          | New agent from a ticket (with ClickUp)               |

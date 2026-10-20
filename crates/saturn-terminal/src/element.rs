@@ -236,6 +236,7 @@ impl TerminalElement {
             )
         };
 
+        let link = view.hovered_link();
         let selection = content.selection;
         let selection_color = hsla(palette::selection(), palette::selection_opacity());
         let mut backgrounds: Vec<(usize, usize, usize, Hsla)> = Vec::new();
@@ -272,7 +273,8 @@ impl TerminalElement {
                 color: hsla(fg, if flags.contains(Flags::DIM) { 0.66 } else { 1.0 }),
                 bold: flags.contains(Flags::BOLD),
                 italic: flags.contains(Flags::ITALIC),
-                underline: flags.intersects(Flags::ALL_UNDERLINES),
+                underline: flags.intersects(Flags::ALL_UNDERLINES)
+                    || link.is_some_and(|link| link.contains(indexed.point)),
             };
             let simple = cell.c.is_ascii() && width == 1 && cell.zerowidth().is_none();
             if simple {

@@ -11,15 +11,16 @@ use alacritty_terminal::index::Side;
 use alacritty_terminal::term::TermMode;
 use gpui_kit::{
     App, ClipboardItem, Context, CursorStyle, EventEmitter, FocusHandle, Focusable, InteractiveElement as _,
-    IntoElement, KeyBinding, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ParentElement as _, Pixels, Point, Render, ScrollDelta, ScrollWheelEvent, Styled as _, Window, div,
+    IntoElement, KeyBinding, KeyDownEvent, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, ParentElement as _, Pixels, Point, Render, ScrollDelta, ScrollWheelEvent,
+    StatefulInteractiveElement as _, Styled as _, Window, div,
 };
 use saturn_core::agent_state::AgentState;
 
 use crate::element::TerminalElement;
 use crate::keys::{self, KeyPress};
 use crate::pty::PtyEvent;
-use crate::terminal::{GridSize, Terminal, TerminalEvent};
+use crate::terminal::{GridSize, Link, Terminal, TerminalEvent};
 
 gpui_kit::actions!(terminal, [SendTab, SendBackTab]);
 
@@ -91,6 +92,10 @@ pub struct TerminalView {
     drag: Drag,
     /// The cell a drag the program follows was last reported at, so each cell is reported once.
     reported: Option<(usize, usize)>,
+    /// Where the mouse last was over the terminal, and whether Command was held.
+    pointer: Option<(Point<Pixels>, bool)>,
+    /// The link under the mouse while Command is held: underlined, and opened on click.
+    link: Option<Link>,
 }
 
 impl EventEmitter<TerminalViewEvent> for TerminalView {}
@@ -144,6 +149,8 @@ impl TerminalView {
             geometry: Rc::default(),
             drag: Drag::None,
             reported: None,
+            pointer: None,
+            link: None,
         }
     }
 
@@ -189,6 +196,8 @@ impl TerminalView {
             }
         }
         self.schedule_sync_flush(cx);
+        // New output can move the text under the mouse.
+        self.refresh_link();
         cx.notify();
     }
 
@@ -265,6 +274,48 @@ impl TerminalView {
         true
     }
 
+    /// The link under the mouse while Command is held.
+    pub(crate) fn hovered_link(&self) -> Option<&Link> {
+        self.link.as_ref()
+    }
+
+    /// Finds the link under the mouse again, after it moved or the screen changed.
+    fn refresh_link(&mut self) -> bool {
+        let link = self
+            .pointer
+            .filter(|(_, command)| *command)
+            .and_then(|(position, _)| self.cell_inside(position))
+            .and_then(|(row, col)| self.terminal.link_at(row, col));
+        let changed = link != self.link;
+        self.link = link;
+        changed
+    }
+
+    fn move_pointer(&mut self, pointer: Option<(Point<Pixels>, bool)>, cx: &mut Context<Self>) {
+        self.pointer = pointer;
+        if self.refresh_link() {
+            cx.notify();
+        }
+    }
+
+    fn modifiers_changed(&mut self, event: &ModifiersChangedEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.pointer.is_some() {
+            self.move_pointer(Some((window.mouse_position(), event.modifiers.platform)), cx);
+        }
+    }
+
+    /// The cell under a window position, or `None` when it's outside the grid.
+    fn cell_inside(&self, position: Point<Pixels>) -> Option<(usize, usize)> {
+        let geometry = self.geometry.get()?;
+        let size = self.terminal.size();
+        let (row, col, _) = self.cell_at(position)?;
+        (position.x >= geometry.origin.x
+            && position.y >= geometry.origin.y
+            && row < usize::from(size.rows)
+            && col < usize::from(size.cols))
+        .then_some((row, col))
+    }
+
     /// The cell under a window position: row, column, and which half of the cell.
     #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "positions inside a small grid")]
     fn cell_at(&self, position: Point<Pixels>) -> Option<(usize, usize, Side)> {
@@ -294,6 +345,14 @@ impl TerminalView {
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
         cx.emit(TerminalViewEvent::Used);
+        // Command-click opens a link, as in other macOS terminals, even when the program wants the
+        // mouse.
+        if event.modifiers.platform
+            && let Some(link) = self.cell_inside(event.position).and_then(|(row, col)| self.terminal.link_at(row, col))
+        {
+            cx.open_url(&link.target);
+            return;
+        }
         let Some((row, col, side)) = self.cell_at(event.position) else { return };
         if self.program_wants_mouse(event.modifiers) {
             self.drag = Drag::Reporting;
@@ -307,6 +366,7 @@ impl TerminalView {
     }
 
     fn mouse_move(&mut self, event: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        self.move_pointer(Some((event.position, event.modifiers.platform)), cx);
         if event.pressed_button != Some(MouseButton::Left) {
             return;
         }
@@ -400,6 +460,7 @@ impl TerminalView {
         } else {
             self.terminal.scroll(whole);
         }
+        self.refresh_link();
         cx.notify();
     }
 }
@@ -408,12 +469,21 @@ impl Render for TerminalView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let focused = self.focus.is_focused(window);
         div()
+            .id("terminal")
             .size_full()
-            // Text can be selected here, so the pointer says so.
-            .cursor(CursorStyle::IBeam)
+            // Text can be selected here, so the pointer says so; over a link with Command held, it
+            // says the link opens.
+            .cursor(if self.link.is_some() { CursorStyle::PointingHand } else { CursorStyle::IBeam })
             .track_focus(&self.focus)
             .key_context("Terminal")
             .on_key_down(cx.listener(Self::key_down))
+            .on_modifiers_changed(cx.listener(Self::modifiers_changed))
+            // A link stays underlined only while the mouse is over this terminal.
+            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                if !hovered {
+                    this.move_pointer(None, cx);
+                }
+            }))
             // Files dropped from Finder or a screenshot tool: their paths, typed in.
             .on_drop(cx.listener(|this, dropped: &gpui_kit::ExternalPaths, window, cx| {
                 window.focus(&this.focus, cx);
