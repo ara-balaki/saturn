@@ -29,6 +29,7 @@ mod problems_view;
 mod queue_view;
 mod references_view;
 mod review_comments;
+mod routines_view;
 mod schema_view;
 mod session;
 mod sessions_view;
@@ -158,6 +159,7 @@ fn main() {
         theme::apply(settings::load().appearance, cx);
         theme::set_text_size(settings::load().text_size, cx);
         usage::start(cx);
+        routines_view::start(cx);
         workspace::apply_app_settings(&settings::load(), cx);
         if settings::load().notifications && !spike::is_automated() {
             notify::request_permission();

@@ -30,6 +30,7 @@ pub mod prompts;
 pub mod pull_request;
 pub mod recipe;
 pub mod review;
+pub mod routines;
 pub mod schema;
 pub mod servers;
 pub mod session_name;

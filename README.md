@@ -105,6 +105,10 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
 - **Search sessions** (⌘⇧P): every Claude Code session on this Mac, newest first, found by what you
   asked in it, its title, its folder or its branch. Pick one to resume it in a new pane in its
   folder, or to go to the pane it's open in.
+- **Routines** (⌘⇧P): agents on a schedule, every day, on weekdays or every few hours. While Saturn
+  is open it starts each one on time in a pane named after it, with its prompt, in its folder. Every
+  run is listed; one whose time passed while Saturn was closed shows as missed, with Run now, and one
+  that ran can be resumed. Kept in `routines.json` beside the settings.
 - macOS notifies you while Saturn is in the background, and a small Saturn in the menu bar shows how
   many are waiting. The moon in the title bar (Focus) holds notifications while you concentrate;
   stopping it gives one that says what happened meanwhile.

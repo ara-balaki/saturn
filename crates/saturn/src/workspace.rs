@@ -25,6 +25,7 @@ use saturn_core::overlap;
 use saturn_core::ports;
 use saturn_core::pull_request::{self, ChecksState, PrState, PullRequest, ReviewNotes};
 use saturn_core::recipe::{self, Source};
+use saturn_core::routines::Routine;
 use saturn_core::servers::{self, Server, Service};
 use saturn_core::session_name::rename_for_prompt;
 use saturn_core::session_usage::{self, Tokens};
@@ -109,6 +110,7 @@ actions!(
         BestOfN,
         CompareAttempts,
         SearchSessions,
+        ShowRoutines,
     ]
 );
 
@@ -131,6 +133,19 @@ pub fn in_front(cx: &mut gpui_kit::App, act: impl FnOnce(&mut Workspace, &mut Wi
     }
 }
 
+/// Runs `act` on the workspace of the window in front, else of the first window open, for what
+/// happens on its own (a routine due). Whether there was one.
+pub fn in_any(cx: &mut gpui_kit::App, act: impl FnOnce(&mut Workspace, &mut Window, &mut Context<Workspace>)) -> bool {
+    let front = cx.active_window();
+    let chosen = OPEN.with_borrow_mut(|open| {
+        open.retain(|(_, workspace)| workspace.upgrade().is_some());
+        open.iter().find(|(window, _)| Some(*window) == front).or(open.first()).cloned()
+    });
+    let Some((window, workspace)) = chosen else { return false };
+    let Some(workspace) = workspace.upgrade() else { return false };
+    window.update(cx, |_, window, cx| workspace.update(cx, |workspace, cx| act(workspace, window, cx))).is_ok()
+}
+
 /// Every command the command palette offers: its name, its icon, and the action it runs (whose
 /// shortcut the palette shows).
 pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)> {
@@ -149,6 +164,7 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("Best of N: one task, several agents", "git-fork", Box::new(BestOfN)),
         ("Compare attempts", "git-compare", Box::new(CompareAttempts)),
         ("Search sessions and resume one", "text-search", Box::new(SearchSessions)),
+        ("Routines: agents on a schedule", "calendar-clock", Box::new(ShowRoutines)),
         ("Show or hide the sidebar", "panel-left", Box::new(ToggleSidebar)),
         ("Show or hide the editor", "panel-top", Box::new(ToggleEditor)),
         ("Show or hide your tickets", "panel-right", Box::new(ToggleTickets)),
@@ -299,6 +315,8 @@ pub struct Workspace {
     sidebar_tab: SidebarTab,
     /// The Claude session running in each tab, from its hooks, so a restart can offer to resume it.
     claude_sessions: HashMap<TabId, String>,
+    /// Panes a routine started, until their session is known: the routine and its time.
+    routine_tabs: HashMap<TabId, (String, i64)>,
     /// ClickUp, when a token is set; nothing about it shows otherwise.
     clickup: ClickUpState,
     /// Where a dragged tab would land: a cell, and the side to split it on (`None`: into the cell).
@@ -961,6 +979,7 @@ impl Workspace {
             tickets_view: None,
             sidebar_tab: SidebarTab::Files,
             claude_sessions: HashMap::new(),
+            routine_tabs: HashMap::new(),
             clickup: ClickUpState::default(),
             checkouts: HashMap::new(),
             drop_target: None,
@@ -1317,6 +1336,25 @@ impl Workspace {
             command = format!("{setup} && {command}");
         }
         self.type_into(tab, command, cx);
+        self.after_layout_change(window, cx);
+    }
+
+    /// Starts a routine for its time `due`: a pane in its folder, named after it, where Claude starts
+    /// with its prompt. Its session is tied to the run once a hook tells it.
+    pub fn start_routine(&mut self, routine: &Routine, due: i64, window: &mut Window, cx: &mut Context<Self>) {
+        let there = routine.folder.is_dir();
+        let folder = if there { routine.folder.clone() } else { self.project.clone() };
+        let Some(tab) = self.spawn_terminal(&folder, window, cx) else { return };
+        self.place_new(tab);
+        self.names.insert(tab, routine.name.clone());
+        if there {
+            self.routine_tabs.insert(tab, (routine.id.clone(), due));
+            self.type_into(tab, format!("claude {}", settings::shell_quote(&routine.prompt)), cx);
+            notify::post(&routine.id, &routine.name, "The routine started.", false);
+        } else {
+            let gone = routine.folder.display();
+            self.note(tab, &format!("{} didn't start: {gone} isn't there any more.", routine.name), cx);
+        }
         self.after_layout_change(window, cx);
     }
 
@@ -2432,6 +2470,9 @@ impl Workspace {
             }
             (_, Some(session)) => {
                 self.claude_sessions.insert(tab, session.to_owned());
+                if let Some((routine, due)) = self.routine_tabs.remove(&tab) {
+                    crate::routines_view::tie_session(routine, due, session.to_owned(), cx);
+                }
             }
             _ => {}
         }
@@ -3885,6 +3926,10 @@ impl Workspace {
             .on_action(cx.listener(|this, _: &CompareAttempts, window, cx| {
                 let repo = git::main_worktree(&this.project).unwrap_or_else(|| this.project.clone());
                 crate::best_of_view::compare(cx.weak_entity(), repo, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ShowRoutines, window, cx| {
+                let folder = this.focused_checkout(cx);
+                crate::routines_view::open(cx.weak_entity(), folder, window, cx);
             }))
             .on_action(cx.listener(|this, _: &SearchSessions, window, cx| {
                 let open = this.claude_sessions.iter().map(|(tab, id)| (id.clone(), *tab)).collect();
