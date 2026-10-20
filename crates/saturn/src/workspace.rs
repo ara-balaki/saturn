@@ -19,7 +19,7 @@ use saturn_core::clickup::Ticket;
 use saturn_core::git;
 use saturn_core::layout::{Cell, CellId, Direction, Layout, RowId, TabId};
 use saturn_core::pull_request::{self, PrState, PullRequest};
-use saturn_core::recipe;
+use saturn_core::recipe::{self, Source};
 use saturn_core::servers::{self, Server, Service};
 use saturn_core::session_name::rename_for_prompt;
 use saturn_core::shared_env;
@@ -83,6 +83,7 @@ actions!(
         TextReset,
         SetUpWorktree,
         StartApp,
+        CreateRecipe,
     ]
 );
 
@@ -129,6 +130,7 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("Impact of the changes", "waypoints", Box::new(ShowImpact)),
         ("Set up this worktree", "wrench", Box::new(SetUpWorktree)),
         ("Start the app", "play", Box::new(StartApp)),
+        ("Create worktree recipe", "file-code", Box::new(CreateRecipe)),
         ("Database diagram", "database", Box::new(ShowSchema)),
         ("dbt lineage", "workflow", Box::new(ShowLineage)),
         ("Problems", "circle-x", Box::new(ShowProblems)),
@@ -515,9 +517,15 @@ fn server_chip(cell: CellId, server: &Server) -> impl IntoElement {
 /// What a pane says when its repo has no recipe yet.
 fn no_recipe() -> String {
     format!(
-        "No worktree recipe here yet. Add {} to the repo, for example:\n  {{ \"setup\": [\"pnpm install\"], \"run\": {{ \"web\": \"pnpm dev\" }} }}",
+        "Saturn couldn't tell how this repo is set up or started. Add {} to the repo, for example:\n  {{ \"setup\": [\"pnpm install\"], \"run\": {{ \"web\": \"pnpm dev\" }} }}",
         recipe::FILE
     )
+}
+
+/// What a pane says before steps Saturn guessed.
+fn guessed() -> String {
+    "Saturn guessed these steps from the repo's files. \"Create worktree recipe\" (⌘⇧P) saves them to adjust and commit."
+        .to_owned()
 }
 
 /// Where in a pane a dragged tab lands: within a quarter of an edge splits the pane on that side,
@@ -1007,14 +1015,16 @@ impl Workspace {
         // A worktree made just now has the code and nothing else: the recipe's setup runs first,
         // and the agent starts only once it has worked.
         if made {
-            match recipe::load(&cwd) {
-                Some(Ok(recipe)) => {
+            match recipe::for_checkout(&cwd) {
+                Ok((recipe, source)) => {
                     if let Some(setup) = recipe.setup_command() {
+                        if source == Source::Guessed {
+                            self.note(tab, &guessed(), cx);
+                        }
                         command = format!("{setup} && {command}");
                     }
                 }
-                Some(Err(problem)) => self.note(tab, &format!("The worktree recipe wasn't run: {problem}"), cx),
-                None => {}
+                Err(problem) => self.note(tab, &format!("The worktree recipe wasn't run: {problem}"), cx),
             }
         }
         self.type_into(tab, command, cx);
@@ -1068,43 +1078,61 @@ impl Workspace {
     fn set_up_worktree(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let checkout = self.focused_checkout(cx);
         let Some(tab) = self.recipe_tab(&checkout, "Setup", window, cx) else { return };
-        match recipe::load(&checkout) {
-            Some(Ok(recipe)) => match recipe.setup_command() {
-                Some(setup) => self.type_into(tab, setup, cx),
-                None => self.note(tab, &format!("{} has no \"setup\" steps.", recipe::FILE), cx),
+        match recipe::for_checkout(&checkout) {
+            Ok((recipe, source)) => match (recipe.setup_command(), source) {
+                (Some(setup), source) => {
+                    if source == Source::Guessed {
+                        self.note(tab, &guessed(), cx);
+                    }
+                    self.type_into(tab, setup, cx);
+                }
+                (None, Source::File) => self.note(tab, &format!("{} has no \"setup\" steps.", recipe::FILE), cx),
+                (None, Source::Guessed) => self.note(tab, &no_recipe(), cx),
             },
-            Some(Err(problem)) => self.note(tab, &problem, cx),
-            None => self.note(tab, &no_recipe(), cx),
+            Err(problem) => self.note(tab, &problem, cx),
         }
     }
 
     /// Starts each of the recipe's `run` commands in a tab of its own, named after it.
     fn start_app(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let checkout = self.focused_checkout(cx);
-        match recipe::load(&checkout) {
-            Some(Ok(recipe)) if !recipe.run.is_empty() => {
-                for (name, command) in recipe.run {
-                    if let Some(tab) = self.recipe_tab(&checkout, &name, window, cx) {
-                        self.type_into(tab, command, cx);
+        let note = match recipe::for_checkout(&checkout) {
+            Ok((recipe, source)) if !recipe.run.is_empty() => {
+                for (index, (name, command)) in recipe.run.into_iter().enumerate() {
+                    let Some(tab) = self.recipe_tab(&checkout, &name, window, cx) else { continue };
+                    if index == 0 && source == Source::Guessed {
+                        self.note(tab, &guessed(), cx);
                     }
+                    self.type_into(tab, command, cx);
                 }
+                return;
             }
-            Some(Ok(_)) => {
-                if let Some(tab) = self.recipe_tab(&checkout, "Start", window, cx) {
-                    self.note(tab, &format!("{} has no \"run\" commands.", recipe::FILE), cx);
+            Ok((_, Source::File)) => format!("{} has no \"run\" commands.", recipe::FILE),
+            Ok((_, Source::Guessed)) => no_recipe(),
+            Err(problem) => problem,
+        };
+        if let Some(tab) = self.recipe_tab(&checkout, "Start", window, cx) {
+            self.note(tab, &note, cx);
+        }
+    }
+
+    /// Writes the focused checkout's guessed recipe to `.saturn/worktree.json`, to adjust and commit,
+    /// and opens it. A recipe that's already there just opens.
+    fn create_recipe(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let checkout = self.focused_checkout(cx);
+        let path = checkout.join(recipe::FILE);
+        if !path.exists() {
+            let text = recipe::guess(&checkout).to_json();
+            let written =
+                path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(&path, text));
+            if let Err(error) = written {
+                if let Some(tab) = self.recipe_tab(&checkout, "Recipe", window, cx) {
+                    self.note(tab, &format!("Couldn't write {}: {error}", path.display()), cx);
                 }
-            }
-            Some(Err(problem)) => {
-                if let Some(tab) = self.recipe_tab(&checkout, "Start", window, cx) {
-                    self.note(tab, &problem, cx);
-                }
-            }
-            None => {
-                if let Some(tab) = self.recipe_tab(&checkout, "Start", window, cx) {
-                    self.note(tab, &no_recipe(), cx);
-                }
+                return;
             }
         }
+        self.open_file(&path, window, cx);
     }
 
     /// Reads the branch each tab is on and the pull request each tab works on, off the main thread.
@@ -2607,6 +2635,7 @@ impl Workspace {
             .on_action(cx.listener(|this, _: &ShowSchema, _, cx| this.show_schema(cx)))
             .on_action(cx.listener(|this, _: &SetUpWorktree, window, cx| this.set_up_worktree(window, cx)))
             .on_action(cx.listener(|this, _: &StartApp, window, cx| this.start_app(window, cx)))
+            .on_action(cx.listener(|this, _: &CreateRecipe, window, cx| this.create_recipe(window, cx)))
             .on_action(cx.listener(|this, _: &ShowLineage, _, cx| this.show_lineage(cx)))
             .on_action(cx.listener(|this, _: &ShowProblems, _, cx| this.show_problems(cx)))
     }

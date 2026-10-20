@@ -13,6 +13,10 @@
 //!
 //! `setup` and `cleanup` are a command or a list run one after another, stopping at the first that
 //! fails. Every field is optional.
+//!
+//! A repository without the file still gets a recipe, guessed from what it already has: its lockfile
+//! says how to install (`pnpm-lock.yaml`: `pnpm install`, `uv.lock`: `uv sync`…) and its `dev`
+//! scripts say how to start it. The guess can be saved as the file, to adjust and commit.
 
 use std::path::{Path, PathBuf};
 
@@ -101,6 +105,25 @@ fn and_then(steps: &[String]) -> Option<String> {
     })
 }
 
+/// Where a checkout's recipe came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Source {
+    /// `.saturn/worktree.json`, its own or the main checkout's.
+    File,
+    /// Guessed from its lockfiles and manifests.
+    Guessed,
+}
+
+/// The recipe for `checkout`: its file (see `load`), else a guess, which may be empty. An error
+/// names the file that is wrong.
+pub fn for_checkout(checkout: &Path) -> Result<(Recipe, Source), String> {
+    match load(checkout) {
+        Some(Ok(recipe)) => Ok((recipe, Source::File)),
+        Some(Err(problem)) => Err(problem),
+        None => Ok((guess(checkout), Source::Guessed)),
+    }
+}
+
 /// The recipe for `checkout`: its own file, else the main checkout's (a branch made before the
 /// recipe existed still gets set up). `None` when neither has one; an error names the file.
 pub fn load(checkout: &Path) -> Option<Result<Recipe, String>> {
@@ -115,6 +138,135 @@ pub fn load(checkout: &Path) -> Option<Result<Recipe, String>> {
         Err(error) => return Some(Err(format!("{}: {error}", path.display()))),
     };
     Some(Recipe::parse(&text).map_err(|error| format!("{}: {error}", path.display())))
+}
+
+/// How a JavaScript repository installs and runs a package's script.
+#[derive(Clone, Copy)]
+enum PackageManager {
+    Pnpm,
+    Yarn,
+    Bun,
+    Npm,
+}
+
+impl PackageManager {
+    fn of(checkout: &Path) -> Option<Self> {
+        let has = |name: &str| checkout.join(name).is_file();
+        if has("pnpm-lock.yaml") {
+            Some(Self::Pnpm)
+        } else if has("yarn.lock") {
+            Some(Self::Yarn)
+        } else if has("bun.lock") || has("bun.lockb") {
+            Some(Self::Bun)
+        } else if has("package-lock.json") || has("package.json") {
+            Some(Self::Npm)
+        } else {
+            None
+        }
+    }
+
+    fn install(self) -> &'static str {
+        match self {
+            Self::Pnpm => "pnpm install",
+            Self::Yarn => "yarn install",
+            Self::Bun => "bun install",
+            Self::Npm => "npm install",
+        }
+    }
+
+    /// Runs `script` at the top (`package` `None`) or in one workspace package.
+    fn run(self, script: &str, package: Option<(&str, &str)>) -> String {
+        match (self, package) {
+            (Self::Pnpm, None) => format!("pnpm {script}"),
+            (Self::Yarn, None) => format!("yarn {script}"),
+            (Self::Bun, None) => format!("bun run {script}"),
+            (Self::Npm, None) => format!("npm run {script}"),
+            (Self::Pnpm, Some((name, _))) => format!("pnpm --filter {name} {script}"),
+            (Self::Yarn, Some((name, _))) => format!("yarn workspace {name} {script}"),
+            (Self::Bun, Some((_, folder))) => format!("bun run --cwd {folder} {script}"),
+            (Self::Npm, Some((_, folder))) => format!("npm run {script} -w {folder}"),
+        }
+    }
+}
+
+/// A `package.json`'s name and whether it has a `dev` script.
+fn package(folder: &Path) -> Option<(Option<String>, bool)> {
+    let json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(folder.join("package.json")).ok()?).ok()?;
+    let name = json.get("name").and_then(serde_json::Value::as_str).map(str::to_owned);
+    let dev = json.get("scripts").and_then(|scripts| scripts.get("dev")).is_some();
+    Some((name, dev))
+}
+
+/// The folders where monorepos keep their apps, in the order they're shown.
+const APP_FOLDERS: [&str; 4] = ["apps", "services", "packages", "examples"];
+
+/// A recipe from what `checkout` already has. Empty when nothing is recognised.
+pub fn guess(checkout: &Path) -> Recipe {
+    let has = |name: &str| checkout.join(name).exists();
+    let mut recipe = Recipe::default();
+    if let Some(manager) = PackageManager::of(checkout) {
+        recipe.setup.push(manager.install().to_owned());
+        if package(checkout).is_some_and(|(_, dev)| dev) {
+            recipe.run.push(("dev".to_owned(), manager.run("dev", None)));
+        } else {
+            // A monorepo: each app with a dev script runs on its own, named after its folder.
+            for parent in APP_FOLDERS {
+                let Ok(entries) = std::fs::read_dir(checkout.join(parent)) else { continue };
+                let mut folders: Vec<PathBuf> =
+                    entries.flatten().map(|entry| entry.path()).filter(|path| path.is_dir()).collect();
+                folders.sort();
+                for folder in folders {
+                    let Some((name, true)) = package(&folder) else { continue };
+                    let Some(short) = folder.file_name().map(|name| name.to_string_lossy().into_owned()) else {
+                        continue;
+                    };
+                    let relative = format!("{parent}/{short}");
+                    let name = name.unwrap_or_else(|| relative.clone());
+                    recipe.run.push((short, manager.run("dev", Some((&name, &relative)))));
+                }
+            }
+        }
+    }
+    let installs = [
+        ("uv.lock", "uv sync"),
+        ("poetry.lock", "poetry install"),
+        ("Pipfile.lock", "pipenv install"),
+        ("Gemfile.lock", "bundle install"),
+        ("composer.lock", "composer install"),
+        ("mix.lock", "mix deps.get"),
+        ("go.sum", "go mod download"),
+    ];
+    for (file, install) in installs {
+        if has(file) {
+            recipe.setup.push(install.to_owned());
+        }
+    }
+    if checkout.join("bin/dev").is_file() {
+        recipe.run.push(("dev".to_owned(), "bin/dev".to_owned()));
+    }
+    recipe
+}
+
+impl Recipe {
+    /// The recipe as `.saturn/worktree.json` holds it.
+    pub fn to_json(&self) -> String {
+        let mut file = serde_json::Map::new();
+        if !self.setup.is_empty() {
+            file.insert("setup".into(), self.setup.clone().into());
+        }
+        if !self.run.is_empty() {
+            let run: serde_json::Map<String, serde_json::Value> =
+                self.run.iter().map(|(name, command)| (name.clone(), command.clone().into())).collect();
+            file.insert("run".into(), run.into());
+        }
+        if !self.cleanup.is_empty() {
+            file.insert("cleanup".into(), self.cleanup.clone().into());
+        }
+        let mut text = serde_json::to_string_pretty(&serde_json::Value::Object(file)).unwrap_or_default();
+        text.push('\n');
+        text
+    }
 }
 
 #[cfg(test)]
@@ -133,6 +285,62 @@ mod tests {
             recipe.run,
             [("api".to_owned(), "pnpm --filter api dev".to_owned()), ("web".to_owned(), "vite".to_owned())]
         );
+    }
+
+    fn checkout(files: &[(&str, &str)]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("a temporary folder");
+        for (path, text) in files {
+            let path = dir.path().join(path);
+            std::fs::create_dir_all(path.parent().expect("a folder")).expect("make folders");
+            std::fs::write(path, text).expect("write");
+        }
+        dir
+    }
+
+    #[test]
+    fn guesses_a_single_app() {
+        let dir = checkout(&[("package.json", r#"{ "scripts": { "dev": "vite" } }"#), ("yarn.lock", "")]);
+        let recipe = guess(dir.path());
+        assert_eq!(recipe.setup, ["yarn install"]);
+        assert_eq!(recipe.run, [("dev".to_owned(), "yarn dev".to_owned())]);
+    }
+
+    #[test]
+    fn guesses_each_app_of_a_monorepo() {
+        let dir = checkout(&[
+            ("package.json", r#"{ "scripts": { "build": "turbo build" } }"#),
+            ("pnpm-lock.yaml", ""),
+            ("apps/web/package.json", r#"{ "name": "@acme/web", "scripts": { "dev": "vite" } }"#),
+            ("apps/api/package.json", r#"{ "name": "@acme/api", "scripts": { "dev": "nest start --watch" } }"#),
+            ("packages/shared/package.json", r#"{ "name": "@acme/shared", "scripts": { "build": "tsc" } }"#),
+        ]);
+        let recipe = guess(dir.path());
+        assert_eq!(recipe.setup, ["pnpm install"]);
+        assert_eq!(
+            recipe.run,
+            [
+                ("api".to_owned(), "pnpm --filter @acme/api dev".to_owned()),
+                ("web".to_owned(), "pnpm --filter @acme/web dev".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn guesses_other_languages() {
+        let dir = checkout(&[("uv.lock", ""), ("Gemfile.lock", ""), ("bin/dev", "#!/bin/sh")]);
+        let recipe = guess(dir.path());
+        assert_eq!(recipe.setup, ["uv sync", "bundle install"]);
+        assert_eq!(recipe.run, [("dev".to_owned(), "bin/dev".to_owned())]);
+        assert_eq!(guess(checkout(&[("README.md", "")]).path()), Recipe::default());
+    }
+
+    #[test]
+    fn a_guess_saves_as_a_file_that_reads_back_the_same() {
+        let dir = checkout(&[("package.json", r#"{ "scripts": { "dev": "next dev" } }"#), ("package-lock.json", "")]);
+        let recipe = guess(dir.path());
+        let text = recipe.to_json();
+        assert!(text.starts_with("{\n  \"setup\": [\n    \"npm install\"\n  ],"), "{text}");
+        assert_eq!(Recipe::parse(&text).expect("valid"), recipe);
     }
 
     #[test]

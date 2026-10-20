@@ -203,8 +203,14 @@ is doing (working, waiting for a permission, done, failed) and do nothing outsid
 
 ## Worktree recipe
 
-A fresh worktree has the code but nothing git ignores: no dependencies, no builds. Put the steps in
-`.saturn/worktree.json`, committed with the repo, and Saturn runs them:
+A fresh worktree has the code but nothing git ignores: no dependencies, no builds. With no setup
+at all, Saturn guesses the steps from the repo's own files: the lockfile says how to install
+(`pnpm-lock.yaml`, `yarn.lock`, `package-lock.json`, `bun.lock`, `uv.lock`, `poetry.lock`,
+`Gemfile.lock`, `composer.lock`, `mix.lock`, `go.sum`), and `dev` scripts (at the top, or one per app
+in `apps/`, `services/`, `packages/`) or `bin/dev` say how to start it.
+
+To change the steps, "Create worktree recipe" in the palette saves the guess to
+`.saturn/worktree.json`, to adjust and commit with the repo:
 
 ```json
 {
@@ -221,7 +227,8 @@ A fresh worktree has the code but nothing git ignores: no dependencies, no build
 - `cleanup` is for when a worktree goes away.
 
 A list of steps runs one after another and stops at the first that fails. Every field is optional. A
-branch made before the recipe existed uses the main checkout's.
+branch made before the recipe existed uses the main checkout's. Steps Saturn guessed say so in the
+pane before they run.
 
 ## Settings
 
