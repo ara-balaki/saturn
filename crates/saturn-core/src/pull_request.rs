@@ -42,6 +42,8 @@ pub struct PullRequest {
     pub checks: Checks,
     /// The commit its branch is at.
     pub head: Option<String>,
+    /// A preview its checks link to, if any.
+    pub preview: Option<Preview>,
 }
 
 /// A pull request's checks, by how they went.
@@ -133,6 +135,59 @@ pub fn failed_checks_message(pr: &PullRequest) -> String {
         pr.number
     );
     out
+}
+
+/// Where a pull request's work runs for people to try: a deployment of its commit (Vercel, Netlify,
+/// a workflow), or a check that links to one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Preview {
+    /// The site; `None` while it's still deploying.
+    pub url: Option<String>,
+    /// The environment's name (`preview`, `pr-12`), or the check's.
+    pub name: String,
+    /// It deployed; `false` while it's on its way.
+    pub ready: bool,
+}
+
+/// The newest deployment in a `GET /repos/{owner}/{repo}/deployments?sha=…` answer: its id and
+/// environment.
+pub fn parse_deployment(json: &str) -> Option<(u64, String)> {
+    let list: Vec<serde_json::Value> = serde_json::from_str(json).ok()?;
+    let newest = list.first()?;
+    let environment = newest.get("environment").and_then(serde_json::Value::as_str).unwrap_or("preview").to_owned();
+    Some((newest.get("id")?.as_u64()?, environment))
+}
+
+/// A deployment's newest status (`GET …/deployments/{id}/statuses`) as a preview: only a deployed
+/// site counts, not a link to the job that deployed it.
+pub fn parse_deployment_status(json: &str, environment: &str) -> Option<Preview> {
+    let list: Vec<serde_json::Value> = serde_json::from_str(json).ok()?;
+    let newest = list.first()?;
+    let state = newest.get("state").and_then(serde_json::Value::as_str).unwrap_or_default();
+    let url = newest.get("environment_url").and_then(serde_json::Value::as_str).filter(|url| !url.is_empty());
+    match state {
+        "success" => url.map(|url| Preview { url: Some(url.to_owned()), name: environment.to_owned(), ready: true }),
+        "queued" | "pending" | "in_progress" => Some(Preview { url: None, name: environment.to_owned(), ready: false }),
+        _ => None,
+    }
+}
+
+/// A preview a check links to, for setups that only post a status: one named like a preview or a
+/// deploy whose link isn't GitHub's own.
+pub fn preview_in_checks(rollup: &[serde_json::Value]) -> Option<Preview> {
+    rollup.iter().find_map(|check| {
+        let text = |key: &str| check.get(key).and_then(serde_json::Value::as_str).unwrap_or_default();
+        let name = if text("__typename") == "StatusContext" { text("context") } else { text("name") };
+        let url = if text("__typename") == "StatusContext" { text("targetUrl") } else { text("detailsUrl") };
+        let lower = name.to_lowercase();
+        let named = lower.contains("preview") || lower.contains("deploy");
+        let success = text("state") == "SUCCESS" || text("conclusion") == "SUCCESS";
+        (named && success && url.starts_with("http") && !url.contains("github.com/")).then(|| Preview {
+            url: Some(url.to_owned()),
+            name: name.to_owned(),
+            ready: true,
+        })
+    })
 }
 
 /// What reviewers asked of a pull request that isn't settled: open review threads on lines, and
@@ -281,6 +336,7 @@ impl Raw {
             url: self.url,
             state,
             checks: Checks::from_rollup(&self.status_check_rollup),
+            preview: preview_in_checks(&self.status_check_rollup),
             head: self.head_ref_oid,
         })
     }
@@ -428,6 +484,42 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn finds_where_a_pull_request_runs() {
+        assert_eq!(
+            super::parse_deployment(r#"[{"id": 7, "environment": "pr-12"}, {"id": 6}]"#),
+            Some((7, "pr-12".to_owned()))
+        );
+        let live = super::parse_deployment_status(
+            r#"[{"state": "success", "environment_url": "https://pr-12.acme.dev", "target_url": "https://github.com/acme/x/actions/runs/1"}]"#,
+            "pr-12",
+        );
+        assert_eq!(
+            live,
+            Some(super::Preview { url: Some("https://pr-12.acme.dev".into()), name: "pr-12".into(), ready: true })
+        );
+        assert_eq!(
+            super::parse_deployment_status(r#"[{"state": "in_progress"}]"#, "pr-12").map(|p| p.ready),
+            Some(false)
+        );
+        assert_eq!(
+            super::parse_deployment_status(
+                r#"[{"state": "success", "environment_url": "", "target_url": "https://github.com/acme/x/actions/runs/1"}]"#,
+                "dev"
+            ),
+            None,
+            "a job log isn't a preview"
+        );
+        let rollup: Vec<serde_json::Value> = serde_json::from_str(r#"[
+            {"__typename": "CheckRun", "name": "test", "conclusion": "SUCCESS", "detailsUrl": "https://github.com/acme/x/runs/1"},
+            {"__typename": "StatusContext", "context": "Vercel – Preview", "state": "SUCCESS", "targetUrl": "https://acme-git-cart.vercel.app"}
+        ]"#).expect("json");
+        assert_eq!(
+            super::preview_in_checks(&rollup).and_then(|p| p.url).as_deref(),
+            Some("https://acme-git-cart.vercel.app")
+        );
+    }
+
     #[test]
     fn reads_what_reviewers_left_open() {
         let json = r#"{"data":{"repository":{"pullRequest":{

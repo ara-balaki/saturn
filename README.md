@@ -174,7 +174,8 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   checks show beside it (✓ passed, ● running, ✕ failed; hover for which), and when they fail, the
   wrench hands them to the pane's agent with where to read why. Open review threads count beside it
   (💬 2): click to hand them to the agent too, each with its file, line and conversation, and any
-  request for changes.
+  request for changes. When the repo deploys pull requests (GitHub deployments: Vercel, Netlify, a
+  workflow), ↗ Preview opens this one's.
 - **Status bar**: errors and warnings, the cursor, the language, and the branch with how many
   commits wait to be pushed and pulled.
 

@@ -409,6 +409,18 @@ fn read_checkouts(
             pull_requests.insert(sources.tab, pull_request);
         }
     }
+    // Where open pull requests are deployed, once each; a deployment wins over a check's link.
+    let mut previews: HashMap<u64, Option<pull_request::Preview>> = HashMap::new();
+    for (tab, pr) in &mut pull_requests {
+        if !matches!(pr.state, PrState::Open | PrState::Draft) {
+            continue;
+        }
+        let Some(root) = checkouts.get(tab).map(|checkout: &Checkout| checkout.root.clone()) else { continue };
+        let found = previews.entry(pr.number).or_insert_with(|| github::deployment_preview(&root, pr)).clone();
+        if found.is_some() {
+            pr.preview = found;
+        }
+    }
     // What reviewers left open, for open pull requests only, once each.
     let mut notes_of: HashMap<u64, Option<ReviewNotes>> = HashMap::new();
     let notes = pull_requests
@@ -568,6 +580,38 @@ fn pull_request_chip(cell: CellId, pr: &PullRequest) -> impl IntoElement {
         .on_click(move |_, _, _| {
             let _ = std::process::Command::new("open").arg(&url).spawn();
         })
+}
+
+/// Where the pane's pull request is deployed: opens it, or says it's on its way.
+fn preview_chip(cell: CellId, pr: &PullRequest) -> Option<impl IntoElement> {
+    let preview = pr.preview.clone()?;
+    let tip = match &preview.url {
+        Some(url) => format!("Open the preview ({}): {url}", preview.name),
+        None => format!("Deploying the preview ({})…", preview.name),
+    };
+    Some(
+        div()
+            .id(("preview-chip", cell.key()))
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(len(space::SPACE_1))
+            .h(len(TAB_HEIGHT))
+            .px(len(space::SPACE_2))
+            .rounded(len(radius::RADIUS_SM))
+            .text_size(px(12.))
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(theme::color(if preview.ready { color::INK_MUTED } else { color::INK_FAINT }))
+            .when(preview.url.is_some(), |chip| chip.cursor_pointer().hover(|s| s.bg(theme::fill_hover())))
+            .child(chrome::icon("external-link", 13., theme::color(color::INK_MUTED)))
+            .child(if preview.ready { "Preview" } else { "Deploying…" })
+            .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+            .on_click(move |_, _, _| {
+                if let Some(url) = &preview.url {
+                    let _ = std::process::Command::new("open").arg(url).spawn();
+                }
+            }),
+    )
 }
 
 /// The pane's permission mode, when it isn't the usual one; a warning when it skips permissions.
@@ -2086,7 +2130,12 @@ impl Workspace {
                     2 => pull_request::Checks { passed: 2, running: vec!["e2e".to_owned()], failed: Vec::new() },
                     _ => pull_request::Checks { passed: 4, ..Default::default() },
                 };
-                self.pull_requests.insert(tab, PullRequest { number, title, url, state, checks, head: None });
+                let preview = (pull_requests == 2).then(|| pull_request::Preview {
+                    url: Some(format!("https://pr-{number}.acme.dev")),
+                    name: format!("pr-{number}"),
+                    ready: true,
+                });
+                self.pull_requests.insert(tab, PullRequest { number, title, url, state, checks, head: None, preview });
                 if pull_requests == 2 {
                     let thread = |path: &str, line, said: &str| pull_request::Thread {
                         path: path.to_owned(),
@@ -2868,6 +2917,7 @@ impl Workspace {
             )
             .children(self.servers.get(&cell.active).into_iter().flatten().map(|server| server_chip(cell_id, server)))
             .children(self.pull_request_of(cell.active).map(|pr| pull_request_chip(cell_id, pr)))
+            .children(self.pull_request_of(cell.active).and_then(|pr| preview_chip(cell_id, pr)))
             .children(self.render_fix_ci(cell, cx))
             .children(self.render_review_notes(cell, cx))
             .child(header_button("split-right", "columns-2", Placement::Right, cx))

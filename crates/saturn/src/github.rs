@@ -13,6 +13,16 @@ pub fn pull_request(root: &Path, which: &str) -> Option<PullRequest> {
     pull_request::parse(&String::from_utf8_lossy(&output.stdout))
 }
 
+/// Where a pull request's commit is deployed for people to try, from GitHub's deployments.
+pub fn deployment_preview(root: &Path, pr: &PullRequest) -> Option<pull_request::Preview> {
+    let (owner, name) = pull_request::owner_and_name(&pr.url)?;
+    let head = pr.head.as_deref()?;
+    let output = gh(root, &["api", &format!("repos/{owner}/{name}/deployments?sha={head}&per_page=1")])?;
+    let (id, environment) = pull_request::parse_deployment(&String::from_utf8_lossy(&output.stdout))?;
+    let output = gh(root, &["api", &format!("repos/{owner}/{name}/deployments/{id}/statuses?per_page=1")])?;
+    pull_request::parse_deployment_status(&String::from_utf8_lossy(&output.stdout), &environment)
+}
+
 /// What reviewers left open on a pull request: its unresolved threads and requests for changes.
 pub fn review_notes(root: &Path, pr: &PullRequest) -> Option<pull_request::ReviewNotes> {
     let (owner, name) = pull_request::owner_and_name(&pr.url)?;
