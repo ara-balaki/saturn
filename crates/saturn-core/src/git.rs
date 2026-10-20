@@ -221,12 +221,26 @@ pub fn main_worktree(dir: &Path) -> Option<PathBuf> {
     common.parent().map(Path::to_path_buf)
 }
 
-/// A worktree for `ticket` next to `repo` (`../<repo>-<ticket>`) on a branch named after the
-/// ticket, made from the current `HEAD`, or the one already there. Returns its folder, and whether
-/// it was made just now (and so still needs setting up).
-pub fn ticket_worktree(repo: &Path, ticket: &str) -> Result<(PathBuf, bool), String> {
-    let branch: String =
-        ticket.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' }).collect();
+/// A branch name for a piece of work, a ticket (`ABC-236`) or words (`Fix login`): `abc-236`,
+/// `fix-login`. Empty when nothing usable is left.
+pub fn branch_for(work: &str) -> String {
+    let words: String = work
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+        .collect();
+    words.split('-').filter(|part| !part.is_empty()).collect::<Vec<_>>().join("-")
+}
+
+/// A worktree for a piece of work next to `repo` (`../<repo>-<branch>`) on a branch named after it
+/// (`branch_for`), made from the current `HEAD`, or the one already there. Returns its folder, and
+/// whether it was made just now (and so still needs setting up).
+pub fn work_worktree(repo: &Path, work: &str) -> Result<(PathBuf, bool), String> {
+    let branch = branch_for(work);
+    if branch.is_empty() {
+        return Err(format!("\"{work}\" can't name a branch"));
+    }
     let top = toplevel(repo).ok_or_else(|| format!("{} is not a git repository", repo.display()))?;
     let name = top.file_name().map_or_else(|| "repo".into(), |name| name.to_string_lossy().into_owned());
     let dir = top.parent().unwrap_or(&top).join(format!("{name}-{branch}"));
@@ -382,13 +396,21 @@ mod tests {
     }
 
     #[test]
+    fn names_a_branch_after_a_ticket_or_words() {
+        assert_eq!(branch_for("ABC-236"), "abc-236");
+        assert_eq!(branch_for("  Fix the login page! "), "fix-the-login-page");
+        assert_eq!(branch_for("feat/new  thing"), "feat-new-thing");
+        assert_eq!(branch_for("???"), "");
+    }
+
+    #[test]
     fn a_ticket_gets_a_sibling_worktree_once() {
         let dir = repo();
-        let (first, made) = ticket_worktree(dir.path(), "ABC-240").expect("created");
+        let (first, made) = work_worktree(dir.path(), "ABC-240").expect("created");
         assert!(made, "made just now, so it gets set up");
         assert!(first.ends_with(format!("{}-abc-240", dir.path().file_name().expect("a name").to_string_lossy())));
         assert_eq!(branch(&first).as_deref(), Some("abc-240"));
-        assert_eq!(ticket_worktree(dir.path(), "ABC-240").expect("reused"), (first.clone(), false));
+        assert_eq!(work_worktree(dir.path(), "ABC-240").expect("reused"), (first.clone(), false));
         let _ = std::fs::remove_dir_all(&first);
     }
 
@@ -396,7 +418,7 @@ mod tests {
     fn a_worktree_belongs_to_its_main_checkout() {
         let dir = repo();
         let main = toplevel(dir.path()).expect("a repository");
-        let (worktree, _) = ticket_worktree(dir.path(), "ABC-241").expect("created");
+        let (worktree, _) = work_worktree(dir.path(), "ABC-241").expect("created");
         assert_eq!(main_worktree(&worktree), Some(main.clone()));
         assert_eq!(main_worktree(&main), Some(main));
         let _ = std::fs::remove_dir_all(&worktree);

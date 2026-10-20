@@ -111,8 +111,9 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
 - Focus a pane that works in another git worktree, and the sidebar follows it there.
 - Worktrees share the main checkout's `.env` files: each one's is a link to main's, so a value added
   in any worktree is in all of them. A worktree's own, different file is left alone.
-- A [worktree recipe](#worktree-recipe) sets up each new worktree before its agent starts, and starts
-  the app (one tab per server) from the palette.
+- New agent (⌘⇧N): name the work (`fix-login`) and Saturn makes a worktree for it on a branch of that
+  name, sets it up with the [worktree recipe](#worktree-recipe), and starts your agent there. The
+  palette's "Start the app" opens a tab per server.
 
 ### Files and editor
 
@@ -156,10 +157,10 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
 
 ### Tickets (optional)
 
-Connect a ClickUp token, and ⌘⇧N lists the tickets assigned to you; ⌘⌥B shows them as a panel on
-the right, with filters for status, priority, due date, space, list and tag. Pick one, and Saturn
-opens a pane (in its own worktree if you like) and starts your agent on it. If you don't connect
-anything, none of this shows up.
+Connect a ClickUp token, and New agent (⌘⇧N) also searches the tickets assigned to you; ⌘⌥B shows
+them as a panel on the right, with filters for status, priority, due date, space, list and tag. Pick
+one, and Saturn opens a pane (in its own worktree if you like) and starts your agent on it. Without
+a tracker, New agent starts work you name, and the rest doesn't show up.
 
 ### Looks
 
@@ -187,7 +188,7 @@ soft periwinkle in light. It follows macOS's appearance, or you pick one.
 | ⌘-click      | Go to definition; open a link in a terminal          |
 | ⌘.           | Quick fixes, Find references, Rename                 |
 | ⌘,           | Settings                                             |
-| ⌘⇧N          | New agent from a ticket (with ClickUp)               |
+| ⌘⇧N          | New agent, in a worktree of its own                  |
 | ⌘⌥B          | Show or hide your tickets (ClickUp)                  |
 
 Every shortcut but copy, paste and quit can be changed in Settings → Keyboard shortcuts.

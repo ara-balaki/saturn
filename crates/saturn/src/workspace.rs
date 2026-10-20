@@ -118,7 +118,7 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("Previous tab", "arrow-left", Box::new(PreviousTab)),
         ("Maximise the pane", "maximize-2", Box::new(ToggleMaximize)),
         ("Go to the next agent that needs you", "bot", Box::new(NextAttention)),
-        ("New agent from a ticket", "square-plus", Box::new(OpenTicketPicker)),
+        ("New agent", "square-plus", Box::new(OpenTicketPicker)),
         ("Show or hide the sidebar", "panel-left", Box::new(ToggleSidebar)),
         ("Show or hide the editor", "panel-top", Box::new(ToggleEditor)),
         ("Show or hide your tickets", "panel-right", Box::new(ToggleTickets)),
@@ -960,9 +960,24 @@ impl Workspace {
     /// Starts an agent on `ticket` in a new pane: in its own worktree when the project asks
     /// Saturn to make one, running the project's ticket command.
     pub fn start_ticket(&mut self, ticket: &Ticket, window: &mut Window, cx: &mut Context<Self>) {
+        let make_worktree = self.settings.project(&self.project).create_worktree;
+        self.start_work(ticket.key(), &ticket.title, make_worktree, window, cx);
+    }
+
+    /// Starts an agent on work named by hand (`fix-login`), with no tracker: always in a worktree
+    /// of its own, which is the point of naming it.
+    pub fn start_named(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.start_work(name, name, true, window, cx);
+    }
+
+    /// Starts an agent on a piece of work, `key` (a ticket's id or a name) with its `title`, in a new
+    /// pane: in a worktree of its own when `make_worktree`, set up by the repo's recipe, running the
+    /// project's agent command.
+    fn start_work(&mut self, key: &str, title: &str, make_worktree: bool, window: &mut Window, cx: &mut Context<Self>) {
         let project = self.settings.project(&self.project);
-        let (cwd, made) = if project.create_worktree {
-            match git::ticket_worktree(&self.project, ticket.key()) {
+        let mut problem = None;
+        let (cwd, made) = if make_worktree {
+            match git::work_worktree(&self.project, key) {
                 Ok((dir, made)) => {
                     // Before the agent starts, so it finds the env files there.
                     if self.settings.share_env_files {
@@ -971,8 +986,8 @@ impl Workspace {
                     }
                     (dir, made)
                 }
-                Err(problem) => {
-                    self.clickup.problem = Some(format!("No worktree for {}: {problem}", ticket.key()));
+                Err(why) => {
+                    problem = Some(format!("No worktree for {key}, so the agent works in the repo itself: {why}"));
                     (self.project.clone(), false)
                 }
             }
@@ -985,7 +1000,10 @@ impl Workspace {
         } else {
             self.layout.split_right(tab, None);
         }
-        let mut command = project.command_for(ticket.key(), &ticket.title);
+        if let Some(problem) = problem {
+            self.note(tab, &problem, cx);
+        }
+        let mut command = project.command_for(key, title);
         // A worktree made just now has the code and nothing else: the recipe's setup runs first,
         // and the agent starts only once it has worked.
         if made {
@@ -2337,16 +2355,18 @@ impl Workspace {
             .child(self.render_repo_tabs(cx))
             .child(empty("titlebar-middle").flex_1())
             .children(activity)
-            // New terminals come from each pane's ＋ (and ⌘N), repos from the ＋ after them. With
-            // ClickUp, starting an agent from a ticket is the one primary action; its shortcut is in
-            // its tooltip, to keep the bar short.
-            .children(self.clickup.connected().then(|| {
+            // New terminals come from each pane's ＋ (and ⌘N), repos from the ＋ after them. Starting
+            // an agent on new work, named or from a ticket, is the one primary action; its shortcut
+            // is in its tooltip, to keep the bar short.
+            .child(
                 chrome::button("new-agent", "New agent", None, true)
                     .h(len(TITLEBAR_CONTROL + 2. * space::SPACE_1))
                     .rounded(len(radius::RADIUS_MD))
-                    .tooltip(chrome::tip_for("New agent from a ticket", OpenTicketPicker))
-                    .on_click(cx.listener(|_, _, window, cx| ticket_picker::open(cx.weak_entity(), window, cx)))
-            }))
+                    .tooltip(chrome::tip_for("New agent, in a worktree of its own", OpenTicketPicker))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        ticket_picker::open(cx.weak_entity(), this.clickup.connected(), window, cx);
+                    })),
+            )
     }
 
     /// The sidebar's header: the folder it shows (the selected repo, or a ticket's worktree when
@@ -2665,8 +2685,8 @@ impl Render for Workspace {
             .on_action(cx.listener(|_, _: &OpenProject, window, cx| Self::open_project(window, cx)))
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(window, cx)))
             .on_action(cx.listener(|this, _: &SaveFile, _, cx| this.save_file(cx)))
-            .on_action(cx.listener(|_, _: &OpenTicketPicker, window, cx| {
-                ticket_picker::open(cx.weak_entity(), window, cx);
+            .on_action(cx.listener(|this, _: &OpenTicketPicker, window, cx| {
+                ticket_picker::open(cx.weak_entity(), this.clickup.connected(), window, cx);
             }))
             .on_action(
                 cx.listener(|this, _: &FocusPane1, window, cx| this.update_layout(window, cx, |l| l.focus_nth(1))),

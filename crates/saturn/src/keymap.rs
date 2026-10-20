@@ -34,7 +34,7 @@ macro_rules! shortcut {
 /// Every shortcut, in the order Settings lists them. Copy, paste and quit stay macOS's own.
 pub const SHORTCUTS: &[Shortcut] = &[
     shortcut!("new-tab", "New terminal", "Terminals", ["cmd-n"], NewTab),
-    shortcut!("new-agent", "New agent from a ticket", "Terminals", ["cmd-shift-n"], OpenTicketPicker),
+    shortcut!("new-agent", "New agent, in a worktree of its own", "Terminals", ["cmd-shift-n"], OpenTicketPicker),
     shortcut!("split-right", "Split right", "Terminals", ["cmd-d"], SplitRight),
     shortcut!("split-down", "Split down", "Terminals", ["cmd-shift-d"], SplitDown),
     shortcut!("close-tab", "Close tab", "Terminals", ["cmd-w"], CloseTab),

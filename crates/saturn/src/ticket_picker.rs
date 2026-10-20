@@ -1,5 +1,6 @@
-//! The ticket picker (⌘⇧N): your open ClickUp tickets, searchable and grouped by status. Picking
-//! one starts an agent on it in a new pane, the way the project's ticket settings say.
+//! New agent (⌘⇧N): name the work and Saturn starts an agent on it in a worktree of its own; with
+//! ClickUp connected, the same field searches your open tickets, grouped by status, and picking one
+//! starts an agent on it the way the project's ticket settings say.
 
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::input::{Input, InputState};
@@ -8,13 +9,19 @@ use gpui_kit::{
     StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div, px, rgb,
 };
 use saturn_core::clickup::{self, Ticket};
+use saturn_core::git;
 use saturn_design::{color, radius, space};
 
 use crate::theme::{self, len};
 use crate::workspace::Workspace;
 
-pub fn open(workspace: WeakEntity<Workspace>, window: &mut Window, cx: &mut App) {
-    let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search tickets by id, title or status"));
+/// Opens the dialog. `connected` says whether ClickUp is, given by the caller: the workspace opens
+/// this from inside its own update, where reading it would abort.
+pub fn open(workspace: WeakEntity<Workspace>, connected: bool, window: &mut Window, cx: &mut App) {
+    let placeholder = if connected { "Name the work, or search your tickets" } else { "Name the work, like fix-login" };
+    // Screenshots type their name up front.
+    let typed = std::env::var("SATURN_NEW_AGENT_QUERY").unwrap_or_default();
+    let search = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder).default_value(typed));
     search.update(cx, |search, cx| search.focus(window, cx));
     // Later: the button and the shortcut that open this run inside the workspace's own update, and
     // updating it again from there aborts.
@@ -24,21 +31,32 @@ pub fn open(workspace: WeakEntity<Workspace>, window: &mut Window, cx: &mut App)
     });
     window.open_dialog(cx, move |dialog, _, cx| {
         let Some(workspace) = workspace.upgrade() else { return dialog };
-        let state = workspace.read(cx).clickup();
         let query = search.read(cx).value().to_string();
-        let tickets: Vec<Ticket> = state.tickets.iter().filter(|ticket| ticket.matches(&query)).cloned().collect();
-        let note = if !state.connected() {
-            Some("Connect ClickUp in Settings (⌘,) to start agents from your tickets.".to_owned())
-        } else if let Some(problem) = &state.problem {
-            Some(problem.clone())
-        } else if state.loading {
+        let rows = picks(&workspace, &query, cx);
+        let state = workspace.read(cx).clickup();
+        let note = if query.trim().is_empty() && !state.connected() {
+            Some("Name the work and press Return: Saturn makes a worktree for it and starts an agent there. Connect ClickUp in Settings (⌘,) to start from your tickets too.".to_owned())
+        } else if let Some(problem) = state.problem.clone().filter(|_| state.connected()) {
+            Some(problem)
+        } else if state.loading && rows.is_empty() {
             Some("Reading your tickets…".to_owned())
-        } else if tickets.is_empty() {
-            Some(if query.is_empty() { "No open tickets assigned to you." } else { "No ticket matches." }.to_owned())
+        } else if rows.is_empty() && state.connected() {
+            Some("No open tickets assigned to you. Type a name to start without one.".to_owned())
         } else {
             None
         };
+        // Return is the dialog's OK: it starts the top row, so typing a name and pressing it is all
+        // it takes. With nothing to start, the dialog stays open.
+        let confirm = (workspace.downgrade(), search.clone());
         dialog
+            .on_ok(move |_, window, cx| {
+                let (workspace, search) = &confirm;
+                let Some(workspace) = workspace.upgrade() else { return true };
+                let query = search.read(cx).value().to_string();
+                let Some(pick) = picks(&workspace, &query, cx).into_iter().next() else { return false };
+                start(&workspace, &pick, window, cx);
+                false
+            })
             .title("New agent")
             .entrance(gpui_kit::component::dialog::DialogEntrance::None)
             .bg(crate::chrome::dialog_surface())
@@ -47,13 +65,50 @@ pub fn open(workspace: WeakEntity<Workspace>, window: &mut Window, cx: &mut App)
             .children(note.map(|note| {
                 div().py(len(space::SPACE_4)).text_size(px(14.)).text_color(theme::color(color::INK_MUTED)).child(note)
             }))
-            .child(list(&workspace, &tickets))
+            .child(list(&workspace, &rows, cx))
     });
 }
 
-fn list(workspace: &Entity<Workspace>, tickets: &[Ticket]) -> impl IntoElement {
+/// A row of the dialog: a ticket, or work named by what was typed.
+#[derive(Clone)]
+enum Pick {
+    Ticket(Box<Ticket>),
+    Name(String),
+}
+
+/// The rows for `query`: the tickets it matches, and the typed name as work of its own, first when
+/// no ticket matches so that Return starts it.
+fn picks(workspace: &Entity<Workspace>, query: &str, cx: &App) -> Vec<Pick> {
+    let tickets = workspace.read(cx).clickup().tickets.iter().filter(|ticket| ticket.matches(query)).cloned();
+    let mut picks: Vec<Pick> = tickets.map(|ticket| Pick::Ticket(Box::new(ticket))).collect();
+    let name = query.trim();
+    if !git::branch_for(name).is_empty() {
+        picks.push(Pick::Name(name.to_owned()));
+    }
+    // With no ticket matching, the name is the only row and comes first; Return takes it.
+    picks
+}
+
+fn start(workspace: &Entity<Workspace>, pick: &Pick, window: &mut Window, cx: &mut App) {
+    workspace.update(cx, |workspace, cx| match pick {
+        Pick::Ticket(ticket) => workspace.start_ticket(ticket, window, cx),
+        Pick::Name(name) => workspace.start_named(name, window, cx),
+    });
+    window.close_dialog(cx);
+}
+
+fn list(workspace: &Entity<Workspace>, picks: &[Pick], cx: &App) -> impl IntoElement {
     let mut rows = div().id("tickets").flex().flex_col().max_h(px(440.)).overflow_y_scroll().mt(len(space::SPACE_2));
-    for (status, group) in clickup::by_status(tickets) {
+    let tickets: Vec<Ticket> = picks
+        .iter()
+        .filter_map(|pick| if let Pick::Ticket(ticket) = pick { Some((**ticket).clone()) } else { None })
+        .collect();
+    let named = picks.iter().find_map(|pick| if let Pick::Name(name) = pick { Some(name.clone()) } else { None });
+    let named_first = matches!(picks.first(), Some(Pick::Name(_)));
+    if named_first && let Some(name) = &named {
+        rows = rows.child(name_row(workspace, name, cx));
+    }
+    for (status, group) in clickup::by_status(&tickets) {
         rows = rows.child(
             div()
                 .pt(len(space::SPACE_3))
@@ -68,7 +123,56 @@ fn list(workspace: &Entity<Workspace>, tickets: &[Ticket]) -> impl IntoElement {
             rows = rows.child(row(workspace, ticket));
         }
     }
+    if !named_first && let Some(name) = &named {
+        rows = rows.child(div().h(len(space::SPACE_2))).child(name_row(workspace, name, cx));
+    }
     rows
+}
+
+/// Work named by hand: where its worktree will be, so the name's effect is plain before Return.
+fn name_row(workspace: &Entity<Workspace>, name: &str, cx: &App) -> impl IntoElement {
+    let repo = workspace
+        .read(cx)
+        .project_path()
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let folder = format!("{repo}-{}", git::branch_for(name));
+    let handle = workspace.downgrade();
+    let pick = Pick::Name(name.to_owned());
+    div()
+        .id("named-work")
+        .flex()
+        .items_center()
+        .gap(len(space::SPACE_3))
+        .px(len(space::SPACE_3))
+        .py(len(space::SPACE_2))
+        .rounded(len(radius::RADIUS_SM))
+        .cursor_pointer()
+        .hover(|s| s.bg(theme::fill_hover()))
+        .child(crate::chrome::icon("git-branch", 14., theme::color(color::INK_MUTED)))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .text_size(px(14.))
+                .text_color(theme::color(color::INK))
+                .truncate()
+                .child(format!("Start “{name}”")),
+        )
+        .child(
+            div()
+                .flex_none()
+                .font_family(saturn_design::font::MONO)
+                .text_size(px(12.))
+                .text_color(theme::color(color::INK_FAINT))
+                .child(format!("new worktree {folder}")),
+        )
+        .on_click(move |_, window, cx| {
+            if let Some(workspace) = handle.upgrade() {
+                start(&workspace, &pick, window, cx);
+            }
+        })
 }
 
 fn row(workspace: &Entity<Workspace>, ticket: &Ticket) -> impl IntoElement {
@@ -111,9 +215,8 @@ fn row(workspace: &Entity<Workspace>, ticket: &Ticket) -> impl IntoElement {
         )
         .on_click(move |_, window, cx| {
             if let Some(workspace) = workspace.upgrade() {
-                workspace.update(cx, |workspace, cx| workspace.start_ticket(&picked, window, cx));
+                start(&workspace, &Pick::Ticket(Box::new(picked.clone())), window, cx);
             }
-            window.close_dialog(cx);
         })
 }
 

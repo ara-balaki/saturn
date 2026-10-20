@@ -11,7 +11,8 @@
 //!   the database diagram, `SATURN_LINEAGE=1` the dbt lineage graph; `SATURN_LSP_PROBE=line:col` asks the open file's language server about
 //!   that place (0-based) and prints its answers; `SATURN_PROBLEMS=1` lists the
 //!   servers' errors and warnings; `SATURN_PALETTE=files|commands` opens a palette, with
-//!   `SATURN_PALETTE_QUERY` typed in it; `SATURN_TICKET_PICKER=1` opens New agent;
+//!   `SATURN_PALETTE_QUERY` typed in it; `SATURN_TICKET_PICKER=1` opens New agent (with
+//!   `SATURN_NEW_AGENT_QUERY` typed in it);
 //!   `SATURN_TICKET_FILTERS=1` opens the Tickets panel's filters.
 //! - `SATURN_DROP=path` drops that file on the middle of the window, as Finder would.
 //! - `SATURN_RUN_COMMAND="Start the app"` runs that command from the palette's list, by its name.

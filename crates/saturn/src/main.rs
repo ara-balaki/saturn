@@ -93,7 +93,7 @@ pub fn set_menus(cx: &mut App) {
         ]),
         Menu::new("Terminal").items([
             MenuItem::action("New Tab", NewTab),
-            MenuItem::action("New Agent from Ticket…", OpenTicketPicker),
+            MenuItem::action("New Agent…", OpenTicketPicker),
             MenuItem::action("Split Right", SplitRight),
             MenuItem::action("Split Down", SplitDown),
             MenuItem::action("Close Tab", CloseTab),
