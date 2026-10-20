@@ -99,6 +99,7 @@ actions!(
         ToggleFocus,
         RunCheck,
         EditPrBody,
+        ShowPictures,
     ]
 );
 
@@ -152,6 +153,7 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("Focus: hold notifications, or stop", "moon", Box::new(ToggleFocus)),
         ("Run a check", "play", Box::new(RunCheck)),
         ("Edit the pull request's description", "git-pull-request", Box::new(EditPrBody)),
+        ("Pictures of the app", "camera", Box::new(ShowPictures)),
         ("Database diagram", "database", Box::new(ShowSchema)),
         ("dbt lineage", "workflow", Box::new(ShowLineage)),
         ("Problems", "circle-x", Box::new(ShowProblems)),
@@ -2820,6 +2822,32 @@ impl Workspace {
         .detach();
     }
 
+    /// Pictures of the focused pane's running app, kept for its repository, all worktrees together.
+    pub fn show_pictures(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let checkout = self.focused_checkout(cx);
+        let repo = git::main_worktree(&checkout).unwrap_or_else(|| checkout.clone());
+        let folder: String =
+            repo.to_string_lossy().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+        let Some(root) = settings::data_dir().map(|dir| dir.join("pictures").join(folder)) else { return };
+        let tab = self.layout.focused_tab();
+        let branch =
+            tab.and_then(|tab| self.checkouts.get(&tab)).map(|checkout| checkout.branch.clone()).unwrap_or_default();
+        // The focused pane's servers, else any in the same checkout.
+        let servers = tab
+            .and_then(|tab| self.servers.get(&tab).cloned())
+            .filter(|servers| !servers.is_empty())
+            .or_else(|| {
+                self.servers
+                    .iter()
+                    .find(|(tab, servers)| {
+                        !servers.is_empty() && self.checkouts.get(tab).is_some_and(|other| other.root == checkout)
+                    })
+                    .map(|(_, servers)| servers.clone())
+            })
+            .unwrap_or_default();
+        crate::pictures_view::open(root, branch, servers, window, cx);
+    }
+
     /// Opens the focused pane's pull request's description, to edit against the template.
     pub fn edit_pr_body(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(tab) = self.layout.focused_tab() else { return };
@@ -3628,6 +3656,7 @@ impl Workspace {
             .on_action(cx.listener(|this, _: &ShowWorktrees, window, cx| this.show_worktrees(window, cx)))
             .on_action(cx.listener(|this, _: &ToggleFocus, _, cx| this.toggle_focus(cx)))
             .on_action(cx.listener(|this, _: &EditPrBody, window, cx| this.edit_pr_body(window, cx)))
+            .on_action(cx.listener(|this, _: &ShowPictures, window, cx| this.show_pictures(window, cx)))
             .on_action(cx.listener(|this, _: &RunCheck, window, cx| {
                 let checkout = this.focused_checkout(cx);
                 crate::palette::checks(cx.weak_entity(), checkout, window, cx);

@@ -19,6 +19,7 @@ pub mod layout;
 pub mod links;
 pub mod lsp;
 pub mod overlap;
+pub mod pictures;
 pub mod ports;
 pub mod pr_body;
 pub mod program_status;

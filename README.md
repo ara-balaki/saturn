@@ -161,6 +161,11 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   (in git, under its own `refs/saturn/`, touching no branch and running no hook). The pane's ↶ then
   puts back exactly the files that turn changed, however it changed them (shell commands too), and
   leaves the rest alone; ↷ redoes it. If one of them changed since, nothing is put back.
+- **Pictures of the app** (⌘⇧P): the pages of a pane's running server, drawn at a desktop's size
+  and a phone's by a Chromium browser already on your Mac (Chrome, Brave, Edge, Chromium or Arc;
+  invisibly, with a profile of its own). Each set is kept with its branch and time, for the whole
+  repo, so two lie side by side: the default branch against an agent's, or before a turn against
+  after. "Open folder" for a pull request or a ticket.
 - **Overlaps**: when two panes' worktrees of one repo change the same files, both panes say so
   (hover for which files and where), while it's still easy to merge one first or split the work.
 - **What was asked**: each file in the review says what you asked Claude Code that changed it (the

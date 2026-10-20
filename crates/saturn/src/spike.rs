@@ -22,6 +22,7 @@
 //! - `SATURN_UNDO_TURN=6` presses the first pane's "Undo the agent's last turn" after 6 seconds.
 //! - `SATURN_ANSWER=allow|deny` answers the first pane's permission after 5 seconds.
 //! - `SATURN_RUN_CHECKS=1` runs every check of the focused pane's checkout.
+//! - `SATURN_PICTURES=1` opens "Pictures of the app" after 6 seconds (`SATURN_TAKE_PICTURES=1` takes a set).
 //! - `SATURN_KEYS="e c h tab"` presses those keys in the focused pane, through the window, and prints
 //!   the tab count after each; `SATURN_REBIND=new-tab=cmd-t` moves a shortcut first, as Settings
 //!   would. `SATURN_SETTINGS_SECTION=keyboard` opens Settings on that section.
@@ -239,6 +240,19 @@ fn review_from_env(window: &mut Window, cx: &mut Context<Workspace>) {
 
 /// Buttons a spike presses after a while: undo a turn, answer a permission, run the checks.
 fn press_from_env(cx: &mut Context<Workspace>) {
+    if std::env::var_os("SATURN_PICTURES").is_some() {
+        // Once the pane's server has been seen; `SATURN_TAKE_PICTURES` presses Take too.
+        cx.spawn(async move |workspace, cx| {
+            cx.background_executor().timer(Duration::from_secs(6)).await;
+            cx.update(|cx| {
+                let Some(window) = cx.active_window().or_else(|| cx.windows().first().copied()) else { return };
+                let _ = window.update(cx, |_, window, cx| {
+                    let _ = workspace.update(cx, |workspace, cx| workspace.show_pictures(window, cx));
+                });
+            });
+        })
+        .detach();
+    }
     undo_turn_from_env(cx);
     answer_from_env(cx);
     if std::env::var_os("SATURN_RUN_CHECKS").is_some() {

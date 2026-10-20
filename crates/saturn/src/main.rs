@@ -19,6 +19,7 @@ mod lsp;
 mod menu_bar;
 mod notify;
 mod palette;
+mod pictures_view;
 mod pr_body_view;
 mod problems_view;
 mod queue_view;
