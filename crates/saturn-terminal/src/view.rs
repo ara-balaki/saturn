@@ -10,9 +10,9 @@ use std::time::Instant;
 use alacritty_terminal::index::Side;
 use alacritty_terminal::term::TermMode;
 use gpui_kit::{
-    App, ClipboardItem, Context, EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement,
-    KeyBinding, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels,
-    Point, Render, ScrollDelta, ScrollWheelEvent, Styled as _, Window, div,
+    App, ClipboardItem, Context, CursorStyle, EventEmitter, FocusHandle, Focusable, InteractiveElement as _,
+    IntoElement, KeyBinding, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    ParentElement as _, Pixels, Point, Render, ScrollDelta, ScrollWheelEvent, Styled as _, Window, div,
 };
 use saturn_core::agent_state::AgentState;
 
@@ -404,6 +404,8 @@ impl Render for TerminalView {
         let focused = self.focus.is_focused(window);
         div()
             .size_full()
+            // Text can be selected here, so the pointer says so.
+            .cursor(CursorStyle::IBeam)
             .track_focus(&self.focus)
             .key_context("Terminal")
             .on_key_down(cx.listener(Self::key_down))
