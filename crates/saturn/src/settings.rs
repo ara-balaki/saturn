@@ -37,6 +37,9 @@ pub struct Settings {
     pub show_usage: bool,
     /// Which tickets the Tickets panel shows.
     pub ticket_filter: saturn_core::clickup::Filter,
+    /// A worktree's env files are links to the main checkout's, so every worktree has the same
+    /// values (`saturn_core::shared_env`).
+    pub share_env_files: bool,
 }
 
 /// How files look in the editor.
@@ -154,6 +157,7 @@ impl Default for Settings {
             terminal: TerminalSettings::default(),
             show_usage: true,
             ticket_filter: saturn_core::clickup::Filter::default(),
+            share_env_files: true,
         }
     }
 }

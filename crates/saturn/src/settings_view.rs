@@ -226,6 +226,12 @@ impl SettingsView {
             ),
             Row::new(
                 Section::General,
+                "Share env files with worktrees",
+                "A worktree's .env files point at the main checkout's, so a value added in either is in both. A worktree's own different file is left alone.",
+                self.switch("share-env-files", settings.share_env_files, |settings, on| settings.share_env_files = on),
+            ),
+            Row::new(
+                Section::General,
                 "Updates",
                 version,
                 chrome::button("check-updates", "Check now", None, false)

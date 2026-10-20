@@ -20,6 +20,7 @@ use saturn_core::git;
 use saturn_core::layout::{Cell, CellId, Direction, Layout, RowId, TabId};
 use saturn_core::pull_request::{self, PrState, PullRequest};
 use saturn_core::session_name::rename_for_prompt;
+use saturn_core::shared_env;
 use saturn_design::{color, radius, shadow, space};
 use saturn_terminal::view::{TerminalView, TerminalViewEvent};
 
@@ -259,6 +260,8 @@ pub struct Workspace {
     pull_requests: HashMap<TabId, PullRequest>,
     /// Whether the two above are being read, so refreshes don't pile up.
     checkout_refresh: Refresh,
+    /// The checkouts whose env files have been shared with the main checkout's this session.
+    env_shared: HashSet<PathBuf>,
 }
 
 /// A background refresh: not running, running, or running with another asked for meanwhile (a new
@@ -630,6 +633,7 @@ impl Workspace {
             drop_target: None,
             pull_requests: HashMap::new(),
             checkout_refresh: Refresh::Idle,
+            env_shared: HashSet::new(),
             roots,
             root: project.clone(),
             follow_pane: true,
@@ -898,7 +902,14 @@ impl Workspace {
         let project = self.settings.project(&self.project);
         let cwd = if project.create_worktree {
             match git::ticket_worktree(&self.project, ticket.key()) {
-                Ok(dir) => dir,
+                Ok(dir) => {
+                    // Before the agent starts, so it finds the env files there.
+                    if self.settings.share_env_files {
+                        shared_env::share(&dir);
+                        self.env_shared.insert(dir.clone());
+                    }
+                    dir
+                }
                 Err(problem) => {
                     self.clickup.problem = Some(format!("No worktree for {}: {problem}", ticket.key()));
                     self.project.clone()
@@ -952,6 +963,7 @@ impl Workspace {
                 let stale = this.checkout_refresh == Refresh::RunningStale;
                 this.checkout_refresh = Refresh::Idle;
                 this.checkouts = checkouts;
+                this.share_env_files(cx);
                 // Made-up agents keep their made-up pull requests.
                 if std::env::var_os("SATURN_FAKE_AGENTS").is_none() {
                     this.pull_requests = pull_requests;
@@ -963,6 +975,28 @@ impl Workspace {
             });
         })
         .detach();
+    }
+
+    /// Links the main checkout's env files into each worktree a tab is in, once a session, also
+    /// worktrees an agent or a script made.
+    fn share_env_files(&mut self, cx: &mut Context<Self>) {
+        if !self.settings.share_env_files {
+            return;
+        }
+        let new: Vec<PathBuf> = self
+            .checkouts
+            .values()
+            .map(|checkout| checkout.root.clone())
+            .filter(|root| self.env_shared.insert(root.clone()))
+            .collect();
+        if !new.is_empty() {
+            cx.background_spawn(async move {
+                for root in new {
+                    shared_env::share(&root);
+                }
+            })
+            .detach();
+        }
     }
 
     /// Makes the text of terminals and files bigger (`by` 1), smaller (−1), or its usual size
