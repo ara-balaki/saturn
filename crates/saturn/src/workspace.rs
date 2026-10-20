@@ -945,16 +945,19 @@ fn process_name(pid: i32) -> Option<String> {
 impl Workspace {
     /// What changes outside Saturn without telling it, read again on timers: ClickUp's tickets,
     /// branches and pull requests, and the servers panes run.
-    fn keep_fresh(cx: &mut Context<Self>) {
+    fn keep_fresh(window: &mut Window, cx: &mut Context<Self>) {
         // A saved ClickUp token turns the ticket picker on; it's read off the main thread.
-        cx.spawn(async move |this, cx| {
+        cx.spawn_in(window, async move |this, cx| {
             let token = cx.background_spawn(async { clickup::token() }).await;
             if let Some(token) = token {
-                let _ = this.update(cx, |this, cx| {
+                let _ = this.update_in(cx, |this, window, cx| {
                     this.clickup.token = Some(token);
                     // The Tickets panel waits for ClickUp before it reopens: without it, it's empty.
-                    this.panels.tickets |= this.settings.panels.tickets;
-                    this.refresh_tickets(cx);
+                    if this.settings.panels.tickets {
+                        this.open_tickets(window, cx);
+                    } else {
+                        this.refresh_tickets(cx);
+                    }
                 });
             }
             // Statuses change in ClickUp; a minute is fresh enough and far under its rate limit.
@@ -1008,7 +1011,7 @@ impl Workspace {
     }
 
     pub fn new(project: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::keep_fresh(cx);
+        Self::keep_fresh(window, cx);
         // Pane sizes change by dragging, which saves nothing on its own; quitting saves them.
         cx.on_app_quit(|this, cx| {
             this.save_session(cx);
@@ -2385,16 +2388,23 @@ impl Workspace {
     /// Opens or closes the Tickets panel, reading the tickets again as it opens. A maximised pane
     /// covers it, so the pane is restored and the panel shows.
     pub fn toggle_tickets(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.panels.tickets = self.layout.maximized.take().is_some() || !self.panels.tickets;
-        if self.panels.tickets {
-            if self.tickets_view.is_none() {
-                let workspace = cx.weak_entity();
-                let view = cx.new(|cx| TicketsView::new(workspace, window, cx));
-                self.tickets_view = Some(view);
-            }
-            self.refresh_tickets(cx);
+        if self.layout.maximized.take().is_some() || !self.panels.tickets {
+            self.open_tickets(window, cx);
+        } else {
+            self.panels.tickets = false;
         }
         self.remember_panels(cx);
+        cx.notify();
+    }
+
+    /// Shows the Tickets panel, made the first time, and reads the tickets again.
+    fn open_tickets(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.panels.tickets = true;
+        if self.tickets_view.is_none() {
+            let workspace = cx.weak_entity();
+            self.tickets_view = Some(cx.new(|cx| TicketsView::new(workspace, window, cx)));
+        }
+        self.refresh_tickets(cx);
         cx.notify();
     }
 
@@ -3601,7 +3611,12 @@ impl Workspace {
             .child(header_button("split-right", "columns-2", Placement::Right, cx))
             .child(header_button("split-down", "rows-2", Placement::Down, cx))
             .child(header_button("new-tab", "plus", Placement::Tab, cx))
-            .child(self.render_maximize_button(cell_id, cx))
+            // On the focused pane only, and the maximised one to restore it: one more button on
+            // every pane would crowd out their chips. ⌘⇧↩ works from any pane.
+            .children(
+                (self.layout.focused == Some(cell_id) || self.layout.maximized == Some(cell_id))
+                    .then(|| self.render_maximize_button(cell_id, cx)),
+            )
     }
 
     /// Maximises this pane over the grid and the panels, or restores it. The pane takes focus
@@ -4252,12 +4267,6 @@ impl Render for Workspace {
                     window.focus(&focus, cx);
                 }
             });
-        }
-        // The Tickets panel reopened at start, once ClickUp answered: its view is made here, where
-        // there's a window to make it in.
-        if self.panels.tickets && self.tickets_view.is_none() {
-            let workspace = cx.weak_entity();
-            self.tickets_view = Some(cx.new(|cx| TicketsView::new(workspace, window, cx)));
         }
         div()
             .size_full()

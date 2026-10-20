@@ -129,7 +129,7 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
 ### Terminals
 
 - Split right (⌘D) or down (⌘⇧D), or drag a tab onto a pane's edge to split it there. Tabs in every
-  pane. Maximise one pane over everything with its button or ⌘⇧↩. Panes share the space evenly
+  pane. Maximise the focused pane over everything with its button or ⌘⇧↩. Panes share the space evenly
   whenever one opens or closes; drag a divider to change that, or double-click it to even out its two
   panes.
 - A real terminal underneath (alacritty's engine), so TUIs, colours and the mouse work as they should.
