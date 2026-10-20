@@ -99,7 +99,7 @@ pub fn name_for(command: &str, folder: Option<&Path>, checkout: Option<&Path>) -
         .split_whitespace()
         .filter(|word| !word.starts_with('-') && !word.contains('='))
         .map(program)
-        .find(|name| !name.is_empty() && !STARTERS.contains(&name.as_str()))
+        .find(|name| !name.is_empty() && !STARTERS.contains(&name.to_lowercase().as_str()))
         .or_else(|| command.split_whitespace().next().map(program))
         .unwrap_or_default()
 }
@@ -217,6 +217,14 @@ mod tests {
         assert_eq!(name_for("node --enable-source-maps dist/main", None, None), "main");
         assert_eq!(name_for("/usr/bin/python3 -m http.server 8000", None, None), "http");
         assert_eq!(name_for("bundle exec rails server", None, None), "rails");
+        assert_eq!(
+            name_for(
+                "/Library/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python -m http.server 8000",
+                None,
+                None
+            ),
+            "http"
+        );
     }
 
     #[test]
