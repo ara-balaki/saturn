@@ -318,6 +318,9 @@ pub struct Workspace {
     /// The agent Saturn started in each tab (by typing its command), or found running there, before
     /// any hook says more. Gone when the shell's prompt comes back.
     started: HashMap<TabId, Agent>,
+    /// When Saturn started (or found) a tab's agent, in Unix seconds: a Codex session that began in
+    /// its folder since then is its own.
+    started_at: HashMap<TabId, i64>,
     /// When each tab's foreground program was last looked up, to find an agent typed by hand without
     /// running `ps` on every title change.
     program_checked: HashMap<TabId, Instant>,
@@ -1100,6 +1103,7 @@ impl Workspace {
             sessions: HashMap::new(),
             started: HashMap::new(),
             program_checked: HashMap::new(),
+            started_at: HashMap::new(),
             routine_tabs: HashMap::new(),
             teams: HashMap::new(),
             also_in: Vec::new(),
@@ -1756,6 +1760,30 @@ impl Workspace {
     }
 
     /// Where each attempt's agent is: its pane (the first working in its folder) and that pane's state.
+    /// The prompts typed in a tab's agent session, in order: from Claude Code's transcript, or
+    /// Codex's rollout.
+    fn typed_prompts(&self, tab: TabId) -> Vec<String> {
+        match self.sessions.get(&tab) {
+            Some((Agent::Codex, id)) => Agent::Codex
+                .home()
+                .map(|home| saturn_core::codex_sessions::typed_prompts(&home, id))
+                .unwrap_or_default(),
+            _ => self
+                .transcripts
+                .get(&tab)
+                .and_then(|path| std::fs::File::open(path).ok())
+                .map(|file| {
+                    saturn_core::prompts::typed_prompts(
+                        std::io::BufRead::lines(std::io::BufReader::new(file)).map_while(Result::ok),
+                    )
+                    .into_iter()
+                    .map(|asked| asked.prompt)
+                    .collect()
+                })
+                .unwrap_or_default(),
+        }
+    }
+
     /// The agent a tab runs, as its session's hooks say, else as Saturn started it.
     pub fn agent_in(&self, tab: TabId) -> Option<Agent> {
         self.sessions.get(&tab).map(|(agent, _)| *agent).or_else(|| self.started.get(&tab).copied())
@@ -1881,6 +1909,7 @@ impl Workspace {
         };
         if let Some(agent) = command.rsplit("&& ").next().and_then(Agent::of_command) {
             self.started.insert(tab, agent);
+            self.started_at.insert(tab, crate::worktrees_view::now());
         }
         cx.spawn(async move |_, cx| {
             cx.background_executor().timer(std::time::Duration::from_millis(600)).await;
@@ -3094,6 +3123,7 @@ impl Workspace {
                 if view.read(cx).state == AgentState::Working && self.waits.remove(&tab).is_some() {
                     cx.notify();
                 }
+                self.find_codex_session(tab, cx);
             }
             Some(Agent::Claude) => {}
             None => {
@@ -3105,6 +3135,8 @@ impl Workspace {
                     let _ = this.update(cx, |this, cx| {
                         if let Some(agent) = program.as_deref().and_then(Agent::of_program) {
                             this.started.insert(tab, agent);
+                            // Typed by hand a moment ago, at most.
+                            this.started_at.insert(tab, crate::worktrees_view::now() - 60);
                             this.read_codex_title(tab, cx);
                         }
                     });
@@ -3112,6 +3144,34 @@ impl Workspace {
                 .detach();
             }
         }
+    }
+
+    /// A Codex pane's session, before Codex has said it as a turn ends: the newest Codex session
+    /// that began in the pane's folder since Codex started there. So a pane quit mid-turn still
+    /// resumes. Looked for once, off the main thread.
+    fn find_codex_session(&mut self, tab: TabId, cx: &mut Context<Self>) {
+        if self.sessions.contains_key(&tab) {
+            return;
+        }
+        let Some(since) = self.started_at.remove(&tab) else { return };
+        let Some(home) = Agent::Codex.home() else { return };
+        let Some(folder) = self.terminals.get(&tab).map(|view| view.read(cx).cwd.clone()) else { return };
+        cx.spawn(async move |this, cx| {
+            // Codex writes the session's first line as it starts; give it a moment.
+            cx.background_executor().timer(Duration::from_secs(2)).await;
+            let found = cx
+                .background_spawn(async move { saturn_core::codex_sessions::session_in(&home, &folder, since) })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if let Some(id) = found
+                    && !this.sessions.contains_key(&tab)
+                {
+                    this.sessions.insert(tab, (Agent::Codex, id));
+                    this.save_session(cx);
+                }
+            });
+        })
+        .detach();
     }
 
     /// A macOS notification about a tab that needs you or finished, while Saturn is in the background.
@@ -4438,8 +4498,8 @@ impl Workspace {
             .on_action(cx.listener(|this, _: &ShowPreview, window, cx| this.show_preview(window, cx)))
             .on_action(cx.listener(|this, _: &TeachRepo, window, cx| {
                 let checkout = this.focused_checkout(cx);
-                let transcript = this.layout.focused_tab().and_then(|tab| this.transcripts.get(&tab).cloned());
-                crate::teach_view::open(cx.weak_entity(), checkout, transcript, window, cx);
+                let asked = this.layout.focused_tab().map(|tab| this.typed_prompts(tab)).unwrap_or_default();
+                crate::teach_view::open(cx.weak_entity(), checkout, asked, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ShowContext, window, cx| {
                 let checkout = this.focused_checkout(cx);

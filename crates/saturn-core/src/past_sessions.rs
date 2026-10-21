@@ -17,6 +17,8 @@ const KEPT: usize = 16_000;
 /// One session, summed up.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Session {
+    /// Whose session: Claude Code's (these transcripts) or Codex's (`codex_sessions`).
+    pub agent: crate::agents::Agent,
     pub id: String,
     /// Its title: the one you gave it, else Claude's, else its first prompt.
     pub title: String,

@@ -1,6 +1,7 @@
-//! The Claude plan's usage (`/usage`: the session, the week, a model's week), read for the whole
-//! app and shown at the foot of every window's sidebar. Read every few minutes and soon after an
-//! agent finishes a turn; hidden when Claude Code has no plan limits to report.
+//! The plans' usage, read for the whole app and shown at the foot of every window's sidebar:
+//! Claude's (`/usage`: the session, the week, a model's week) and Codex's (the limits it last wrote
+//! into its sessions). Read every few minutes and soon after an agent finishes a turn; each hidden
+//! when its agent has no plan limits to report.
 
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -21,7 +22,10 @@ const AT_MOST_EVERY: Duration = Duration::from_secs(60);
 
 #[derive(Default)]
 pub struct Usage {
+    /// Claude's plan.
     pub limits: Option<Vec<Limit>>,
+    /// Codex's plan.
+    pub codex: Option<Vec<Limit>>,
     read_at: Option<Instant>,
     reading: bool,
     /// The highest warning given for each limit's current window (80 or 95), by label and reset.
@@ -49,11 +53,18 @@ pub fn session_percent(cx: &App) -> Option<f64> {
 
 /// A notification when a limit passes 80% or 95% of its window, once each per window.
 fn warn(usage: &mut Usage) {
-    let Some(limits) = &usage.limits else { return };
+    let plans = [("", usage.limits.clone()), ("Codex ", usage.codex.clone())];
+    for (whose, limits) in plans {
+        warn_about(usage, whose, &limits.unwrap_or_default());
+    }
+}
+
+/// Warns about each of a plan's limits nearly used (`whose`: "" for Claude's, "Codex " for Codex's).
+fn warn_about(usage: &mut Usage, whose: &str, limits: &[Limit]) {
     for limit in limits {
         let level = WARN_AT.iter().rev().copied().find(|at| limit.percent >= f64::from(*at));
         let Some(level) = level else { continue };
-        let key = (limit.label.clone(), limit.resets_at);
+        let key = (format!("{whose}{}", limit.label), limit.resets_at);
         if usage.warned.get(&key).is_some_and(|warned| *warned >= level) {
             continue;
         }
@@ -65,9 +76,9 @@ fn warn(usage: &mut Usage) {
         };
         let resets =
             limit.resets_at.map(|at| format!(" It resets {}.", resets_in(at - unix_now()))).unwrap_or_default();
-        let title = format!("{level}% of your {which} used");
+        let title = format!("{level}% of your {whose}{which} used");
         let body = format!("Agents slow down or stop when it runs out.{resets}");
-        crate::notify::post(&format!("limit-{}", limit.label), &title, &body, false);
+        crate::notify::post(&format!("limit-{whose}{}", limit.label), &title, &body, false);
     }
 }
 
@@ -90,6 +101,11 @@ pub fn start(cx: &mut App) {
     if crate::spike::is_automated() || std::env::var_os("SATURN_FAKE_USAGE").is_some() {
         if std::env::var_os("SATURN_FAKE_USAGE").is_some() {
             cx.global_mut::<Usage>().limits = Some(made_up());
+            if std::env::var_os("SATURN_AGENTS").is_some_and(|agents| agents.to_string_lossy().contains("codex")) {
+                let now = unix_now();
+                cx.global_mut::<Usage>().codex =
+                    Some(vec![Limit { label: "Week".to_owned(), percent: 23., resets_at: Some(now + 5 * 86_400) }]);
+            }
         }
         return;
     }
@@ -114,12 +130,20 @@ pub fn refresh(now: bool, cx: &mut App) {
     cx.global_mut::<Usage>().reading = true;
     let path = crate::lsp::login_path();
     cx.spawn(async move |cx| {
-        let limits = cx.background_spawn(async move { usage::read(&path) }).await;
+        let (limits, codex) = cx
+            .background_spawn(async move {
+                let codex = saturn_core::agents::Agent::Codex
+                    .home()
+                    .and_then(|home| saturn_core::codex_sessions::limits(&home));
+                (usage::read(&path), codex)
+            })
+            .await;
         cx.update(|cx| {
             let usage = cx.global_mut::<Usage>();
             usage.reading = false;
             usage.read_at = Some(Instant::now());
             usage.limits = limits;
+            usage.codex = codex;
             warn(usage);
             cx.refresh_windows();
         });
@@ -167,15 +191,35 @@ fn meter(percent: f64) -> impl IntoElement {
 /// The plan's limits as a card at the foot of the sidebar, on the same gradient as an agent's.
 /// Clicking it reads them again.
 pub fn render(cx: &App) -> Option<impl IntoElement> {
-    let limits = cx.try_global::<Usage>()?.limits.clone()?;
-    let now = unix_now();
-    let resets = |limit: &Limit| limit.resets_at.map(|at| usage::resets_in(at, now)).unwrap_or_default();
+    let usage = cx.try_global::<Usage>()?;
+    let plans: Vec<(&str, Vec<Limit>)> = [("Claude", usage.limits.clone()), ("Codex", usage.codex.clone())]
+        .into_iter()
+        .filter_map(|(name, limits)| Some((name, limits.filter(|limits| !limits.is_empty())?)))
+        .collect();
+    if plans.is_empty() {
+        return None;
+    }
     let card = crate::agents_view::surface("usage", AgentState::Working)
         .gap(len(space::SPACE_3))
         .cursor_pointer()
         .on_click(|_, _, cx| refresh(true, cx));
+    // One plan is "Usage"; two are told apart by their agent.
+    let titled = plans.len() > 1;
+    let mut card = card;
+    for (name, limits) in plans {
+        let title =
+            div().relative().text_size(px(12.)).text_color(white(0.62)).child(if titled { name } else { "Usage" });
+        card = card.child(title).child(limit_rows(&limits));
+    }
+    Some(card)
+}
+
+/// Each limit of a plan: its name, when it resets, how much is used, and a meter.
+fn limit_rows(limits: &[Limit]) -> impl IntoElement {
+    let now = unix_now();
+    let resets = |limit: &Limit| limit.resets_at.map(|at| usage::resets_in(at, now)).unwrap_or_default();
     let mut rows = div().relative().flex().flex_col().gap(len(space::SPACE_3));
-    for limit in &limits {
+    for limit in limits {
         rows = rows.child(
             div()
                 .flex()
@@ -203,6 +247,5 @@ pub fn render(cx: &App) -> Option<impl IntoElement> {
                 .child(meter(limit.percent)),
         );
     }
-    let title = div().relative().text_size(px(12.)).text_color(white(0.62)).child("Usage");
-    Some(card.child(title).child(rows))
+    rows
 }

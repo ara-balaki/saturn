@@ -8,9 +8,11 @@ use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Agent {
+    /// What Saturn ran before it knew others, and what anything saved before then was.
+    #[default]
     Claude,
     Codex,
 }

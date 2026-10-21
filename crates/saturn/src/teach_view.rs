@@ -36,22 +36,17 @@ impl TeachView {
     fn new(
         workspace: WeakEntity<Workspace>,
         checkout: PathBuf,
-        transcript: Option<PathBuf>,
+        asked: Vec<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let mut prompts: Vec<(String, bool)> = transcript
-            .and_then(|path| std::fs::File::open(path).ok())
-            .map(|file| {
-                prompts::typed_prompts(std::io::BufRead::lines(std::io::BufReader::new(file)).map_while(Result::ok))
-            })
-            .unwrap_or_default()
+        let mut prompts: Vec<(String, bool)> = asked
             .into_iter()
             .rev()
             .take(40)
-            .map(|asked| {
-                let correction = prompts::is_correction(&asked.prompt);
-                (asked.prompt, correction)
+            .map(|prompt| {
+                let correction = prompts::is_correction(&prompt);
+                (prompt, correction)
             })
             .collect();
         // Corrections first, each group newest first.
@@ -108,7 +103,7 @@ impl Render for TeachView {
                     .py(len(space::SPACE_2))
                     .text_size(px(13.))
                     .text_color(theme::color(color::INK_MUTED))
-                    .child("No Claude session in this pane yet: write the lesson yourself below."),
+                    .child("No agent session in this pane yet: write the lesson yourself below."),
             );
         }
         for (index, (prompt, correction)) in self.prompts.iter().enumerate() {
@@ -206,15 +201,15 @@ fn file_label(file: &std::path::Path) -> String {
     format!("{name}{new}{whose}")
 }
 
-/// Opens Teach the repo for the pane working in `checkout`, its session's `transcript` if known.
+/// Opens Teach the repo for the pane working in `checkout`, with the prompts typed in its session.
 pub fn open(
     workspace: WeakEntity<Workspace>,
     checkout: PathBuf,
-    transcript: Option<PathBuf>,
+    asked: Vec<String>,
     window: &mut Window,
     cx: &mut gpui_kit::App,
 ) {
-    let view = cx.new(|cx| TeachView::new(workspace, checkout, transcript, window, cx));
+    let view = cx.new(|cx| TeachView::new(workspace, checkout, asked, window, cx));
     window.open_dialog(cx, move |dialog, _, _| {
         dialog
             .title("Teach the repo")

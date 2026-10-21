@@ -1,6 +1,7 @@
-//! Search sessions (⌘⇧P): every Claude Code session on this Mac, newest first, found by what you
-//! asked in it, its title, its folder or its branch (`saturn_core::past_sessions`). Picking one
-//! resumes it in a new pane in its folder, or goes to the pane it's already open in.
+//! Search sessions: every Claude Code and Codex session on this Mac, newest first, found by what you
+//! asked in it, its title, its folder or its branch (`saturn_core::past_sessions`,
+//! `saturn_core::codex_sessions`). Picking one resumes it in a new pane in its folder, with its own
+//! agent, or goes to the pane it's already open in.
 
 use std::sync::{LazyLock, Mutex};
 
@@ -21,6 +22,8 @@ use crate::workspace::Workspace;
 
 /// The sessions read so far, kept for the next search so only changed transcripts are read again.
 static INDEX: LazyLock<Mutex<Index>> = LazyLock::new(|| Mutex::new(Index::default()));
+static CODEX_INDEX: LazyLock<Mutex<saturn_core::codex_sessions::Index>> =
+    LazyLock::new(|| Mutex::new(saturn_core::codex_sessions::Index::default()));
 
 /// The most rows shown; a search narrows them.
 const SHOWN: usize = 80;
@@ -32,6 +35,8 @@ pub struct SessionsView {
     sessions: Option<Vec<Session>>,
     /// Sessions open in a pane, by their id.
     open: Vec<(String, TabId)>,
+    /// Both agents are on this Mac, so each row says whose session it is.
+    both: bool,
     _query_events: Subscription,
 }
 
@@ -60,7 +65,13 @@ impl SessionsView {
                 .background_spawn(async move {
                     let home = saturn_core::prompts::claude_home();
                     let mut index = INDEX.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                    home.map(|home| index.refresh(&home)).unwrap_or_default()
+                    let mut sessions = home.map(|home| index.refresh(&home)).unwrap_or_default();
+                    if let Some(home) = Agent::Codex.home().filter(|home| home.is_dir()) {
+                        let mut codex = CODEX_INDEX.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                        sessions.extend(codex.refresh(&home));
+                        sessions.sort_by_key(|session| std::cmp::Reverse(session.modified));
+                    }
+                    sessions
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
@@ -69,13 +80,18 @@ impl SessionsView {
             });
         })
         .detach();
-        Self { workspace, query, sessions: None, open, _query_events: query_events }
+        let both = crate::agent_choice::ready(cx).len() > 1;
+        Self { workspace, query, sessions: None, open, both, _query_events: query_events }
     }
 
     fn row(&self, index: usize, session: &Session, query: &str) -> impl IntoElement + use<> {
         let pane = self.open.iter().find(|(id, _)| *id == session.id).map(|(_, tab)| *tab);
         let folder = session.cwd.clone().filter(|cwd| cwd.is_dir());
         let mut place: Vec<String> = Vec::new();
+        // Whose, when this Mac runs both.
+        if self.both {
+            place.push(session.agent.name().to_owned());
+        }
         if let Some(cwd) = &session.cwd {
             place.push(
                 cwd.file_name().map_or_else(|| cwd.display().to_string(), |name| name.to_string_lossy().into_owned()),
@@ -138,11 +154,11 @@ impl SessionsView {
             return row;
         }
         let workspace = self.workspace.clone();
-        let id = session.id.clone();
+        let (id, agent) = (session.id.clone(), session.agent);
         row.cursor_pointer().hover(|s| s.bg(theme::fill_hover())).on_click(move |_, window, cx| {
             let _ = workspace.update(cx, |workspace, cx| match (pane, &folder) {
                 (Some(tab), _) => workspace.go_to_tab(tab, window, cx),
-                (None, Some(folder)) => workspace.resume_session(folder, Agent::Claude, &id, window, cx),
+                (None, Some(folder)) => workspace.resume_session(folder, agent, &id, window, cx),
                 (None, None) => {}
             });
             window.close_dialog(cx);
