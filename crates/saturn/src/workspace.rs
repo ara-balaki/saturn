@@ -4018,34 +4018,44 @@ impl Workspace {
     /// tooltip, to keep the bar short. Its arrow holds the other ways to start agents: several at
     /// once, again, on a schedule.
     fn render_new_agent(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
+        let height = len(TITLEBAR_CONTROL + 2. * space::SPACE_1);
+        // A part of the button: no fill of its own, a light veil on hover.
+        let part = |id: &'static str| {
+            div()
+                .id(id)
+                .flex()
+                .items_center()
+                .h(height)
+                .cursor_pointer()
+                .hover(|s| s.bg(gpui_kit::white().opacity(0.1)))
+        };
+        let open = self.open_menu == Some(OpenMenu::NewAgent);
+        let more = part("new-agent-more")
+            .px(len(space::SPACE_2))
+            .rounded_r(len(radius::RADIUS_MD))
+            .when(open, |part| part.bg(gpui_kit::white().opacity(0.1)))
+            .child(chrome::icon("chevron-down", 14., theme::color(color::INK_ON_ACCENT)))
+            .tooltip(chrome::tip("More ways to start agents: Best of N, routines, past sessions"))
+            .on_click(cx.listener(|this, _, _, cx| this.toggle_menu(OpenMenu::NewAgent, cx)));
+        chrome::primary_surface(div())
             .flex()
             .items_center()
-            .gap(px(1.))
+            .h(height)
+            .rounded(len(radius::RADIUS_MD))
+            .text_size(px(13.))
+            .font_weight(FontWeight::MEDIUM)
             .child(
-                chrome::button("new-agent", "New agent", None, true)
-                    .h(len(TITLEBAR_CONTROL + 2. * space::SPACE_1))
-                    .rounded(len(radius::RADIUS_MD))
-                    .rounded_r(px(0.))
+                part("new-agent")
+                    .px(len(space::SPACE_4))
+                    .rounded_l(len(radius::RADIUS_MD))
+                    .child("New agent")
                     .tooltip(chrome::tip_for("New agent, in a worktree of its own", OpenTicketPicker))
                     .on_click(cx.listener(|this, _, window, cx| {
                         ticket_picker::open(cx.weak_entity(), this.clickup.connected(), window, cx);
                     })),
             )
-            .child(
-                self.with_menu(
-                    OpenMenu::NewAgent,
-                    chrome::button("new-agent-more", "", None, true)
-                        .h(len(TITLEBAR_CONTROL + 2. * space::SPACE_1))
-                        .px(len(space::SPACE_2))
-                        .rounded(len(radius::RADIUS_MD))
-                        .rounded_l(px(0.))
-                        .child(chrome::icon("chevron-down", 14., theme::color(color::INK_ON_ACCENT)))
-                        .tooltip(chrome::tip("More ways to start agents: Best of N, routines, past sessions"))
-                        .on_click(cx.listener(|this, _, _, cx| this.toggle_menu(OpenMenu::NewAgent, cx))),
-                    cx,
-                ),
-            )
+            .child(div().flex_none().w(px(1.)).h(px(16.)).bg(theme::color(color::INK_ON_ACCENT).opacity(0.3)))
+            .child(self.with_menu(OpenMenu::NewAgent, more, cx))
     }
 
     /// The sidebar's header: the folder it shows (the selected repo, or a ticket's worktree when

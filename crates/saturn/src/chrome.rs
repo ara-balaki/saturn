@@ -237,15 +237,7 @@ pub fn button(
         .font_weight(FontWeight::MEDIUM)
         .map(|button| {
             if primary {
-                button.text_color(theme::color(color::INK_ON_ACCENT)).bg(accent_fill()).shadow(vec![
-                    gpui_kit::BoxShadow {
-                        color: theme::color(color::BLUE_VIVID).opacity(0.35),
-                        offset: point(px(0.), px(6.)),
-                        blur_radius: px(20.),
-                        spread_radius: px(0.),
-                        inset: false,
-                    },
-                ])
+                primary_surface(button)
             } else {
                 button
                     .text_color(theme::color(color::INK))
@@ -255,6 +247,18 @@ pub fn button(
         })
         .child(label)
         .children(shortcut.map(|keys| div().font_weight(FontWeight::NORMAL).text_color(hint).child(keys)))
+}
+
+/// The surface of the one primary action: the accent fill with a soft blue bloom beneath it. A
+/// split button lays its parts on one surface, so the gradient and the bloom run across both.
+pub fn primary_surface<E: gpui_kit::Styled>(element: E) -> E {
+    element.text_color(theme::color(color::INK_ON_ACCENT)).bg(accent_fill()).shadow(vec![gpui_kit::BoxShadow {
+        color: theme::color(color::BLUE_VIVID).opacity(0.35),
+        offset: point(px(0.), px(6.)),
+        blur_radius: px(20.),
+        spread_radius: px(0.),
+        inset: false,
+    }])
 }
 
 /// A headline in two weights, the point in semibold: "No terminals **yet**".
