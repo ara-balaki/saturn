@@ -17,7 +17,8 @@
 //!   `SATURN_PALETTE_QUERY` typed in it; `SATURN_TICKET_PICKER=1` opens New agent (with
 //!   `SATURN_NEW_AGENT_QUERY` typed in it);
 //!   `SATURN_TICKET_FILTERS=1` opens the Tickets panel's filters.
-//! - `SATURN_DROP=path` drops that file on the middle of the window, as Finder would.
+//! - `SATURN_DROP=path` drops that file on the middle of the window, as Finder would;
+//!   `SATURN_DRAG=270,600:390,600` drags the mouse from one point to the other, a few pixels a frame.
 //! - `SATURN_RUN_COMMAND="Start the app"` runs that command from the palette's list, by its name
 //!   (after `SATURN_RUN_COMMAND_AFTER` seconds, else 1.5); `SATURN_THEN_COMMAND` runs a second one
 //!   later (`SATURN_THEN_AFTER`, else 8).
@@ -407,6 +408,60 @@ fn input_from_env(window: &mut Window, cx: &mut Context<Workspace>) {
     if let Ok(keys) = std::env::var("SATURN_KEYS") {
         press_keys(keys, window, cx);
     }
+    if let Ok(drag) = std::env::var("SATURN_DRAG") {
+        drag_mouse(&drag, window, cx);
+    }
+}
+
+/// Presses the mouse at one point and drags it to another a few pixels a frame, as a hand would
+/// (`SATURN_DRAG=270,400:420,400`): how dividers and resize handles are tried.
+fn drag_mouse(drag: &str, window: &mut Window, cx: &mut Context<Workspace>) {
+    let point = |text: &str| {
+        let (x, y) = text.split_once(',')?;
+        Some(gpui_kit::point(gpui_kit::px(x.trim().parse().ok()?), gpui_kit::px(y.trim().parse().ok()?)))
+    };
+    let Some((from, to)) = drag.split_once(':').and_then(|(from, to)| Some((point(from)?, point(to)?))) else {
+        return;
+    };
+    cx.spawn_in(window, async move |_, cx| {
+        cx.background_executor().timer(Duration::from_millis(2000)).await;
+        let left = gpui_kit::MouseButton::Left;
+        let _ = cx.update(|window, cx| {
+            let down = gpui_kit::MouseDownEvent {
+                button: left,
+                position: from,
+                modifiers: gpui_kit::Modifiers::default(),
+                click_count: 1,
+                first_mouse: false,
+            };
+            window.dispatch_event(gpui_kit::PlatformInput::MouseDown(down), cx);
+        });
+        let steps = 40;
+        for step in 1..=steps {
+            cx.background_executor().timer(Duration::from_millis(16)).await;
+            #[allow(clippy::cast_precision_loss)]
+            let along = step as f32 / steps as f32;
+            let position = from + (to - from) * along;
+            let _ = cx.update(|window, cx| {
+                let event = gpui_kit::MouseMoveEvent {
+                    position,
+                    pressed_button: Some(left),
+                    modifiers: gpui_kit::Modifiers::default(),
+                };
+                window.dispatch_event(gpui_kit::PlatformInput::MouseMove(event), cx);
+            });
+        }
+        let _ = cx.update(|window, cx| {
+            let up = gpui_kit::MouseUpEvent {
+                button: left,
+                position: to,
+                modifiers: gpui_kit::Modifiers::default(),
+                click_count: 1,
+            };
+            window.dispatch_event(gpui_kit::PlatformInput::MouseUp(up), cx);
+        });
+    })
+    .detach();
 }
 
 /// Drops a file on the middle of the window, as Finder would (`SATURN_DROP=path`).
