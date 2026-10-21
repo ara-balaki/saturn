@@ -3279,7 +3279,12 @@ impl Workspace {
             return name.clone();
         }
         let Some(view) = self.terminals.get(&tab).map(|view| view.read(cx)) else { return "zsh".to_owned() };
-        let title = self.settings.name_tabs_after_sessions.then(|| view.title.as_deref().and_then(tab_title)).flatten();
+        let codex = self.agent_in(tab) == Some(Agent::Codex);
+        let title = self
+            .settings
+            .name_tabs_after_sessions
+            .then(|| view.title.as_deref().and_then(|title| tab_title(title, codex)))
+            .flatten();
         title.unwrap_or_else(|| {
             view.cwd.file_name().map_or_else(|| "zsh".to_owned(), |folder| folder.to_string_lossy().into_owned())
         })

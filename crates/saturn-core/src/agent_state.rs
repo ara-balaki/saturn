@@ -78,14 +78,15 @@ fn is_spinner(c: char) -> bool {
 }
 
 /// A terminal title as a short tab name: Claude's session name, Codex's thread (or project) name,
-/// or the shell's folder for titles like oh-my-zsh's `user@host: ~/some/path`.
-pub fn tab_title(title: &str) -> Option<String> {
+/// or the shell's folder for titles like oh-my-zsh's `user@host: ~/some/path`. Only a `codex`
+/// title is cut at its first ` | `: a session name of Claude's may hold one of its own.
+pub fn tab_title(title: &str, codex: bool) -> Option<String> {
     let mut trimmed = title.trim();
     // Codex: `[ ! ] Action Required | thread | project`, `⠋ thread | project`.
-    if let Some(prefix) = CODEX_ACTION_REQUIRED.iter().find(|prefix| trimmed.starts_with(*prefix)) {
-        trimmed = trimmed[prefix.len()..].trim_start_matches([' ', '|']);
-    }
-    if trimmed.contains(" | ") {
+    if codex {
+        if let Some(prefix) = CODEX_ACTION_REQUIRED.iter().find(|prefix| trimmed.starts_with(*prefix)) {
+            trimmed = trimmed[prefix.len()..].trim_start_matches([' ', '|']);
+        }
         trimmed = trimmed.split(" | ").next().unwrap_or(trimmed);
     }
     if let Some(first) = trimmed.chars().next()
@@ -130,18 +131,18 @@ mod tests {
 
     #[test]
     fn keeps_a_claude_session_name() {
-        assert_eq!(tab_title("ABC-236").as_deref(), Some("ABC-236"));
+        assert_eq!(tab_title("ABC-236", false).as_deref(), Some("ABC-236"));
     }
 
     #[test]
     fn drops_a_leading_spinner_glyph() {
-        assert_eq!(tab_title("✳ ABC-236").as_deref(), Some("ABC-236"));
+        assert_eq!(tab_title("✳ ABC-236", false).as_deref(), Some("ABC-236"));
     }
 
     #[test]
     fn turns_a_shell_prompt_title_into_its_folder() {
-        assert_eq!(tab_title("dev@Mac: ~/Code/acme-app").as_deref(), Some("acme-app"));
-        assert_eq!(tab_title("jonasarden@Mac:~").as_deref(), Some("~"));
+        assert_eq!(tab_title("dev@Mac: ~/Code/acme-app", false).as_deref(), Some("acme-app"));
+        assert_eq!(tab_title("jonasarden@Mac:~", false).as_deref(), Some("~"));
     }
 
     #[test]
@@ -159,13 +160,19 @@ mod tests {
 
     #[test]
     fn names_a_codex_tab_after_its_thread() {
-        assert_eq!(tab_title("⠋ fix-login | acme-web").as_deref(), Some("fix-login"));
-        assert_eq!(tab_title("[ ! ] Action Required | fix-login | acme-web").as_deref(), Some("fix-login"));
-        assert_eq!(tab_title("acme-web").as_deref(), Some("acme-web"));
+        assert_eq!(tab_title("⠋ fix-login | acme-web", true).as_deref(), Some("fix-login"));
+        assert_eq!(tab_title("[ ! ] Action Required | fix-login | acme-web", true).as_deref(), Some("fix-login"));
+        assert_eq!(tab_title("acme-web", true).as_deref(), Some("acme-web"));
+    }
+
+    #[test]
+    fn keeps_a_claude_session_name_whole() {
+        let name = "ABC | Import the bank statements";
+        assert_eq!(tab_title(&format!("✳ {name}"), false).as_deref(), Some(name));
     }
 
     #[test]
     fn gives_nothing_for_an_empty_title() {
-        assert_eq!(tab_title("   "), None);
+        assert_eq!(tab_title("   ", false), None);
     }
 }
