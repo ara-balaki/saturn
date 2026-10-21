@@ -135,9 +135,15 @@ impl Agent {
 /// each turn ends with the session's id and last answer.
 pub const CODEX_PROFILE: &str = "saturn";
 
-/// The profile file's text.
+/// What Codex shows under its prompt with Saturn's status line on: its own items, as `/statusline`
+/// would set them.
+pub const CODEX_STATUS_LINE: [&str; 6] =
+    ["model-with-reasoning", "current-dir", "git-branch", "context-used", "five-hour-limit", "weekly-limit"];
+
+/// The profile file's text, with Codex's status line set to [`CODEX_STATUS_LINE`] when
+/// `status_line`.
 #[must_use]
-pub fn codex_profile(notify: Option<&str>) -> String {
+pub fn codex_profile(notify: Option<&str>, status_line: bool) -> String {
     let mut text = String::from(
         "# Written by Saturn for the Codex sessions it starts (codex -p saturn); your config.toml still\n\
          # applies beneath it. Saturn writes it again as it starts, so changes here don't last.\n",
@@ -146,6 +152,10 @@ pub fn codex_profile(notify: Option<&str>) -> String {
         let _ = writeln!(text, "notify = [{}]", toml_string(program));
     }
     text.push_str("\n[tui]\nnotification_method = \"osc9\"\nnotification_condition = \"always\"\n");
+    if status_line {
+        let items: Vec<String> = CODEX_STATUS_LINE.iter().map(|item| toml_string(item)).collect();
+        let _ = writeln!(text, "status_line = [{}]", items.join(", "));
+    }
     text
 }
 
@@ -263,10 +273,12 @@ mod tests {
         assert_eq!(with_codex_profile("codex resume 019d"), "codex -p saturn resume 019d");
         assert_eq!(with_codex_profile("codex -p work"), "codex -p work", "a profile of its own stays");
         assert_eq!(with_codex_profile("claude 'Fix it'"), "claude 'Fix it'");
-        let profile = codex_profile(Some("/Applications/Saturn.app/Contents/Resources/plugin/bin/codex-notify"));
+        let profile = codex_profile(Some("/Applications/Saturn.app/Contents/Resources/plugin/bin/codex-notify"), false);
         assert!(profile.contains("notify = [\"/Applications/Saturn.app/Contents/Resources/plugin/bin/codex-notify\"]"));
         assert!(profile.contains("notification_method = \"osc9\""));
-        assert!(!codex_profile(None).contains("notify ="));
+        assert!(!codex_profile(None, false).contains("notify ="));
+        assert!(!profile.contains("status_line"));
+        assert!(codex_profile(None, true).contains("status_line = [\"model-with-reasoning\", \"current-dir\""));
     }
 
     #[test]

@@ -73,13 +73,13 @@ pub fn start(cx: &mut App) {
 /// Writes Saturn's Codex profile (`$CODEX_HOME/saturn.config.toml`) when it isn't as it should be:
 /// Codex's notifications to the terminal, and Saturn's `codex-notify` as each turn ends, unless the
 /// person runs a `notify` of their own, which stays theirs. Says whether the profile is there.
-fn install_codex_profile() -> bool {
+pub fn install_codex_profile() -> bool {
     let Some(home) = Agent::Codex.home().filter(|home| home.is_dir()) else { return false };
     let own_notify = std::fs::read_to_string(home.join("config.toml"))
         .is_ok_and(|config| config.lines().any(|line| line.trim_start().starts_with("notify")));
     let script = crate::workspace::plugin_dir().map(|dir| dir.join("bin/codex-notify"));
     let notify = script.filter(|_| !own_notify).map(|script| script.to_string_lossy().into_owned());
-    let text = agents::codex_profile(notify.as_deref());
+    let text = agents::codex_profile(notify.as_deref(), settings::load().codex_status_line);
     let file = home.join(format!("{}.config.toml", agents::CODEX_PROFILE));
     std::fs::read_to_string(&file).is_ok_and(|now| now == text) || std::fs::write(&file, text).is_ok()
 }

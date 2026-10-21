@@ -46,6 +46,9 @@ pub struct Settings {
     pub panels: Panels,
     /// The agent picked last (Claude Code or Codex), which new panes start while it's ready.
     pub agent: Option<Agent>,
+    /// Codex shows its status line (model, folder, branch, context, limits) in the sessions Saturn
+    /// starts.
+    pub codex_status_line: bool,
 }
 
 /// The window's panels around the grid, and whether each is showing.
@@ -198,6 +201,7 @@ impl Default for Settings {
             share_env_files: true,
             panels: Panels::default(),
             agent: None,
+            codex_status_line: false,
         }
     }
 }

@@ -2804,8 +2804,13 @@ impl Workspace {
 
     pub fn change_settings(&mut self, change: impl FnOnce(&mut Settings), cx: &mut Context<Self>) {
         let (appearance, menu_bar) = (self.settings.appearance, self.settings.menu_bar);
+        let codex_status_line = self.settings.codex_status_line;
         change(&mut self.settings);
         settings::save(&self.settings);
+        // Codex's status line lives in Saturn's Codex profile; the next Codex session shows it.
+        if self.settings.codex_status_line != codex_status_line {
+            cx.background_spawn(async { crate::agent_choice::install_codex_profile() }).detach();
+        }
         if self.settings.appearance != appearance {
             theme::apply(self.settings.appearance, cx);
             theme::set_text_size(self.settings.text_size, cx);

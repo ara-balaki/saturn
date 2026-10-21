@@ -415,6 +415,21 @@ impl SettingsView {
         rows
     }
 
+    /// Codex's status line, when Codex is on this Mac.
+    fn codex(&self, settings: &Settings, cx: &mut Context<Self>) -> Vec<Row> {
+        if !crate::agent_choice::ready(cx).contains(&Agent::Codex) {
+            return Vec::new();
+        }
+        vec![Row::new(
+            Section::Agents,
+            "Status line in Codex",
+            "Under Codex's prompt, in the Codex sessions Saturn starts: the model, the folder and branch, how full the context is, and the plan's limits. Your own Codex config isn't touched.",
+            self.switch("codex-status-line", settings.codex_status_line, |settings, on| {
+                settings.codex_status_line = on;
+            }),
+        )]
+    }
+
     fn claude(&self, settings: &Settings, cx: &mut Context<Self>) -> Vec<Row> {
         let detail = format!(
             "Under Claude Code's prompt, in Saturn and in any other terminal: the model, how full the context is, the step when Claude keeps a task list, and how much of the session's limit is used (in Saturn, with this session's part of it). Turning it on keeps the status line you had, to put back when you turn it off.{}",
@@ -666,6 +681,7 @@ impl SettingsView {
         rows.extend(self.terminal(&settings));
         rows.extend(Self::found_agents(cx));
         rows.extend(self.claude(&settings, cx));
+        rows.extend(self.codex(&settings, cx));
         rows.extend(SHORTCUTS.iter().map(|shortcut| self.shortcut_row(shortcut, &settings, cx)));
         rows.extend(self.clickup(cx));
         rows
