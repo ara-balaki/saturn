@@ -47,7 +47,8 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   which both agents take). A pane in such a worktree shows a chip for each other repo's.
 - macOS notifies you while Saturn is in the background, and a small Saturn in the menu bar shows how
   many are waiting.
-- **Your plans' limits** at the foot of the sidebar, Claude's and Codex's, each with when it resets.
+- **Your plans' limits** at the foot of the sidebar, Claude's and Codex's, each with when it resets,
+  asked of each agent; offline, they aren't shown.
   At 80% and 95% of a limit, a notification says so. With Saturn's status line on (Settings, off to
   begin with), each Claude Code agent shows under its prompt roughly how much of the 5-hour limit it
   used (`session 40% (≈2% here)`).

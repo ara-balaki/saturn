@@ -1,7 +1,7 @@
 //! The plans' usage, read for the whole app and shown at the foot of every window's sidebar:
-//! Claude's (`/usage`: the session, the week, a model's week) and Codex's (the limits it last wrote
-//! into its sessions). Read every few minutes and soon after an agent finishes a turn; each hidden
-//! when its agent has no plan limits to report.
+//! Claude's (`/usage`: the session, the week, a model's week) and Codex's (every window its plan
+//! has), each asked of its agent. Read every few minutes and soon after an agent finishes a turn;
+//! each hidden when its agent has no plan limits to report or can't be asked.
 
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -132,11 +132,8 @@ pub fn refresh(now: bool, cx: &mut App) {
     cx.spawn(async move |cx| {
         let (limits, codex) = cx
             .background_spawn(async move {
-                // Live from Codex when it answers, else what its last session recorded.
-                let codex = saturn_core::codex_usage::read(&path).or_else(|| {
-                    let home = saturn_core::agents::Agent::Codex.home()?;
-                    saturn_core::codex_sessions::limits(&home, unix_now())
-                });
+                // Only what Codex says now: a figure from an old session would be out of date.
+                let codex = saturn_core::codex_usage::read(&path);
                 (usage::read(&path), codex)
             })
             .await;

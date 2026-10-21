@@ -12,7 +12,6 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use crate::codex_sessions::window_label;
 use crate::usage::Limit;
 
 const REQUEST_ID: i64 = 2;
@@ -92,6 +91,16 @@ pub fn answer(line: &str) -> Option<Option<Vec<Limit>>> {
         })
         .collect();
     Some((!limits.is_empty()).then_some(limits))
+}
+
+/// A window's name by its length, as Claude's are named.
+fn window_label(minutes: i64) -> String {
+    match minutes {
+        300 => "Session".to_owned(),
+        10_080 => "Week".to_owned(),
+        minutes if minutes % 1_440 == 0 => format!("{} days", minutes / 1_440),
+        minutes => format!("{} h", minutes / 60),
+    }
 }
 
 #[cfg(test)]

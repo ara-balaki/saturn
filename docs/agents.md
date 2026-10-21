@@ -49,8 +49,10 @@ only its own keys, and keeps anything Codex writes there (the folders you trust,
 
 Saturn asks Codex for the plan's limits as Codex's `/status` does (`codex app-server`, which starts
 no session and spends nothing), and shows every window the plan reports: for some plans the 5-hour
-one and the week, for others, Pro among them, only the week. Saturn reads Codex's sessions in
-`~/.codex/sessions` for Search sessions and Teach the repo. It doesn't use Codex's hooks, which Codex runs only once each is trusted.
+one and the week, for others, Pro among them, only the week. When Codex can't be asked (offline,
+say), its limits aren't shown, as Claude's aren't. Saturn reads Codex's sessions in
+`~/.codex/sessions` for Search sessions and Teach the repo. It doesn't use Codex's hooks, which
+Codex runs only once each is trusted.
 
 ## One instruction file for both
 

@@ -1,7 +1,7 @@
 //! Codex's sessions, from the rollouts it writes under `$CODEX_HOME/sessions/YYYY/MM/DD/`
 //! (`rollout-<time>-<id>.jsonl`, one JSON event a line): each session summed up as Search sessions
-//! shows Claude Code's (title, folder, branch, the prompts you typed), the plan's limits as Codex
-//! last read them, and the session a folder runs. The names you give threads (`/rename`) are in
+//! shows Claude Code's (title, folder, branch, the prompts you typed), and the session a folder
+//! runs. The names you give threads (`/rename`) are in
 //! `session_index.jsonl`. The format is Codex's own; anything not understood is passed over.
 
 use std::collections::HashMap;
@@ -13,7 +13,6 @@ use serde_json::Value;
 
 use crate::agents::Agent;
 use crate::past_sessions::Session;
-use crate::usage::Limit;
 
 /// Every rollout under `home`'s sessions, newest first by when it last changed.
 #[must_use]
@@ -154,54 +153,6 @@ impl Index {
     }
 }
 
-/// The plan's limits as Codex last read them: the newest `token_count` event's `rate_limits` in
-/// the newest rollouts, for when Codex can't be asked (`codex_usage::read`). Its windows are told
-/// apart by their length (300 minutes is the 5-hour one, 10080 the week), not by which slot they're
-/// in, which changed between versions. A window whose reset passed before `now` has started again
-/// since, so it reads as unused, with its next reset unknown.
-#[must_use]
-pub fn limits(home: &Path, now: i64) -> Option<Vec<Limit>> {
-    for (path, _) in rollouts(home).into_iter().take(5) {
-        let Ok(text) = std::fs::read_to_string(&path) else { continue };
-        let newest = text.lines().rev().find_map(|line| {
-            if !line.contains("\"rate_limits\"") {
-                return None;
-            }
-            let entry: Value = serde_json::from_str(line).ok()?;
-            let limits = entry.get("payload")?.get("rate_limits")?.clone();
-            limits.is_object().then_some(limits)
-        });
-        if let Some(rate_limits) = newest {
-            let read: Vec<Limit> = ["primary", "secondary"]
-                .iter()
-                .filter_map(|slot| rate_limits.get(slot).filter(|window| window.is_object()))
-                .filter_map(|window| {
-                    let minutes = window.get("window_minutes")?.as_i64()?;
-                    let resets_at = window.get("resets_at").and_then(Value::as_i64);
-                    let passed = resets_at.is_some_and(|at| at <= now);
-                    Some(Limit {
-                        label: window_label(minutes),
-                        percent: if passed { 0.0 } else { window.get("used_percent")?.as_f64()? },
-                        resets_at: resets_at.filter(|_| !passed),
-                    })
-                })
-                .collect();
-            return (!read.is_empty()).then_some(read);
-        }
-    }
-    None
-}
-
-/// A window's name by its length, as Claude's are named.
-pub(crate) fn window_label(minutes: i64) -> String {
-    match minutes {
-        300 => "Session".to_owned(),
-        10_080 => "Week".to_owned(),
-        minutes if minutes % 1_440 == 0 => format!("{} days", minutes / 1_440),
-        minutes => format!("{} h", minutes / 60),
-    }
-}
-
 /// The session that started in `folder` at or after `since` (Unix seconds), newest first: how a
 /// pane's Codex session is found when Codex hasn't told Saturn about it yet.
 #[must_use]
@@ -280,18 +231,6 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].title, "Login redirect");
         assert!(sessions[0].modified.is_some());
-    }
-
-    #[test]
-    fn reads_the_limits_by_their_window() {
-        let home = home_with_rollout();
-        let limits = limits(home.path(), 1_761_000_000).expect("limits");
-        assert_eq!(limits.len(), 1);
-        assert_eq!((limits[0].label.as_str(), limits[0].percent), ("Week", 44.0));
-        assert_eq!(limits[0].resets_at, Some(1_761_300_000));
-        let reset = &super::limits(home.path(), 1_761_300_000).expect("limits")[0];
-        assert_eq!((reset.percent, reset.resets_at), (0.0, None));
-        assert_eq!(window_label(300), "Session");
     }
 
     #[test]
