@@ -10,8 +10,9 @@ use serde_json::{Value, json};
 
 use crate::agent_activity::Steps;
 
-/// The status line for Claude Code's input, with the agent's steps if it has a task list.
-pub fn line(input: &Value, steps: Option<&Steps>) -> String {
+/// The status line for Claude Code's input, with the agent's steps if it has a task list, and
+/// `here`, this session's part of the plan's session as Saturn worked it out (`≈2%`), after it.
+pub fn line(input: &Value, steps: Option<&Steps>, here: Option<&str>) -> String {
     const DIM: &str = "\x1b[2m";
     const RESET: &str = "\x1b[0m";
     let mut parts = Vec::new();
@@ -33,7 +34,8 @@ pub fn line(input: &Value, steps: Option<&Steps>) -> String {
         } else {
             ""
         };
-        parts.push(format!("{DIM}session{RESET} {tint}{used:.0}%{RESET}"));
+        let here = here.map(|here| format!(" {DIM}({here} here){RESET}")).unwrap_or_default();
+        parts.push(format!("{DIM}session{RESET} {tint}{used:.0}%{RESET}{here}"));
     }
     parts.join(&format!("  {DIM}·{RESET}  "))
 }
@@ -141,6 +143,27 @@ pub fn uninstall(claude_settings: &mut Value, previous: Value) {
     }
 }
 
+/// How long Saturn's reading of each session's share stays good: it reads them again every minute
+/// or so while it runs, and an old one would be wrong.
+const SHARES_KEPT: i64 = 600;
+
+/// Saturn's reading of what each Claude session used of the plan's session (`≈2%`), by session id,
+/// for the status line to show: the file's contents, written at `now` (seconds since 1970).
+#[must_use]
+pub fn shares_file(shares: &[(String, String)], now: i64) -> String {
+    let sessions: serde_json::Map<String, Value> =
+        shares.iter().map(|(session, share)| (session.clone(), Value::String(share.clone()))).collect();
+    json!({ "at": now, "sessions": sessions }).to_string()
+}
+
+/// `session`'s share from the file `shares_file` wrote, while it's recent.
+#[must_use]
+pub fn share_of(file: &str, session: &str, now: i64) -> Option<String> {
+    let file: Value = serde_json::from_str(file).ok()?;
+    let at = file.get("at").and_then(Value::as_i64)?;
+    (now - at <= SHARES_KEPT).then(|| file.pointer(&format!("/sessions/{session}"))?.as_str().map(str::to_owned))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,8 +189,21 @@ mod tests {
             "rate_limits": { "five_hour": { "used_percentage": 34.0, "resets_at": 1 } },
         });
         let steps = Steps { done: 1, total: 3, current: None };
-        assert_eq!(plain(&line(&input, Some(&steps))), "Opus 5.5  ·  ███░░░░░░░░░ 25%  ·  step 2/3  ·  session 34%");
-        assert_eq!(plain(&line(&json!({ "model": { "display_name": "Fable 5.1" } }), None)), "Fable 5.1");
+        assert_eq!(
+            plain(&line(&input, Some(&steps), None)),
+            "Opus 5.5  ·  ███░░░░░░░░░ 25%  ·  step 2/3  ·  session 34%"
+        );
+        assert_eq!(plain(&line(&input, None, Some("≈2%"))), "Opus 5.5  ·  ███░░░░░░░░░ 25%  ·  session 34% (≈2% here)");
+        assert_eq!(plain(&line(&json!({ "model": { "display_name": "Fable 5.1" } }), None, None)), "Fable 5.1");
+    }
+
+    #[test]
+    fn reads_this_sessions_share_while_it_is_recent() {
+        let file = shares_file(&[("abc".to_owned(), "≈2%".to_owned())], 1_000);
+        assert_eq!(share_of(&file, "abc", 1_100).as_deref(), Some("≈2%"));
+        assert_eq!(share_of(&file, "other", 1_100), None);
+        assert_eq!(share_of(&file, "abc", 1_000 + 3_600), None, "an old reading is wrong");
+        assert_eq!(share_of("not json", "abc", 1_000), None);
     }
 
     #[test]

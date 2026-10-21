@@ -2260,50 +2260,39 @@ impl Workspace {
                 .await;
             let _ = this.update(cx, |this, cx| {
                 this.spent = spent;
-                cx.notify();
+                this.write_shares(cx);
             });
         })
         .detach();
     }
 
-    /// What the pane's session used: its share of the 5-hour limit, estimated from its part of what
-    /// all the panes' sessions used, or its tokens when the plan has no limits to share.
-    fn render_spent(&self, cell: &Cell, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let tokens = self.spent.get(&cell.active).filter(|tokens| tokens.counted() > 0)?;
+    /// Writes each pane's session's share of the 5-hour limit, estimated from its part of what all
+    /// the panes' sessions used (or its tokens when the plan has no limits to share), for Saturn's
+    /// status line to show under Claude's prompt. Off the main thread.
+    fn write_shares(&self, cx: &mut Context<Self>) {
+        let Some(path) = crate::status_line::shares_path() else { return };
         let all: u64 = self.spent.values().map(Tokens::counted).sum();
-        #[expect(clippy::cast_precision_loss, reason = "a share shown as a whole percentage")]
-        let share = tokens.counted() as f64 / all.max(1) as f64;
         let percent = crate::usage::session_percent(cx);
-        let label = match percent {
-            Some(percent) => format!("≈{:.0}% of 5h", (share * percent).max(1.)),
-            None => format!("{} tokens", session_usage::short(tokens.counted())),
-        };
-        let mut tip = format!(
-            "This session in the current 5-hour window: {} tokens in, {} out, {} written to the cache ({} read back from it, which counts little).",
-            session_usage::short(tokens.input),
-            session_usage::short(tokens.output),
-            session_usage::short(tokens.cache_write),
-            session_usage::short(tokens.cache_read),
-        );
-        if let Some(percent) = percent {
-            let _ = write!(
-                tip,
-                "\n\nThat's {:.0}% of what the agents in Saturn used, and the 5-hour limit is {percent:.0}% used, so about {:.0}% of it went here.",
-                share * 100.,
-                share * percent
-            );
-        }
-        Some(
-            div()
-                .id(("spent", cell.id.key()))
-                .flex_none()
-                .px(len(space::SPACE_2))
-                .text_size(px(12.))
-                .text_color(theme::color(color::INK_FAINT))
-                .child(label)
-                .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
-                .into_any_element(),
-        )
+        let shares: Vec<(String, String)> = self
+            .spent
+            .iter()
+            .filter(|(_, tokens)| tokens.counted() > 0)
+            .filter_map(|(tab, tokens)| {
+                let session = self.claude_sessions.get(tab)?.clone();
+                #[expect(clippy::cast_precision_loss, reason = "a share shown as a whole percentage")]
+                let share = tokens.counted() as f64 / all.max(1) as f64;
+                let label = match percent {
+                    Some(percent) => format!("≈{:.0}%", (share * percent).max(1.)),
+                    None => format!("{} tokens", session_usage::short(tokens.counted())),
+                };
+                Some((session, label))
+            })
+            .collect();
+        let now = crate::worktrees_view::now();
+        cx.background_spawn(async move {
+            let _ = std::fs::write(path, saturn_core::status_line::shares_file(&shares, now));
+        })
+        .detach();
     }
 
     /// Finds the panes' checkouts that change the same files as another of their repository's, off the
@@ -3635,7 +3624,6 @@ impl Workspace {
                     .map(|(_, number)| attempt_chip(cell_id, number)),
             )
             .children(self.render_links(cell, cx))
-            .children(self.render_spent(cell, cx))
             .children(self.render_turn(cell, cx))
             .children(
                 self.checkouts

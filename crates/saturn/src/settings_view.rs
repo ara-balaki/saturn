@@ -359,7 +359,7 @@ impl SettingsView {
 
     fn claude(&self, settings: &Settings, cx: &mut Context<Self>) -> Vec<Row> {
         let detail = format!(
-            "Under Claude Code's prompt, in Saturn and in any other terminal: the model, how full the context is, the step when Claude keeps a task list, and how much of the session's limit is used. Turning it on keeps the status line you had, to put back when you turn it off.{}",
+            "Under Claude Code's prompt, in Saturn and in any other terminal: the model, how full the context is, the step when Claude keeps a task list, and how much of the session's limit is used (in Saturn, with this session's part of it). Turning it on keeps the status line you had, to put back when you turn it off.{}",
             self.status_line_problem.as_ref().map(|problem| format!(" {problem}")).unwrap_or_default()
         );
         vec![

@@ -20,7 +20,19 @@ pub fn print() {
         .and_then(Value::as_str)
         .and_then(|path| std::fs::read_to_string(path).ok())
         .and_then(|transcript| status_line::steps_in_transcript(&transcript));
-    print!("{}", status_line::line(&input, steps.as_ref()));
+    // This session's part of the plan's session, as Saturn last worked it out; outside Saturn there's
+    // no such file and the line goes without.
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.as_secs());
+    let here = input.get("session_id").and_then(Value::as_str).and_then(|session| {
+        let file = std::fs::read_to_string(shares_path()?).ok()?;
+        status_line::share_of(&file, session, i64::try_from(now).unwrap_or(i64::MAX))
+    });
+    print!("{}", status_line::line(&input, steps.as_ref(), here.as_deref()));
+}
+
+/// Where Saturn keeps each session's share of the plan's session, for the status line.
+pub fn shares_path() -> Option<PathBuf> {
+    crate::settings::data_dir().map(|dir| dir.join("session-shares.json"))
 }
 
 /// Claude Code's user settings: `~/.claude/settings.json`, or under `CLAUDE_CONFIG_DIR`.
