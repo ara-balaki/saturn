@@ -315,8 +315,12 @@ pub struct Workspace {
     /// The agent's session running in each tab (whose, and its id), from its hooks, so a restart can
     /// offer to resume it.
     sessions: HashMap<TabId, (Agent, String)>,
-    /// The agent Saturn started in each tab (by typing its command), before any hook says more.
+    /// The agent Saturn started in each tab (by typing its command), or found running there, before
+    /// any hook says more. Gone when the shell's prompt comes back.
     started: HashMap<TabId, Agent>,
+    /// When each tab's foreground program was last looked up, to find an agent typed by hand without
+    /// running `ps` on every title change.
+    program_checked: HashMap<TabId, Instant>,
     /// Panes a routine started, until their session is known: the routine and its time.
     routine_tabs: HashMap<TabId, (String, i64)>,
     /// The agent team each pane's session leads, if any.
@@ -1095,6 +1099,7 @@ impl Workspace {
             sidebar_tab: SidebarTab::Files,
             sessions: HashMap::new(),
             started: HashMap::new(),
+            program_checked: HashMap::new(),
             routine_tabs: HashMap::new(),
             teams: HashMap::new(),
             also_in: Vec::new(),
@@ -2264,12 +2269,13 @@ impl Workspace {
     pub fn answer_permission(&mut self, tab: TabId, allow: bool, cx: &mut Context<Self>) {
         let asks = matches!(self.waits.get(&tab), Some(Waiting::Permission { .. }));
         let Some(view) = self.terminals.get(&tab).cloned() else { return };
-        let runs_an_agent =
-            view.read(cx).foreground_pid().and_then(process_name).is_some_and(|name| AGENTS.contains(&name.as_str()));
-        if !asks || view.read(cx).state != AgentState::NeedsYou || !runs_an_agent {
+        let program = view.read(cx).foreground_pid().and_then(process_name);
+        // Claude Code and Codex answer with their own keys; another agent isn't pressed for.
+        let Some(agent) = program.as_deref().and_then(Agent::of_program) else { return };
+        if !asks || view.read(cx).state != AgentState::NeedsYou {
             return;
         }
-        view.update(cx, |view, _| view.write(if allow { b"\r".to_vec() } else { b"\x1b".to_vec() }));
+        view.update(cx, |view, _| view.write(agent.answer_keys(allow).to_vec()));
         self.waits.remove(&tab);
         cx.notify();
     }
@@ -3024,7 +3030,14 @@ impl Workspace {
                 self.report_attention(window, cx);
                 cx.notify();
             }
-            TerminalViewEvent::TitleChanged => cx.notify(),
+            TerminalViewEvent::TitleChanged => {
+                self.read_codex_title(tab, cx);
+                cx.notify();
+            }
+            TerminalViewEvent::PromptShown => {
+                self.started.remove(&tab);
+                self.program_checked.remove(&tab);
+            }
             // Coming back to the window isn't looking at the pane in front (your eyes may go to
             // another one); typing or clicking in it is.
             TerminalViewEvent::Used => {
@@ -3040,6 +3053,36 @@ impl Workspace {
                 }
                 self.refresh_checkouts(cx);
                 self.save_session(cx);
+            }
+        }
+    }
+
+    /// Codex says what it's doing only in its title; a tab running it takes its state from there.
+    /// A `codex` typed by hand is found by the tab's foreground program, looked up now and then.
+    fn read_codex_title(&mut self, tab: TabId, cx: &mut Context<Self>) {
+        let Some(view) = self.terminals.get(&tab).cloned() else { return };
+        match self.agent_in(tab) {
+            Some(Agent::Codex) => {
+                if view.update(cx, TerminalView::codex_title_state) {
+                    self.started.remove(&tab);
+                    self.program_checked.remove(&tab);
+                }
+            }
+            Some(Agent::Claude) => {}
+            None => {
+                let recently = self.program_checked.get(&tab).is_some_and(|at| at.elapsed() < Duration::from_secs(3));
+                let Some(pid) = view.read(cx).foreground_pid().filter(|_| !recently) else { return };
+                self.program_checked.insert(tab, Instant::now());
+                cx.spawn(async move |this, cx| {
+                    let program = cx.background_spawn(async move { process_name(pid) }).await;
+                    let _ = this.update(cx, |this, cx| {
+                        if let Some(agent) = program.as_deref().and_then(Agent::of_program) {
+                            this.started.insert(tab, agent);
+                            this.read_codex_title(tab, cx);
+                        }
+                    });
+                })
+                .detach();
             }
         }
     }

@@ -53,6 +53,8 @@ pub enum TerminalViewEvent {
     Used,
     /// A pull request was linked in it ([`TerminalView::pull_request_link`]).
     PullRequestLinked,
+    /// The shell drew its prompt (OSC 133): whatever ran in the foreground has ended.
+    PromptShown,
 }
 
 /// Where the grid was last drawn: enough to turn a mouse position into a cell.
@@ -192,7 +194,14 @@ impl TerminalView {
                         cx.emit(TerminalViewEvent::PullRequestLinked);
                     }
                 }
-                TerminalEvent::PromptStart => {}
+                TerminalEvent::PromptStart => {
+                    // Back at the shell: an agent that reports no state of its own has ended.
+                    if !self.has_program_status && self.state != AgentState::Shell {
+                        self.state = AgentState::Shell;
+                        cx.emit(TerminalViewEvent::StateChanged);
+                    }
+                    cx.emit(TerminalViewEvent::PromptShown);
+                }
             }
         }
         self.schedule_sync_flush(cx);
@@ -215,6 +224,20 @@ impl TerminalView {
             });
         })
         .detach();
+    }
+
+    /// State read from the title of an agent that sets one but reports nothing else (Codex), as
+    /// [`saturn_core::agent_state::from_codex_title`] reads it. Codex empties the title as it quits:
+    /// then it's a shell again, and this says so (`true`).
+    pub fn codex_title_state(&mut self, cx: &mut Context<Self>) -> bool {
+        let title = self.title.clone().unwrap_or_default();
+        if title.trim().is_empty() {
+            self.hook_state(AgentState::Shell, cx);
+            return true;
+        }
+        let state = saturn_core::agent_state::from_codex_title(&title, self.state);
+        self.hook_state(state, cx);
+        false
     }
 
     /// State reported by a Claude Code hook. Used only when Claude doesn't report its state to the

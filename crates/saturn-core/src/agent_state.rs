@@ -45,15 +45,49 @@ impl AgentState {
     }
 }
 
-/// Spinner glyphs Claude Code may put in front of its terminal title.
-fn is_spinner(c: char) -> bool {
-    matches!(c, '·' | '✢' | '✳' | '✶' | '✻' | '✽' | '*') || ('\u{2801}'..='\u{28ff}').contains(&c)
+/// What Codex's terminal title (its default one) says it's doing: `⠋ thread | project` with a
+/// turning spinner while it works, `[ ! ] Action Required | …` (blinking with `[ . ]`) while it
+/// waits for an approval, the same without the spinner when it's idle. Codex reports no state of its
+/// own, so a turn that ends is the spinner going away after it was working or waiting: your turn.
+pub fn from_codex_title(title: &str, previous: AgentState) -> AgentState {
+    // A dot in front while it listens to the microphone.
+    let title = title.trim_start_matches('●').trim_start();
+    if CODEX_ACTION_REQUIRED.iter().any(|prefix| title.starts_with(prefix)) {
+        AgentState::NeedsYou
+    } else if title.chars().next().is_some_and(is_braille) {
+        AgentState::Working
+    } else {
+        match previous {
+            AgentState::Working | AgentState::NeedsYou | AgentState::YourTurn => AgentState::YourTurn,
+            AgentState::Error => AgentState::Error,
+            AgentState::Shell | AgentState::Idle => AgentState::Idle,
+        }
+    }
 }
 
-/// A terminal title as a short tab name: Claude's session name, or the shell's folder for titles
-/// like oh-my-zsh's `user@host: ~/some/path`.
+/// The two phases of Codex's blinking "needs you" title.
+const CODEX_ACTION_REQUIRED: [&str; 2] = ["[ ! ] Action Required", "[ . ] Action Required"];
+
+fn is_braille(c: char) -> bool {
+    ('\u{2801}'..='\u{28ff}').contains(&c)
+}
+
+/// Spinner glyphs Claude Code may put in front of its terminal title.
+fn is_spinner(c: char) -> bool {
+    matches!(c, '·' | '✢' | '✳' | '✶' | '✻' | '✽' | '*') || is_braille(c)
+}
+
+/// A terminal title as a short tab name: Claude's session name, Codex's thread (or project) name,
+/// or the shell's folder for titles like oh-my-zsh's `user@host: ~/some/path`.
 pub fn tab_title(title: &str) -> Option<String> {
     let mut trimmed = title.trim();
+    // Codex: `[ ! ] Action Required | thread | project`, `⠋ thread | project`.
+    if let Some(prefix) = CODEX_ACTION_REQUIRED.iter().find(|prefix| trimmed.starts_with(*prefix)) {
+        trimmed = trimmed[prefix.len()..].trim_start_matches([' ', '|']);
+    }
+    if trimmed.contains(" | ") {
+        trimmed = trimmed.split(" | ").next().unwrap_or(trimmed);
+    }
     if let Some(first) = trimmed.chars().next()
         && is_spinner(first)
     {
@@ -108,6 +142,26 @@ mod tests {
     fn turns_a_shell_prompt_title_into_its_folder() {
         assert_eq!(tab_title("dev@Mac: ~/Code/acme-app").as_deref(), Some("acme-app"));
         assert_eq!(tab_title("jonasarden@Mac:~").as_deref(), Some("~"));
+    }
+
+    #[test]
+    fn reads_what_codex_does_from_its_title() {
+        use AgentState::{Idle, NeedsYou, Working, YourTurn};
+        assert_eq!(from_codex_title("acme-web", AgentState::Shell), Idle, "just started");
+        assert_eq!(from_codex_title("⠋ fix-login | acme-web", Idle), Working);
+        assert_eq!(from_codex_title("[ ! ] Action Required | fix-login | acme-web", Working), NeedsYou);
+        assert_eq!(from_codex_title("[ . ] Action Required | fix-login | acme-web", NeedsYou), NeedsYou);
+        assert_eq!(from_codex_title("⠹ fix-login | acme-web", NeedsYou), Working, "approved");
+        assert_eq!(from_codex_title("fix-login | acme-web", Working), YourTurn, "the turn ended");
+        assert_eq!(from_codex_title("fix-login | acme-web", YourTurn), YourTurn);
+        assert_eq!(from_codex_title("● ⠋ fix-login", Idle), Working, "listening");
+    }
+
+    #[test]
+    fn names_a_codex_tab_after_its_thread() {
+        assert_eq!(tab_title("⠋ fix-login | acme-web").as_deref(), Some("fix-login"));
+        assert_eq!(tab_title("[ ! ] Action Required | fix-login | acme-web").as_deref(), Some("fix-login"));
+        assert_eq!(tab_title("acme-web").as_deref(), Some("acme-web"));
     }
 
     #[test]

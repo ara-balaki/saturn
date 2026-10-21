@@ -66,6 +66,18 @@ impl Agent {
         }
     }
 
+    /// The keys that answer its permission prompt, allowing or refusing: Claude Code's highlighted
+    /// "Yes" and Escape; Codex's `y` and `d` (deny).
+    #[must_use]
+    pub fn answer_keys(self, allow: bool) -> &'static [u8] {
+        match (self, allow) {
+            (Self::Claude, true) => b"\r",
+            (Self::Claude, false) => b"\x1b",
+            (Self::Codex, true) => b"y",
+            (Self::Codex, false) => b"d",
+        }
+    }
+
     /// What starting it on a ticket runs, before a project chooses its own: Claude Code names its
     /// session after the ticket (`-n`); Codex has no such flag.
     #[must_use]
@@ -184,6 +196,8 @@ mod tests {
         assert_eq!(Agent::of_program("-codex"), Some(Agent::Codex));
         assert_eq!(Agent::of_command("claude -n ABC-123"), Some(Agent::Claude));
         assert_eq!(Agent::of_command("aider"), None);
+        assert_eq!(Agent::Codex.answer_keys(true), b"y");
+        assert_eq!(Agent::Claude.answer_keys(false), b"\x1b");
     }
 
     #[test]
