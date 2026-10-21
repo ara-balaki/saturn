@@ -130,7 +130,8 @@ impl WorktreesView {
     }
 
     /// Spikes press Archive or Restore by the worktree's folder name (`SATURN_WORKTREE_ARCHIVE`,
-    /// `SATURN_WORKTREE_RESTORE`), once each, as a click would.
+    /// `SATURN_WORKTREE_RESTORE`), or Remove the finished ones (`SATURN_WORKTREE_REMOVE_FINISHED`),
+    /// once, as a click would.
     fn act_from_env(&mut self, cx: &mut Context<Self>) {
         let named = |key: &str| std::env::var(key).ok().filter(|name| !name.is_empty());
         if self.spiked {
@@ -142,6 +143,18 @@ impl WorktreesView {
                 self.spiked = true;
                 self.archive(row.worktree, cx);
             }
+        }
+        if named("SATURN_WORKTREE_REMOVE_FINISHED").is_some() && self.rows.is_some() {
+            let finished: Vec<Worktree> = self
+                .rows
+                .iter()
+                .flatten()
+                .filter(|row| row.blocker().is_none())
+                .map(|row| row.worktree.clone())
+                .collect();
+            self.spiked = true;
+            eprintln!("removing {} finished worktrees", finished.len());
+            self.remove(finished, cx);
         }
         if let Some(name) = named("SATURN_WORKTREE_RESTORE") {
             let found = self.archived.iter().find(|archived| folder_name(&archived.path) == name).cloned();
@@ -275,7 +288,8 @@ impl WorktreesView {
         cx.spawn(async move |this, cx| {
             let said = cx
                 .background_spawn(async move {
-                    let mut said = Vec::new();
+                    // One line for what went well; a worktree is named only when something didn't.
+                    let (mut removed, mut branches, mut problems) = (0, 0, Vec::new());
                     for worktree in &worktrees {
                         // Only a recipe someone wrote has a cleanup; a guess never does.
                         let cleanup = recipe::load(&worktree.path)
@@ -283,12 +297,22 @@ impl WorktreesView {
                             .and_then(|recipe| recipe.cleanup_command());
                         let name = folder_name(&worktree.path);
                         match worktrees::remove(&repo, worktree, cleanup.as_deref()) {
-                            Ok(note) if note.is_empty() => said.push(format!("Removed {name}.")),
-                            Ok(note) => said.push(format!("Removed {name}. {note}")),
-                            Err(problem) => said.push(format!("{name} stays: {problem}")),
+                            Ok(done) => {
+                                removed += 1;
+                                branches += usize::from(done.branch_deleted);
+                                if done.cleanup_failed {
+                                    problems.push(format!("{name}'s cleanup failed; it was removed anyway."));
+                                }
+                            }
+                            Err(problem) => problems.push(format!("{name} stays: {problem}")),
                         }
                     }
-                    said.join(" ")
+                    let mut said = removed_summary(removed, branches);
+                    for problem in problems {
+                        said.push(' ');
+                        said.push_str(&problem);
+                    }
+                    said.trim().to_owned()
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
@@ -567,6 +591,15 @@ pub fn open(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sums_up_what_was_removed() {
+        assert_eq!(super::removed_summary(7, 7), "Removed 7 worktrees and their merged branches.");
+        assert_eq!(super::removed_summary(1, 1), "Removed 1 worktree and its merged branch.");
+        assert_eq!(super::removed_summary(3, 1), "Removed 3 worktrees and 1 merged branch.");
+        assert_eq!(super::removed_summary(2, 0), "Removed 2 worktrees.");
+        assert_eq!(super::removed_summary(0, 0), "");
+    }
 
     #[test]
     fn says_how_long_ago() {

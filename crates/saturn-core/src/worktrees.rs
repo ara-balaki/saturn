@@ -123,39 +123,90 @@ pub fn programs_in(folders: &[PathBuf]) -> HashMap<PathBuf, Vec<String>> {
     found
 }
 
+/// What removing a worktree did, besides removing it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Removed {
+    /// Its branch was merged, so it went too.
+    pub branch_deleted: bool,
+    /// Its recipe's cleanup failed; the worktree went anyway.
+    pub cleanup_failed: bool,
+}
+
 /// Removes a worktree: its recipe's `cleanup` first (when there is one), then the folder, then its
 /// branch when git agrees it's merged (`branch -d`; a squashed one stays, for git to keep its
-/// history). Refuses one with uncommitted work, as `git worktree remove` does. Says what happened.
-pub fn remove(main: &Path, worktree: &Worktree, cleanup: Option<&str>) -> Result<String, String> {
+/// history). Refuses one with uncommitted work, as `git worktree remove` does.
+///
+/// Deleting a worktree's files (a `node_modules` is tens of thousands) takes seconds, so the folder
+/// is moved into the repository's trash instead, which is instant on the same disk, git is told it's
+/// gone, and the files are deleted in the background. Where the move can't be made, `git worktree
+/// remove` does it all, slowly.
+pub fn remove(main: &Path, worktree: &Worktree, cleanup: Option<&str>) -> Result<Removed, String> {
     if worktree.main {
         return Err("The main checkout stays.".to_owned());
     }
     if worktree.missing {
         return run(main, &["worktree", "prune"])
-            .map(|_| "Forgot the missing worktree.".to_owned())
+            .map(|_| Removed::default())
             .ok_or_else(|| "git couldn't forget the missing worktree.".to_owned());
     }
-    let mut said = Vec::new();
+    let mut removed = Removed::default();
     if let Some(cleanup) = cleanup {
         let ran = Command::new("/bin/sh").args(["-c", cleanup]).current_dir(&worktree.path).output();
-        if !ran.is_ok_and(|output| output.status.success()) {
-            said.push(format!("Its cleanup (`{cleanup}`) failed; the worktree was removed anyway."));
+        removed.cleanup_failed = !ran.is_ok_and(|output| output.status.success());
+    }
+    if !move_to_trash(main, &worktree.path)? {
+        let output = crate::git::command(main)
+            .args(["worktree", "remove"])
+            .arg(&worktree.path)
+            .output()
+            .map_err(|error| format!("git could not run: {error}"))?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
         }
     }
-    let output = crate::git::command(main)
-        .args(["worktree", "remove"])
-        .arg(&worktree.path)
-        .output()
-        .map_err(|error| format!("git could not run: {error}"))?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+    removed.branch_deleted =
+        worktree.branch.as_ref().is_some_and(|branch| run(main, &["branch", "-d", branch]).is_some());
+    Ok(removed)
+}
+
+/// Moves a worktree's folder into the trash and drops git's record of it, as `git worktree remove`
+/// would, then empties the trash in the background. `Ok(false)` when it can't be done this way
+/// (a locked worktree, a folder git's status can't read, another disk), so git should do it.
+fn move_to_trash(main: &Path, folder: &Path) -> Result<bool, String> {
+    let Some(status) = run(folder, &["--no-optional-locks", "status", "--porcelain"]) else { return Ok(false) };
+    if !status.trim().is_empty() {
+        return Err("It has uncommitted work.".to_owned());
     }
-    if let Some(branch) = &worktree.branch
-        && run(main, &["branch", "-d", branch]).is_some()
+    // The folder's `.git` file names git's record of it: `gitdir: <repo>/.git/worktrees/<name>`.
+    let Some(record) = std::fs::read_to_string(folder.join(".git"))
+        .ok()
+        .and_then(|text| text.strip_prefix("gitdir:").map(|path| PathBuf::from(path.trim())))
+    else {
+        return Ok(false);
+    };
+    if record.join("locked").exists() {
+        return Ok(false);
+    }
+    let Some(trash) = run(main, &["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .map(|dir| PathBuf::from(dir.trim()).join("saturn-trash"))
+    else {
+        return Ok(false);
+    };
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.as_nanos());
+    let name = folder.file_name().map_or_else(|| "worktree".into(), |name| name.to_string_lossy().into_owned());
+    if std::fs::create_dir_all(&trash).is_err()
+        || std::fs::rename(folder, trash.join(format!("{name}-{nanos}"))).is_err()
     {
-        said.push(format!("Deleted the merged branch {branch}."));
+        return Ok(false);
     }
-    Ok(said.join(" "))
+    let _ = std::fs::remove_dir_all(&record);
+    // Everything in the trash, a removal an earlier run didn't finish too.
+    std::thread::spawn(move || {
+        for entry in std::fs::read_dir(&trash).into_iter().flatten().flatten() {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    });
+    Ok(true)
 }
 
 /// A worktree put away: its branch, and its work as it was, so it can come back where it was.
@@ -338,12 +389,43 @@ mod tests {
         assert_eq!(uncommitted(&worktree.path), 0);
 
         let marker = dir.path().join("cleaned");
-        let said = remove(&main, worktree, Some(&format!("touch {}", marker.display()))).expect("removed");
+        let removed = remove(&main, worktree, Some(&format!("touch {}", marker.display()))).expect("removed");
         assert!(marker.exists(), "cleanup ran first");
         assert!(!path.exists());
-        assert!(said.contains("abc-1"), "{said}");
-        assert_eq!(list(&main).len(), 1);
+        assert_eq!(removed, Removed { branch_deleted: true, cleanup_failed: false });
+        assert_eq!(list(&main).len(), 1, "git forgot it");
+        assert!(run(&main, &["rev-parse", "--verify", "--quiet", "refs/heads/abc-1"]).is_none());
         assert!(remove(&main, &list(&main)[0], None).is_err(), "the main checkout stays");
+    }
+
+    #[test]
+    fn removes_a_worktree_with_ignored_files_by_moving_it_aside() {
+        let dir = tempfile::tempdir().expect("a temporary folder");
+        let main = dir.path().join("acme-web");
+        fs::create_dir_all(&main).expect("make folders");
+        git(&main, &["init", "-q", "-b", "main"]);
+        fs::write(main.join(".gitignore"), "node_modules\n").expect("write");
+        git(&main, &["add", "."]);
+        git(&main, &["commit", "-q", "-m", "start"]);
+        let path = dir.path().join("acme-web-abc-4");
+        git(&main, &["worktree", "add", "-q", "-b", "abc-4", &path.to_string_lossy()]);
+        fs::create_dir_all(path.join("node_modules/left-pad")).expect("make folders");
+        fs::write(path.join("node_modules/left-pad/index.js"), "module.exports = 1;\n").expect("write");
+        let worktree = list(&main).into_iter().find(|worktree| !worktree.main).expect("listed");
+
+        remove(&main, &worktree, None).expect("removed");
+        assert!(!path.exists());
+        assert_eq!(list(&main).len(), 1, "git forgot it");
+        assert!(!main.join(".git/worktrees/acme-web-abc-4").exists(), "and its record");
+        // The trash empties in the background.
+        let trash = main.join(".git/saturn-trash");
+        for _ in 0..100 {
+            if fs::read_dir(&trash).map_or(true, |mut entries| entries.next().is_none()) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        panic!("the trash was never emptied");
     }
 
     #[test]
