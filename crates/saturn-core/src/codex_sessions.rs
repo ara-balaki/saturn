@@ -155,10 +155,12 @@ impl Index {
 }
 
 /// The plan's limits as Codex last read them: the newest `token_count` event's `rate_limits` in
-/// the newest rollouts. Its windows are told apart by their length (300 minutes is the 5-hour one,
-/// 10080 the week), not by which slot they're in, which changed between versions.
+/// the newest rollouts, for when Codex can't be asked (`codex_usage::read`). Its windows are told
+/// apart by their length (300 minutes is the 5-hour one, 10080 the week), not by which slot they're
+/// in, which changed between versions. A window whose reset passed before `now` has started again
+/// since, so it reads as unused, with its next reset unknown.
 #[must_use]
-pub fn limits(home: &Path) -> Option<Vec<Limit>> {
+pub fn limits(home: &Path, now: i64) -> Option<Vec<Limit>> {
     for (path, _) in rollouts(home).into_iter().take(5) {
         let Ok(text) = std::fs::read_to_string(&path) else { continue };
         let newest = text.lines().rev().find_map(|line| {
@@ -175,10 +177,12 @@ pub fn limits(home: &Path) -> Option<Vec<Limit>> {
                 .filter_map(|slot| rate_limits.get(slot).filter(|window| window.is_object()))
                 .filter_map(|window| {
                     let minutes = window.get("window_minutes")?.as_i64()?;
+                    let resets_at = window.get("resets_at").and_then(Value::as_i64);
+                    let passed = resets_at.is_some_and(|at| at <= now);
                     Some(Limit {
                         label: window_label(minutes),
-                        percent: window.get("used_percent")?.as_f64()?,
-                        resets_at: window.get("resets_at").and_then(Value::as_i64),
+                        percent: if passed { 0.0 } else { window.get("used_percent")?.as_f64()? },
+                        resets_at: resets_at.filter(|_| !passed),
                     })
                 })
                 .collect();
@@ -188,7 +192,8 @@ pub fn limits(home: &Path) -> Option<Vec<Limit>> {
     None
 }
 
-fn window_label(minutes: i64) -> String {
+/// A window's name by its length, as Claude's are named.
+pub(crate) fn window_label(minutes: i64) -> String {
     match minutes {
         300 => "Session".to_owned(),
         10_080 => "Week".to_owned(),
@@ -280,10 +285,12 @@ mod tests {
     #[test]
     fn reads_the_limits_by_their_window() {
         let home = home_with_rollout();
-        let limits = limits(home.path()).expect("limits");
+        let limits = limits(home.path(), 1_761_000_000).expect("limits");
         assert_eq!(limits.len(), 1);
         assert_eq!((limits[0].label.as_str(), limits[0].percent), ("Week", 44.0));
         assert_eq!(limits[0].resets_at, Some(1_761_300_000));
+        let reset = &super::limits(home.path(), 1_761_300_000).expect("limits")[0];
+        assert_eq!((reset.percent, reset.resets_at), (0.0, None));
         assert_eq!(window_label(300), "Session");
     }
 

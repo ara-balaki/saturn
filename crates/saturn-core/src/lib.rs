@@ -9,6 +9,7 @@ pub mod best_of;
 pub mod checks;
 pub mod clickup;
 pub mod codex_sessions;
+pub mod codex_usage;
 pub mod dbt;
 pub mod dbt_impact;
 pub mod file_icon;

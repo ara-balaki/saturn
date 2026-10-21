@@ -132,9 +132,11 @@ pub fn refresh(now: bool, cx: &mut App) {
     cx.spawn(async move |cx| {
         let (limits, codex) = cx
             .background_spawn(async move {
-                let codex = saturn_core::agents::Agent::Codex
-                    .home()
-                    .and_then(|home| saturn_core::codex_sessions::limits(&home));
+                // Live from Codex when it answers, else what its last session recorded.
+                let codex = saturn_core::codex_usage::read(&path).or_else(|| {
+                    let home = saturn_core::agents::Agent::Codex.home()?;
+                    saturn_core::codex_sessions::limits(&home, unix_now())
+                });
                 (usage::read(&path), codex)
             })
             .await;

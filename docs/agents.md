@@ -8,17 +8,17 @@ a **Claude Code | Codex** switch that remembers your last pick.
 
 ## What each gives Saturn
 
-|                                               | Claude Code                    | Codex                                            |
-| --------------------------------------------- | ------------------------------ | ------------------------------------------------ |
-| Working, needs you, your turn                 | ✓                              | ✓                                                |
-| What it waits for, answered from the queue    | ✓                              | ✓ (in sessions Saturn starts)                    |
-| Resume after a restart                        | `claude --resume …`            | `codex -p saturn resume …`                       |
-| Search sessions, Best of N, routines, Also in | ✓                              | ✓                                                |
-| Limits at the foot of the sidebar             | the session, the week, a model | what Codex last wrote (for most plans, the week) |
-| Status line                                   | Saturn's own, with its share   | Codex's own items                                |
-| Teach the repo, what the agent is told        | ✓                              | ✓                                                |
-| Which prompt changed a file, in the review    | ✓                              | –                                                |
-| Agent teams                                   | ✓                              | –                                                |
+|                                               | Claude Code                    | Codex                                         |
+| --------------------------------------------- | ------------------------------ | --------------------------------------------- |
+| Working, needs you, your turn                 | ✓                              | ✓                                             |
+| What it waits for, answered from the queue    | ✓                              | ✓ (in sessions Saturn starts)                 |
+| Resume after a restart                        | `claude --resume …`            | `codex -p saturn resume …`                    |
+| Search sessions, Best of N, routines, Also in | ✓                              | ✓                                             |
+| Limits at the foot of the sidebar             | the session, the week, a model | every window the plan has (for Pro, the week) |
+| Status line                                   | Saturn's own, with its share   | Codex's own items                             |
+| Teach the repo, what the agent is told        | ✓                              | ✓                                             |
+| Which prompt changed a file, in the review    | ✓                              | –                                             |
+| Agent teams                                   | ✓                              | –                                             |
 
 ## Claude Code
 
@@ -47,8 +47,10 @@ only its own keys, and keeps anything Codex writes there (the folders you trust,
   leaves it alone and finds the session from Codex's session files instead.
 - `[tui] status_line`, only with Status line in Codex turned on in Settings.
 
-Saturn reads Codex's sessions in `~/.codex/sessions` for Search sessions, Teach the repo and the
-plan's limits. It doesn't use Codex's hooks, which Codex runs only once each is trusted.
+Saturn asks Codex for the plan's limits as Codex's `/status` does (`codex app-server`, which starts
+no session and spends nothing), and shows every window the plan reports: for some plans the 5-hour
+one and the week, for others, Pro among them, only the week. Saturn reads Codex's sessions in
+`~/.codex/sessions` for Search sessions and Teach the repo. It doesn't use Codex's hooks, which Codex runs only once each is trusted.
 
 ## One instruction file for both
 
