@@ -72,8 +72,12 @@ fn render_row(workspace: &WeakEntity<Workspace>, row: Row) -> impl IntoElement {
         let workspace = workspace.clone();
         chrome::button((id, tab.0), label, None, primary).on_click(move |_, window, cx| {
             let _ = workspace.update(cx, |workspace, cx| match act {
-                Act::Allow => workspace.answer_permission(tab, true, cx),
-                Act::Deny => workspace.answer_permission(tab, false, cx),
+                Act::Allow => {
+                    workspace.answer_permission(tab, true, cx);
+                }
+                Act::Deny => {
+                    workspace.answer_permission(tab, false, cx);
+                }
                 Act::Go => {
                     workspace.go_to_tab(tab, window, cx);
                     window.close_dialog(cx);

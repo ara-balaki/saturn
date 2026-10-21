@@ -2300,18 +2300,19 @@ impl Workspace {
 
     /// Answers the permission a tab's agent asks for, by pressing what you would in the pane:
     /// Return for Claude's highlighted "Yes", Escape for "No". Only while it really asks.
-    pub fn answer_permission(&mut self, tab: TabId, allow: bool, cx: &mut Context<Self>) {
+    pub fn answer_permission(&mut self, tab: TabId, allow: bool, cx: &mut Context<Self>) -> bool {
         let asks = matches!(self.waits.get(&tab), Some(Waiting::Permission { .. }));
-        let Some(view) = self.terminals.get(&tab).cloned() else { return };
+        let Some(view) = self.terminals.get(&tab).cloned() else { return false };
         let program = view.read(cx).foreground_pid().and_then(process_name);
         // Claude Code and Codex answer with their own keys; another agent isn't pressed for.
-        let Some(agent) = program.as_deref().and_then(Agent::of_program) else { return };
+        let Some(agent) = program.as_deref().and_then(Agent::of_program) else { return false };
         if !asks || view.read(cx).state != AgentState::NeedsYou {
-            return;
+            return false;
         }
         view.update(cx, |view, _| view.write(agent.answer_keys(allow).to_vec()));
         self.waits.remove(&tab);
         cx.notify();
+        true
     }
 
     /// Brings a tab to the front and gives it the keyboard.

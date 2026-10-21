@@ -357,7 +357,17 @@ fn answer_from_env(cx: &mut Context<Workspace>) {
     let after = var("SATURN_ANSWER_AFTER").map_or(Duration::from_secs(5), Duration::from_secs);
     cx.spawn(async move |workspace, cx| {
         cx.background_executor().timer(after).await;
-        let _ = workspace.update(cx, |workspace, cx| workspace.answer_permission(TabId(1), answer == "allow", cx));
+        // Then once a second until there's a permission to answer, for an agent that takes its time.
+        for _ in 0..180 {
+            let answered = workspace
+                .update(cx, |workspace, cx| workspace.answer_permission(TabId(1), answer == "allow", cx))
+                .unwrap_or(true);
+            if answered {
+                eprintln!("answered the permission: {answer}");
+                break;
+            }
+            cx.background_executor().timer(Duration::from_secs(1)).await;
+        }
     })
     .detach();
 }
