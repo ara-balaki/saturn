@@ -143,7 +143,8 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
 - Each pane shows the servers its agent runs, named after their app and port (`web :5173`); click one
   to open it. The repo's Docker Compose services (`postgres :5432`) sit in the bar at the bottom.
 - Several repos in one window, as tabs in the title bar (the + after them, or ⌘O, adds one). Their agents share one grid.
-- Focus a pane that works in another git worktree, and the sidebar follows it there.
+- Turn on Follow (the target beside the repo's name), and the sidebar follows the focused pane into
+  its worktree.
 - Worktrees (the repo's ⋯ in the sidebar): every worktree of the repo with its branch, last commit, pull request and whether
   its work is merged (squash merges too). The finished ones, with nothing uncommitted, no open pull
   request and nothing running in them, go with one click. One you're not working on now can be

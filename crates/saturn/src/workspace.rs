@@ -1116,7 +1116,8 @@ impl Workspace {
             check_runs: HashMap::new(),
             roots,
             root: project.clone(),
-            follow_pane: true,
+            // Off to begin with: the sidebar stays on the repo until you ask it to follow panes.
+            follow_pane: false,
             editor,
             projects: vec![project.clone()],
             project,
