@@ -484,15 +484,14 @@ enum PrLookup {
 
 /// The branch each tab is on, and the pull request each works on: an open one whose title or branch
 /// names its ticket, else the one last linked in it (the agent opened it, or you pasted it), else its
-/// branch's, else one that only mentions the ticket (a subtask's) or a merged or closed one for it.
-/// Slow: runs `git` and `gh`.
+/// branch's, else a merged or closed one that names its ticket. Slow: runs `git` and `gh`.
 fn read_checkouts(
     tabs: Vec<TabSources>,
 ) -> (HashMap<TabId, Checkout>, HashMap<TabId, PullRequest>, HashMap<TabId, ReviewNotes>) {
     let mut checkouts = HashMap::new();
     let mut pull_requests = HashMap::new();
     let mut found: HashMap<PrLookup, Option<PullRequest>> = HashMap::new();
-    let mut for_tickets: HashMap<(PathBuf, String), Option<(PullRequest, bool)>> = HashMap::new();
+    let mut for_tickets: HashMap<(PathBuf, String), Option<PullRequest>> = HashMap::new();
     for sources in tabs {
         let checkout =
             git::toplevel(&sources.dir).and_then(|root| git::branch(&root).map(|branch| Checkout { root, branch }));
@@ -506,24 +505,20 @@ fn read_checkouts(
                 })
                 .clone()
         };
-        // An open pull request that's the tab's ticket's own (named in its title or branch) wins even
-        // over a link, so a link to some other pull request the agent mentions in passing doesn't take
-        // the tab's chip. One that only mentions the ticket (a subtask's), or a merged or closed one,
-        // only counts when nothing else is found.
+        // An open pull request that names the tab's ticket (in its title or branch) wins even over a
+        // link, so a link to some other pull request the agent mentions in passing doesn't take the
+        // tab's chip. A merged or closed one only counts when nothing else is found.
         let for_ticket = sources.ticket.filter(|_| checkout.is_some()).and_then(|ticket| {
             for_tickets
                 .entry((root.clone(), ticket.clone()))
                 .or_insert_with(|| github::pull_request_for_ticket(&root, &ticket))
                 .clone()
         });
-        let ticket_own_open = for_ticket
-            .clone()
-            .filter(|(pr, own)| *own && matches!(pr.state, PrState::Open | PrState::Draft))
-            .map(|(pr, _)| pr);
-        let pull_request = ticket_own_open
+        let ticket_open = for_ticket.clone().filter(|pr| matches!(pr.state, PrState::Open | PrState::Draft));
+        let pull_request = ticket_open
             .or_else(|| sources.link.and_then(|link| look(PrLookup::Link(link))))
             .or_else(|| checkout.clone().and_then(|checkout| look(PrLookup::Branch(checkout))))
-            .or(for_ticket.map(|(pr, _)| pr));
+            .or(for_ticket);
         if let Some(checkout) = checkout {
             checkouts.insert(sources.tab, checkout);
         }

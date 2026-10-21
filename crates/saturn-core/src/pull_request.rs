@@ -11,7 +11,7 @@ use serde::Deserialize;
 pub const GH_FIELDS: &str = "number,state,isDraft,url,title,statusCheckRollup,headRefOid";
 
 /// The fields Saturn asks `gh pr list` for, to find a ticket's pull request.
-pub const GH_LIST_FIELDS: &str = "number,state,isDraft,url,title,headRefName,body,statusCheckRollup,headRefOid";
+pub const GH_LIST_FIELDS: &str = "number,state,isDraft,url,title,headRefName,statusCheckRollup,headRefOid";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrState {
@@ -313,8 +313,6 @@ struct Raw {
     #[serde(default)]
     head_ref_name: String,
     #[serde(default)]
-    body: String,
-    #[serde(default)]
     status_check_rollup: Vec<serde_json::Value>,
     #[serde(default)]
     head_ref_oid: Option<String>,
@@ -363,23 +361,18 @@ pub fn by_branch(json: &str) -> std::collections::HashMap<String, PullRequest> {
     found.into_iter().collect()
 }
 
-/// The pull request for a ticket from `gh pr list --search <ticket> --json …`, and whether it's
-/// truly the ticket's. One whose title or branch names it is (`true`); one whose description only
-/// mentions it (a subtask's "part of ABC-12") is a guess (`false`), so it comes after those. GitHub's
-/// search also matches the ticket's parts on their own, so only whole mentions count. Open before
-/// merged or closed, the newest first.
-pub fn for_ticket(json: &str, ticket: &str) -> Option<(PullRequest, bool)> {
+/// The pull request for a ticket from `gh pr list --search <ticket> --json …`: one whose title or
+/// branch names it, open before merged or closed, the newest first. One whose description only
+/// mentions it isn't the ticket's: a subtask's "part of ABC-12", another ticket's "see ABC-12", and a
+/// merged one of those took the pane of work that had just begun. GitHub's search also matches the
+/// ticket's parts on their own, so only whole mentions count.
+pub fn for_ticket(json: &str, ticket: &str) -> Option<PullRequest> {
     let found: Vec<Raw> = serde_json::from_str(json).ok()?;
     found
         .into_iter()
-        .filter_map(|raw| {
-            let own = names_ticket(&raw.title, ticket) || names_ticket(&raw.head_ref_name, ticket);
-            let mentioned = own || names_ticket(&raw.body, ticket);
-            mentioned.then_some(raw).and_then(Raw::into_pull_request).map(|pr| (pr, own))
-        })
-        .min_by_key(|(pr, own)| {
-            (!own, matches!(pr.state, PrState::Merged | PrState::Closed), std::cmp::Reverse(pr.number))
-        })
+        .filter(|raw| names_ticket(&raw.title, ticket) || names_ticket(&raw.head_ref_name, ticket))
+        .filter_map(Raw::into_pull_request)
+        .min_by_key(|pr| (matches!(pr.state, PrState::Merged | PrState::Closed), std::cmp::Reverse(pr.number)))
 }
 
 /// Whether `text` names `ticket` as a whole word, in any case: `ABC-12` is in "abc-12-fix" and
@@ -663,7 +656,7 @@ mod tests {
             {"number":11,"state":"OPEN","isDraft":false,"url":"u11","title":"Dark mode","headRefName":"abc-12-dark","body":""},
             {"number":12,"state":"OPEN","isDraft":false,"url":"u12","title":"ABC-123 is another ticket","headRefName":"y","body":""}
         ]"#;
-        assert_eq!(for_ticket(list, "ABC-12").map(|(pr, own)| (pr.number, own)), Some((11, true)));
+        assert_eq!(for_ticket(list, "ABC-12").map(|pr| pr.number), Some(11));
         assert_eq!(for_ticket(list, "ABC-99"), None);
         assert_eq!(for_ticket("[]", "ABC-12"), None);
     }
@@ -674,9 +667,10 @@ mod tests {
             {"number":163,"state":"OPEN","isDraft":true,"url":"u163","title":"Rewrite comments","headRefName":"feat/ABC-276-comments","body":"Part of ABC-274."},
             {"number":162,"state":"OPEN","isDraft":true,"url":"u162","title":"ABC-274: writing standard","headRefName":"feat/ABC-274-standard","body":""}
         ]"#;
-        assert_eq!(for_ticket(list, "ABC-274").map(|(pr, own)| (pr.number, own)), Some((162, true)));
-        let only_mentioned = r#"[{"number":163,"state":"OPEN","isDraft":false,"url":"u","title":"Comments","headRefName":"x","body":"Part of ABC-274."}]"#;
-        assert_eq!(for_ticket(only_mentioned, "ABC-274").map(|(pr, own)| (pr.number, own)), Some((163, false)));
+        assert_eq!(for_ticket(list, "ABC-274").map(|pr| pr.number), Some(162));
+        // Another ticket's merged pull request that mentions this one isn't this one's.
+        let only_mentioned = r#"[{"number":131,"state":"MERGED","isDraft":false,"url":"u","title":"Close the gaps","headRefName":"fix/ABC-275-gaps","body":"Follows ABC-274."}]"#;
+        assert_eq!(for_ticket(only_mentioned, "ABC-274"), None);
     }
 
     #[test]
