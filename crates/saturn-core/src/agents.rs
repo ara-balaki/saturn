@@ -2,7 +2,6 @@
 //! the program, how it starts with a first message, how a session resumes, where it keeps its
 //! sessions. Which of them a Mac has is found, not set: on the login `PATH`, and logged in.
 
-use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -140,28 +139,39 @@ pub const CODEX_PROFILE: &str = "saturn";
 pub const CODEX_STATUS_LINE: [&str; 6] =
     ["model-with-reasoning", "current-dir", "git-branch", "context-used", "five-hour-limit", "weekly-limit"];
 
-/// The profile file's text, with Codex's status line set to [`CODEX_STATUS_LINE`] when
-/// `status_line`.
+/// Saturn's settings set in the profile file `existing` (empty for a new one): `notify` when given,
+/// Codex's notifications to the terminal, and its status line when `status_line`. Everything else
+/// stays as it is: Codex keeps its own choices in the profile it runs with (the folders you trust
+/// in a session Saturn started, for one), and those must outlast Saturn's next start.
 #[must_use]
-pub fn codex_profile(notify: Option<&str>, status_line: bool) -> String {
-    let mut text = String::from(
-        "# Written by Saturn for the Codex sessions it starts (codex -p saturn); your config.toml still\n\
-         # applies beneath it. Saturn writes it again as it starts, so changes here don't last.\n",
-    );
-    if let Some(program) = notify {
-        let _ = writeln!(text, "notify = [{}]", toml_string(program));
+pub fn codex_profile(existing: &str, notify: Option<&str>, status_line: bool) -> String {
+    use toml_edit::{Array, DocumentMut, Item, Table, value};
+    let mut profile = existing.parse::<DocumentMut>().unwrap_or_default();
+    if profile.is_empty() {
+        profile.decor_mut().set_prefix(
+            "# Saturn's profile for the Codex sessions it starts (codex -p saturn), over your config.toml.\n\
+             # Saturn sets notify and [tui]'s notification_method, notification_condition and status_line\n\
+             # as it starts; anything else here is kept.\n",
+        );
     }
-    text.push_str("\n[tui]\nnotification_method = \"osc9\"\nnotification_condition = \"always\"\n");
+    match notify {
+        Some(program) => profile["notify"] = value(Array::from_iter([program])),
+        None => {
+            profile.remove("notify");
+        }
+    }
+    if !profile.contains_table("tui") {
+        profile.insert("tui", Item::Table(Table::new()));
+    }
+    let tui = &mut profile["tui"];
+    tui["notification_method"] = value("osc9");
+    tui["notification_condition"] = value("always");
     if status_line {
-        let items: Vec<String> = CODEX_STATUS_LINE.iter().map(|item| toml_string(item)).collect();
-        let _ = writeln!(text, "status_line = [{}]", items.join(", "));
+        tui["status_line"] = value(Array::from_iter(CODEX_STATUS_LINE));
+    } else if let Some(table) = tui.as_table_mut() {
+        table.remove("status_line");
     }
-    text
-}
-
-/// A TOML basic string.
-fn toml_string(text: &str) -> String {
-    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
+    profile.to_string()
 }
 
 /// `command` with Saturn's Codex profile when it starts Codex without a profile of its own: after
@@ -273,12 +283,24 @@ mod tests {
         assert_eq!(with_codex_profile("codex resume 019d"), "codex -p saturn resume 019d");
         assert_eq!(with_codex_profile("codex -p work"), "codex -p work", "a profile of its own stays");
         assert_eq!(with_codex_profile("claude 'Fix it'"), "claude 'Fix it'");
-        let profile = codex_profile(Some("/Applications/Saturn.app/Contents/Resources/plugin/bin/codex-notify"), false);
+        let profile =
+            codex_profile("", Some("/Applications/Saturn.app/Contents/Resources/plugin/bin/codex-notify"), false);
         assert!(profile.contains("notify = [\"/Applications/Saturn.app/Contents/Resources/plugin/bin/codex-notify\"]"));
         assert!(profile.contains("notification_method = \"osc9\""));
-        assert!(!codex_profile(None, false).contains("notify ="));
-        assert!(!profile.contains("status_line"));
-        assert!(codex_profile(None, true).contains("status_line = [\"model-with-reasoning\", \"current-dir\""));
+        assert!(!codex_profile("", None, false).contains("notify ="));
+        assert!(!profile.contains("status_line ="));
+        assert!(codex_profile("", None, true).contains("status_line = [\"model-with-reasoning\", \"current-dir\""));
+    }
+
+    #[test]
+    fn keeps_what_codex_writes_into_the_profile() {
+        let codex_wrote = "notify = [\"/old/codex-notify\"]\nmodel = \"gpt-6\"\n\n[tui]\nnotification_method = \"osc9\"\nstatus_line = [\"model\"]\n\n[projects.\"/code/acme-web\"]\ntrust_level = \"trusted\"\n";
+        let profile = codex_profile(codex_wrote, Some("/new/codex-notify"), false);
+        assert!(profile.contains("[projects.\"/code/acme-web\"]\ntrust_level = \"trusted\""), "{profile}");
+        assert!(profile.contains("model = \"gpt-6\""));
+        assert!(profile.contains("notify = [\"/new/codex-notify\"]"));
+        assert!(!profile.contains("status_line ="), "turned off");
+        assert_eq!(codex_profile(&profile, Some("/new/codex-notify"), false), profile, "nothing to change");
     }
 
     #[test]

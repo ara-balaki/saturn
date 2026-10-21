@@ -79,9 +79,10 @@ pub fn install_codex_profile() -> bool {
         .is_ok_and(|config| config.lines().any(|line| line.trim_start().starts_with("notify")));
     let script = crate::workspace::plugin_dir().map(|dir| dir.join("bin/codex-notify"));
     let notify = script.filter(|_| !own_notify).map(|script| script.to_string_lossy().into_owned());
-    let text = agents::codex_profile(notify.as_deref(), settings::load().codex_status_line);
     let file = home.join(format!("{}.config.toml", agents::CODEX_PROFILE));
-    std::fs::read_to_string(&file).is_ok_and(|now| now == text) || std::fs::write(&file, text).is_ok()
+    let now = std::fs::read_to_string(&file).unwrap_or_default();
+    let text = agents::codex_profile(&now, notify.as_deref(), settings::load().codex_status_line);
+    now == text || std::fs::write(&file, text).is_ok()
 }
 
 /// A command as Saturn types it: Codex with Saturn's profile, once it's in place.
