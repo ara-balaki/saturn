@@ -2995,6 +2995,11 @@ impl Workspace {
                 self.names.insert(tab, name.clone());
             }
             let agent = saved_tab.agent.unwrap_or(Agent::Claude);
+            // The session stays the tab's until another starts there, so a tab not resumed this
+            // time still offers it after the next start.
+            if let Some(id) = saved_tab.session.clone() {
+                self.sessions.insert(tab, (agent, id));
+            }
             if let Some(command) = saved_tab
                 .session
                 .as_deref()
