@@ -3388,18 +3388,10 @@ impl Workspace {
         let selected = tab == cell.active;
         let state = self.tab_state(tab, cx);
         let name = self.tab_name(tab, cx);
-        // A tab hidden behind another that needs you turns orange, so it can't be missed.
+        // A tab hidden behind another that needs you rings orange, as its pane does, so the pane's
+        // glow says which tab it's for. A fill hid the tab's own orange dot and read as a button.
         let calling = !selected && state == AgentState::NeedsYou && self.unseen.contains(&tab);
-        let on_orange = if saturn_design::appearance() == saturn_design::Appearance::Dark {
-            theme::color(color::INK_ON_SIGNAL)
-        } else {
-            gpui_kit::white()
-        };
-        let foreground = match (calling, selected) {
-            (true, _) => on_orange,
-            (false, true) => theme::color(color::INK),
-            (false, false) => theme::color(color::INK_MUTED),
-        };
+        let foreground = if selected { theme::color(color::INK) } else { theme::color(color::INK_MUTED) };
         let renaming = self.renaming.as_ref().filter(|(renaming, _)| *renaming == tab).map(|(_, input)| input.clone());
 
         let close = div()
@@ -3431,10 +3423,10 @@ impl Workspace {
             .pr(len(space::SPACE_1))
             .max_w(px(220.))
             .rounded(len(radius::RADIUS_SM))
-            // Selected the way every tab is (chrome::raised); a hidden tab that needs you, orange.
-            .map(|tab| chrome::raised(tab, selected && !calling))
-            .when(calling, |tab| tab.bg(theme::color(color::STATUS_NEEDS_YOU)))
-            .when(!selected && !calling, |tab| tab.hover(|s| s.bg(theme::fill_hover())))
+            // Selected the way every tab is (chrome::raised); a hidden tab that needs you, ringed.
+            .map(|tab| chrome::raised(tab, selected))
+            .when(calling, |tab| tab.shadow(theme::layers(&shadow::GLOW_NEEDS_YOU.get()[..1])))
+            .when(!selected, |tab| tab.hover(|s| s.bg(theme::fill_hover())))
             .text_color(foreground)
             .text_size(px(13.))
             .font_weight(FontWeight::MEDIUM)
