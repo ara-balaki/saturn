@@ -4021,16 +4021,10 @@ impl Workspace {
     /// once, again, on a schedule.
     fn render_new_agent(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let height = len(TITLEBAR_CONTROL + 2. * space::SPACE_1);
-        // A part of the button: no fill of its own, a light veil on hover.
-        let part = |id: &'static str| {
-            div()
-                .id(id)
-                .flex()
-                .items_center()
-                .h(height)
-                .cursor_pointer()
-                .hover(|s| s.bg(gpui_kit::white().opacity(0.1)))
-        };
+        // A part of the button, with no fill of its own: like the primary button, it doesn't light
+        // up under the pointer, so the gradient stays whole. The arrow looks pressed while its menu
+        // is open.
+        let part = |id: &'static str| div().id(id).flex().items_center().h(height).cursor_pointer();
         let open = self.open_menu == Some(OpenMenu::NewAgent);
         let more = part("new-agent-more")
             .px(len(space::SPACE_2))
