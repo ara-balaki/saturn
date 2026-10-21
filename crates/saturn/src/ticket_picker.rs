@@ -62,6 +62,7 @@ pub fn open(workspace: WeakEntity<Workspace>, connected: bool, window: &mut Wind
             .bg(crate::chrome::dialog_surface())
             .w(px(600.))
             .child(Input::new(&search))
+            .children(crate::agent_choice::row("new-agent-agent", "Agent", cx))
             .children(also_in_row(&workspace, cx))
             .children(note.map(|note| {
                 div().py(len(space::SPACE_4)).text_size(px(14.)).text_color(theme::color(color::INK_MUTED)).child(note)
@@ -130,9 +131,10 @@ fn picks(workspace: &Entity<Workspace>, query: &str, cx: &App) -> Vec<Pick> {
 }
 
 fn start(workspace: &Entity<Workspace>, pick: &Pick, window: &mut Window, cx: &mut App) {
+    let agent = crate::agent_choice::current(cx);
     workspace.update(cx, |workspace, cx| match pick {
-        Pick::Ticket(ticket) => workspace.start_ticket(ticket, window, cx),
-        Pick::Name(name) => workspace.start_named(name, window, cx),
+        Pick::Ticket(ticket) => workspace.start_ticket(ticket, agent, window, cx),
+        Pick::Name(name) => workspace.start_named(name, agent, window, cx),
     });
     window.close_dialog(cx);
 }

@@ -122,12 +122,19 @@ pub struct Routine {
     pub name: String,
     /// Where it runs.
     pub folder: PathBuf,
-    /// What Claude is asked, as its first prompt.
+    /// What the agent is asked, as its first prompt.
     pub prompt: String,
     pub schedule: Schedule,
     /// Paused routines keep their place but don't run.
     #[serde(default = "on")]
     pub on: bool,
+    /// The agent it starts; routines made before Codex start Claude Code.
+    #[serde(default = "claude")]
+    pub agent: crate::agents::Agent,
+}
+
+fn claude() -> crate::agents::Agent {
+    crate::agents::Agent::Claude
 }
 
 fn on() -> bool {
@@ -245,6 +252,7 @@ mod tests {
             prompt: "Update the dependencies".to_owned(),
             schedule,
             on: true,
+            agent: crate::agents::Agent::Claude,
         }
     }
 

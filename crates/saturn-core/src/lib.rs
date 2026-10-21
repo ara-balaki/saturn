@@ -1,9 +1,10 @@
-//! Saturn's logic without any UI: the terminal grid as data, what an agent is doing, how to read
-//! the signals Claude Code sends to its terminal, and the file tree with its git state. Everything
+//! Saturn's logic without any UI: the terminal grid as data, the agents it runs (Claude Code, Codex)
+//! and what each is doing, how to read the signals they send to their terminals, and the file tree with its git state. Everything
 //! here is unit-tested.
 
 pub mod agent_activity;
 pub mod agent_state;
+pub mod agents;
 pub mod best_of;
 pub mod checks;
 pub mod clickup;

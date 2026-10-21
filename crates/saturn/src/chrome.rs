@@ -401,7 +401,7 @@ pub fn empty_grid(
                                     div()
                                         .text_size(px(14.))
                                         .text_color(theme::color(color::INK_MUTED))
-                                        .child("Open a shell in the project folder, then start Claude in it."),
+                                        .child("Open a shell in the project folder, then start your agent in it."),
                                 ),
                         )
                         .child(button("empty-new", "New terminal", Some("⌘N"), true).on_click(new_terminal)),

@@ -10,6 +10,7 @@ use gpui_kit::{
     AppContext as _, Context, Entity, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, Render,
     StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div, px,
 };
+use saturn_core::agents::Agent;
 use saturn_core::layout::TabId;
 use saturn_core::past_sessions::{Index, Session};
 use saturn_design::{color, radius, space};
@@ -141,7 +142,7 @@ impl SessionsView {
         row.cursor_pointer().hover(|s| s.bg(theme::fill_hover())).on_click(move |_, window, cx| {
             let _ = workspace.update(cx, |workspace, cx| match (pane, &folder) {
                 (Some(tab), _) => workspace.go_to_tab(tab, window, cx),
-                (None, Some(folder)) => workspace.resume_session(folder, &id, window, cx),
+                (None, Some(folder)) => workspace.resume_session(folder, Agent::Claude, &id, window, cx),
                 (None, None) => {}
             });
             window.close_dialog(cx);

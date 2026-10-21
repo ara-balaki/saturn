@@ -1,5 +1,6 @@
 //! Saturn: a terminal grid for running many Claude Code agents side by side.
 
+mod agent_choice;
 mod agents_view;
 mod app_view;
 mod assets;
@@ -198,6 +199,7 @@ fn main() {
         languages::register();
         theme::apply(settings::load().appearance, cx);
         theme::set_text_size(settings::load().text_size, cx);
+        agent_choice::start(cx);
         usage::start(cx);
         routines_view::start(cx);
         workspace::apply_app_settings(&settings::load(), cx);

@@ -1,11 +1,12 @@
 //! The window as it was, per project, so Saturn opens where it left off: the repos it held, the
-//! shape of the grid, and for each tab its folder, the name typed for it, and the Claude session
-//! it was running.
+//! shape of the grid, and for each tab its folder, the name typed for it, and the agent's session
+//! it was running (Claude Code's or Codex's).
 //! Kept in `~/Library/Application Support/Saturn/sessions.json`.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use saturn_core::agents::Agent;
 use saturn_core::layout::Shape;
 use serde::{Deserialize, Serialize};
 
@@ -25,9 +26,12 @@ pub struct SavedTab {
     /// A name typed by hand for the tab.
     #[serde(default)]
     pub name: Option<String>,
-    /// The Claude session that was running in it, offered for resuming.
+    /// The agent's session that was running in it, offered for resuming.
+    #[serde(default, alias = "claude_session")]
+    pub session: Option<String>,
+    /// Whose session it is; grids saved before Codex knew only Claude Code.
     #[serde(default)]
-    pub claude_session: Option<String>,
+    pub agent: Option<Agent>,
 }
 
 fn file() -> Option<PathBuf> {
@@ -62,11 +66,11 @@ pub fn save(project: &Path, grid: Option<SavedGrid>) {
     }
 }
 
-/// What to type into a restored tab to resume its Claude session: typed, not run, so resuming is
+/// What to type into a restored tab to resume its agent's session: typed, not run, so resuming is
 /// one Enter and never a surprise.
-pub fn resume_command(session: &str) -> Option<String> {
+pub fn resume_command(agent: Agent, session: &str) -> Option<String> {
     // Session ids are UUIDs; anything else is not typed into a shell.
-    session.chars().all(|c| c.is_ascii_hexdigit() || c == '-').then(|| format!("claude --resume {session}"))
+    session.chars().all(|c| c.is_ascii_hexdigit() || c == '-').then(|| agent.resume(session))
 }
 
 #[cfg(test)]
@@ -76,9 +80,20 @@ mod tests {
     #[test]
     fn only_uuid_like_sessions_are_offered() {
         assert_eq!(
-            resume_command("0b6f7c2e-1a2b-4c3d-9e8f-001122334455").as_deref(),
+            resume_command(Agent::Claude, "0b6f7c2e-1a2b-4c3d-9e8f-001122334455").as_deref(),
             Some("claude --resume 0b6f7c2e-1a2b-4c3d-9e8f-001122334455")
         );
-        assert_eq!(resume_command("x; rm -rf ~"), None);
+        assert_eq!(
+            resume_command(Agent::Codex, "019d7c54-01b0-7992-acd4-66566288cc3e").as_deref(),
+            Some("codex resume 019d7c54-01b0-7992-acd4-66566288cc3e")
+        );
+        assert_eq!(resume_command(Agent::Claude, "x; rm -rf ~"), None);
+    }
+
+    #[test]
+    fn a_tab_saved_before_codex_resumes_its_claude_session() {
+        let tab: SavedTab =
+            serde_json::from_str(r#"{"cwd":"/code/acme-web","claude_session":"0b6f7c2e"}"#).expect("reads");
+        assert_eq!((tab.session.as_deref(), tab.agent), (Some("0b6f7c2e"), None));
     }
 }

@@ -3,6 +3,7 @@
 //! starts Claude with its prompt; a run whose time passed while Saturn was closed shows as missed,
 //! to run by hand. The schedule is looked at every half minute, by one loop for the whole app.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
@@ -178,7 +179,15 @@ impl RoutinesView {
         // Unique enough: two routines aren't added in the same nanosecond.
         let made = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
         let id = format!("routine-{}", made.as_nanos());
-        let routine = Routine { id, name, folder: self.folder.clone(), prompt, schedule, on: true };
+        let routine = Routine {
+            id,
+            name,
+            folder: self.folder.clone(),
+            prompt,
+            schedule,
+            on: true,
+            agent: crate::agent_choice::current(cx),
+        };
         self.said = Some(format!("Added {}.", routine.name));
         self.name.update(cx, |name, cx| name.set_value("", window, cx));
         self.prompt.update(cx, |prompt, cx| prompt.set_value("", window, cx));
@@ -191,7 +200,11 @@ impl RoutinesView {
             .then(|| routines::next_time(routine, now))
             .flatten()
             .map_or_else(|| "Paused".to_owned(), |next| format!("Next {}", routines::local_label(next)));
-        let detail = format!("{} · in {}", routine.schedule.describe(), folder_name(&routine.folder));
+        let mut detail = format!("{} · in {}", routine.schedule.describe(), folder_name(&routine.folder));
+        // Which agent, once there's more than one to tell apart.
+        if crate::agent_choice::ready(cx).len() > 1 {
+            let _ = write!(detail, " · {}", routine.agent.name());
+        }
         let (toggle_id, remove_id) = (routine.id.clone(), routine.id.clone());
         let picked = routine.clone();
         div()
@@ -260,9 +273,10 @@ impl RoutinesView {
         let action = match (&run.ran, &run.session, &routine) {
             (Some(_), Some(session), Some(routine)) if routine.folder.is_dir() => {
                 let (workspace, folder, session) = (self.workspace.clone(), routine.folder.clone(), session.clone());
+                let agent = routine.agent;
                 Some(chrome::button(("run-resume", index), "Resume", None, false).on_click(move |_, window, cx| {
-                    let _ =
-                        workspace.update(cx, |workspace, cx| workspace.resume_session(&folder, &session, window, cx));
+                    let _ = workspace
+                        .update(cx, |workspace, cx| workspace.resume_session(&folder, agent, &session, window, cx));
                     window.close_dialog(cx);
                 }))
             }
@@ -337,6 +351,7 @@ impl RoutinesView {
             .gap(len(space::SPACE_2))
             .child(Input::new(&self.name))
             .child(Textarea::new(&self.prompt).h(px(80.)))
+            .children(crate::agent_choice::row("routine-agent", "Agent", cx))
             .child(
                 div()
                     .flex()

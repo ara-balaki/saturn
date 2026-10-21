@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
+use saturn_core::agents::Agent;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +44,8 @@ pub struct Settings {
     /// The panels showing when Saturn last quit or one was shown or hidden; new windows open
     /// with the same.
     pub panels: Panels,
+    /// The agent picked last (Claude Code or Codex), which new panes start while it's ready.
+    pub agent: Option<Agent>,
 }
 
 /// The window's panels around the grid, and whether each is showing.
@@ -104,8 +107,10 @@ pub struct TerminalSettings {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ProjectSettings {
-    /// Run in the new pane, with `{ticket}` (ABC-236) and `{title}` filled in.
+    /// Run in the new pane to start Claude Code, with `{ticket}` (ABC-236) and `{title}` filled in.
     pub ticket_command: String,
+    /// The same, to start Codex.
+    pub codex_command: String,
     /// Saturn makes a git worktree per ticket and opens the pane in it. Off when the command sets
     /// up its own (a skill that creates worktrees, for example).
     pub create_worktree: bool,
@@ -113,14 +118,26 @@ pub struct ProjectSettings {
 
 impl Default for ProjectSettings {
     fn default() -> Self {
-        Self { ticket_command: "claude -n {ticket}".to_owned(), create_worktree: true }
+        Self {
+            ticket_command: Agent::Claude.ticket_command().to_owned(),
+            codex_command: Agent::Codex.ticket_command().to_owned(),
+            create_worktree: true,
+        }
     }
 }
 
 impl ProjectSettings {
-    /// The command for `ticket`, quoted for the shell where filled in.
-    pub fn command_for(&self, ticket: &str, title: &str) -> String {
-        self.ticket_command.replace("{ticket}", &shell_quote(ticket)).replace("{title}", &shell_quote(title))
+    /// What starts `agent` on a ticket, as the project has it.
+    pub fn command(&self, agent: Agent) -> &str {
+        match agent {
+            Agent::Claude => &self.ticket_command,
+            Agent::Codex => &self.codex_command,
+        }
+    }
+
+    /// The command that starts `agent` on `ticket`, quoted for the shell where filled in.
+    pub fn command_for(&self, agent: Agent, ticket: &str, title: &str) -> String {
+        self.command(agent).replace("{ticket}", &shell_quote(ticket)).replace("{title}", &shell_quote(title))
     }
 }
 
@@ -180,6 +197,7 @@ impl Default for Settings {
             ticket_filter: saturn_core::clickup::Filter::default(),
             share_env_files: true,
             panels: Panels::default(),
+            agent: None,
         }
     }
 }
@@ -315,9 +333,11 @@ mod tests {
         let project = ProjectSettings {
             ticket_command: "claude -n {ticket} \"/start {ticket}\"".to_owned(),
             create_worktree: false,
+            ..ProjectSettings::default()
         };
-        assert_eq!(project.command_for("ABC-236", "x"), "claude -n ABC-236 \"/start ABC-236\"");
-        let titled = ProjectSettings { ticket_command: "echo {title}".to_owned(), create_worktree: true };
-        assert_eq!(titled.command_for("ABC-1", "Don't break; rm -rf"), "echo 'Don'\\''t break; rm -rf'");
+        assert_eq!(project.command_for(Agent::Claude, "ABC-236", "x"), "claude -n ABC-236 \"/start ABC-236\"");
+        assert_eq!(project.command_for(Agent::Codex, "ABC-236", "x"), "codex");
+        let titled = ProjectSettings { ticket_command: "echo {title}".to_owned(), ..ProjectSettings::default() };
+        assert_eq!(titled.command_for(Agent::Claude, "ABC-1", "Don't break; rm -rf"), "echo 'Don'\\''t break; rm -rf'");
     }
 }

@@ -15,6 +15,8 @@ use crate::chrome;
 use crate::keymap::{self, SHORTCUTS, Shortcut};
 use crate::settings::{AppearanceSetting, Settings, TEXT_SIZES};
 use crate::theme::{self, len};
+use saturn_core::agents::Agent;
+
 use crate::workspace::Workspace;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -23,14 +25,14 @@ enum Section {
     Appearance,
     Editor,
     Terminal,
-    Claude,
+    Agents,
     Keymap,
     ClickUp,
 }
 
 impl Section {
     const ALL: [Self; 7] =
-        [Self::General, Self::Appearance, Self::Editor, Self::Terminal, Self::Claude, Self::Keymap, Self::ClickUp];
+        [Self::General, Self::Appearance, Self::Editor, Self::Terminal, Self::Agents, Self::Keymap, Self::ClickUp];
 
     fn name(self) -> &'static str {
         match self {
@@ -38,7 +40,7 @@ impl Section {
             Self::Appearance => "Appearance",
             Self::Editor => "Editor",
             Self::Terminal => "Terminal",
-            Self::Claude => "Claude",
+            Self::Agents => "Agents",
             Self::Keymap => "Keyboard shortcuts",
             Self::ClickUp => "ClickUp",
         }
@@ -50,7 +52,7 @@ impl Section {
             Self::Appearance => "sun-moon",
             Self::Editor => "file-code",
             Self::Terminal => "square-terminal",
-            Self::Claude => "bot",
+            Self::Agents => "bot",
             Self::Keymap => "keyboard",
             Self::ClickUp => "link-2",
         }
@@ -110,6 +112,7 @@ pub struct SettingsView {
     search: Entity<InputState>,
     token: Entity<InputState>,
     command: Entity<InputState>,
+    codex_command: Entity<InputState>,
     /// The shortcut waiting for its new keys, and what takes them before any shortcut fires.
     recording: Option<(&'static str, Subscription)>,
     /// What the last shortcut change did besides itself ("Taken from Close tab").
@@ -123,16 +126,18 @@ pub struct SettingsView {
 
 impl SettingsView {
     /// The workspace is in the middle of an update when Settings opens, so nothing here reads it:
-    /// `ticket_command` comes from the caller.
+    /// the project's commands come from the caller.
     fn new(
         workspace: WeakEntity<Workspace>,
-        ticket_command: String,
+        commands: (String, String),
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let (ticket_command, codex_command) = commands;
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search settings"));
         let token = cx.new(|cx| InputState::new(window, cx).masked(true).placeholder("pk_…"));
         let command = cx.new(|cx| InputState::new(window, cx).default_value(ticket_command));
+        let codex_command = cx.new(|cx| InputState::new(window, cx).default_value(codex_command));
         search.update(cx, |search, cx| search.focus(window, cx));
         let subscriptions = vec![
             cx.subscribe(&search, |_, _, event: &InputEvent, cx| {
@@ -154,6 +159,19 @@ impl SettingsView {
                     );
                 });
             }),
+            cx.subscribe(&codex_command, |this, input, event: &InputEvent, cx| {
+                if !matches!(event, InputEvent::Change) {
+                    return;
+                }
+                let value = input.read(cx).value().to_string();
+                let _ = this.workspace.update(cx, |workspace, cx| {
+                    let project = workspace.project_path().to_owned();
+                    workspace.change_settings(
+                        |settings| settings.projects.entry(project).or_default().codex_command = value,
+                        cx,
+                    );
+                });
+            }),
         ];
         let observed = workspace.upgrade().map(|workspace| cx.observe(&workspace, |_, _, cx| cx.notify()));
         // Spikes open a section by name (`SATURN_SETTINGS_SECTION=keyboard`).
@@ -167,6 +185,7 @@ impl SettingsView {
             search,
             token,
             command,
+            codex_command,
             recording: None,
             note: None,
             status_line: crate::status_line::is_installed(),
@@ -357,6 +376,45 @@ impl SettingsView {
         ]
     }
 
+    /// What Saturn found of each agent, and which one new panes start when there are two.
+    fn found_agents(cx: &mut Context<Self>) -> Vec<Row> {
+        let found = cx.try_global::<crate::agent_choice::Agents>().and_then(|agents| agents.found.clone());
+        let mut rows: Vec<Row> = Agent::ALL
+            .into_iter()
+            .map(|agent| {
+                let state = found.as_ref().and_then(|found| found.iter().find(|found| found.agent == agent).copied());
+                let (detail, status) = match state {
+                    None => ("Looking for it…".to_owned(), "…"),
+                    Some(found) if found.ready() => {
+                        (format!("Installed and logged in: Saturn can start it ({}).", agent.program()), "Ready")
+                    }
+                    Some(found) if found.installed => (
+                        format!("Installed, not logged in. Run {} in a terminal to log in.", agent.program()),
+                        "Not logged in",
+                    ),
+                    Some(_) => {
+                        (format!("Not on this Mac. Install it to run {} agents here.", agent.name()), "Not installed")
+                    }
+                };
+                Row::new(
+                    Section::Agents,
+                    agent.name(),
+                    detail,
+                    div().text_size(px(13.)).text_color(theme::color(color::INK_MUTED)).child(status),
+                )
+            })
+            .collect();
+        if let Some(switch) = crate::agent_choice::switch("settings-agent", cx) {
+            rows.push(Row::new(
+                Section::Agents,
+                "New agents start",
+                "New agent, Best of N and routines start this one, and remember what you pick there.",
+                switch,
+            ));
+        }
+        rows
+    }
+
     fn claude(&self, settings: &Settings, cx: &mut Context<Self>) -> Vec<Row> {
         let detail = format!(
             "Under Claude Code's prompt, in Saturn and in any other terminal: the model, how full the context is, the step when Claude keeps a task list, and how much of the session's limit is used (in Saturn, with this session's part of it). Turning it on keeps the status line you had, to put back when you turn it off.{}",
@@ -364,7 +422,7 @@ impl SettingsView {
         );
         vec![
             Row::new(
-                Section::Claude,
+                Section::Agents,
                 "Status line in Claude Code",
                 detail,
                 Switch::new("status-line").checked(self.status_line).on_click(cx.listener(|this, on: &bool, _, cx| {
@@ -379,7 +437,7 @@ impl SettingsView {
                 })),
             ),
             Row::new(
-                Section::Claude,
+                Section::Agents,
                 "Name tabs after Claude's session",
                 "A tab shows the session's name, from /rename or set automatically. Off: the tab shows its folder, or a name you gave it by double-clicking.",
                 self.switch("name-tabs", settings.name_tabs_after_sessions, |settings, on| {
@@ -387,7 +445,7 @@ impl SettingsView {
                 }),
             ),
             Row::new(
-                Section::Claude,
+                Section::Agents,
                 "Name sessions after tickets",
                 "A slash command whose first word is a ticket, like /start abc-224, renames the session to ABC-224, as /rename would. A name you gave yourself is never replaced.",
                 self.switch("rename-sessions", settings.rename_sessions_from_commands, |settings, on| {
@@ -578,9 +636,16 @@ impl SettingsView {
             ),
             Row::new(
                 Section::ClickUp,
-                format!("Starting a ticket in {project_name}"),
+                format!("Starting Claude Code on a ticket in {project_name}"),
                 "Runs in the new pane. {ticket} becomes the ticket's id (ABC-236), {title} its title. To have the agent start straight away, give it a first message: claude -n {ticket} \"/start {ticket}\".",
                 Input::new(&self.command),
+            )
+            .wide(),
+            Row::new(
+                Section::ClickUp,
+                format!("Starting Codex on a ticket in {project_name}"),
+                "The same for Codex, which has no flag to name its session: codex \"Work on {ticket}: {title}\".",
+                Input::new(&self.codex_command),
             )
             .wide(),
             Row::new(
@@ -599,6 +664,7 @@ impl SettingsView {
         rows.extend(self.appearance(&settings));
         rows.extend(self.editor(&settings));
         rows.extend(self.terminal(&settings));
+        rows.extend(Self::found_agents(cx));
         rows.extend(self.claude(&settings, cx));
         rows.extend(SHORTCUTS.iter().map(|shortcut| self.shortcut_row(shortcut, &settings, cx)));
         rows.extend(self.clickup(cx));
@@ -776,10 +842,11 @@ impl Render for SettingsView {
     }
 }
 
-/// Opens Settings. `ticket_command` is the project's current one: the caller passes it, since the
-/// workspace that opens the dialog is in the middle of an update and can't be read.
-pub fn open(workspace: WeakEntity<Workspace>, ticket_command: String, window: &mut Window, cx: &mut App) {
-    let view = cx.new(|cx| SettingsView::new(workspace, ticket_command, window, cx));
+/// Opens Settings. `commands` are the project's current ones (Claude Code's, Codex's): the caller
+/// passes them, since the workspace that opens the dialog is in the middle of an update and can't be
+/// read.
+pub fn open(workspace: WeakEntity<Workspace>, commands: (String, String), window: &mut Window, cx: &mut App) {
+    let view = cx.new(|cx| SettingsView::new(workspace, commands, window, cx));
     window.open_dialog(cx, move |dialog, _, _| {
         dialog
             .title("Settings")

@@ -1,6 +1,7 @@
 //! Work that spans repositories: one ticket that changes an app and its API, say. Each repository
 //! gets a worktree for it on the same branch (`git::work_worktree` names both alike), and one agent
-//! works in the first with the others added to what it may read and change (`claude --add-dir`).
+//! works in the first with the others added to what it may read and change (`--add-dir`, which
+//! Claude Code and Codex both take).
 //! The worktrees are linked by their branch alone, so nothing else needs remembering.
 
 use std::fmt::Write as _;
@@ -28,19 +29,20 @@ pub fn linked(branch: &str, repos: &[PathBuf], own: &Path) -> Vec<PathBuf> {
     found
 }
 
-/// An agent command that also reaches `folders`: `claude …` with `--add-dir` for each, given as
-/// shell words by `quote`. A command that doesn't start Claude is left as it is.
+/// An agent command that also reaches `folders`: `claude …` or `codex …` with `--add-dir` for each
+/// (both take it), given as shell words by `quote`. Any other command is left as it is.
 #[must_use]
 pub fn with_folders(command: &str, folders: &[PathBuf], quote: impl Fn(&str) -> String) -> String {
-    let Some(rest) = command.strip_prefix("claude") else { return command.to_owned() };
-    if !(rest.is_empty() || rest.starts_with(' ')) || folders.is_empty() {
+    let Some(agent) = crate::agents::Agent::of_command(command) else { return command.to_owned() };
+    let Some(rest) = command.strip_prefix(agent.program()) else { return command.to_owned() };
+    if folders.is_empty() {
         return command.to_owned();
     }
     let mut added = String::new();
     for folder in folders {
         let _ = write!(added, " --add-dir {}", quote(&folder.to_string_lossy()));
     }
-    format!("claude{added}{rest}")
+    format!("{}{added}{rest}", agent.program())
 }
 
 #[cfg(test)]
@@ -52,7 +54,7 @@ mod tests {
     }
 
     #[test]
-    fn adds_folders_to_a_claude_command_only() {
+    fn adds_folders_to_an_agent_command_only() {
         let folders = [PathBuf::from("/code/acme-api-abc-123"), PathBuf::from("/code/acme-docs-abc-123")];
         assert_eq!(
             with_folders("claude '/start ABC-123'", &folders, quote),
@@ -60,7 +62,11 @@ mod tests {
         );
         assert_eq!(with_folders("claude", &folders[..1], quote), "claude --add-dir '/code/acme-api-abc-123'");
         assert_eq!(with_folders("claude-other x", &folders, quote), "claude-other x");
-        assert_eq!(with_folders("codex 'ABC-123'", &folders, quote), "codex 'ABC-123'");
+        assert_eq!(
+            with_folders("codex 'ABC-123'", &folders[..1], quote),
+            "codex --add-dir '/code/acme-api-abc-123' 'ABC-123'"
+        );
+        assert_eq!(with_folders("aider 'ABC-123'", &folders, quote), "aider 'ABC-123'");
         assert_eq!(with_folders("claude x", &[], quote), "claude x");
     }
 

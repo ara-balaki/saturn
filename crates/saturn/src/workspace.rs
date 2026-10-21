@@ -17,6 +17,7 @@ use gpui_kit::{
 };
 use saturn_bridge::{Bridge, HookCall};
 use saturn_core::agent_state::{AgentState, tab_title};
+use saturn_core::agents::Agent;
 use saturn_core::best_of;
 use saturn_core::checks;
 use saturn_core::clickup::Ticket;
@@ -311,8 +312,9 @@ pub struct Workspace {
     tickets_view: Option<Entity<TicketsView>>,
     /// What the sidebar shows.
     sidebar_tab: SidebarTab,
-    /// The Claude session running in each tab, from its hooks, so a restart can offer to resume it.
-    claude_sessions: HashMap<TabId, String>,
+    /// The agent's session running in each tab (whose, and its id), from its hooks, so a restart can
+    /// offer to resume it.
+    sessions: HashMap<TabId, (Agent, String)>,
     /// Panes a routine started, until their session is known: the routine and its time.
     routine_tabs: HashMap<TabId, (String, i64)>,
     /// The agent team each pane's session leads, if any.
@@ -1089,7 +1091,7 @@ impl Workspace {
             status_bar,
             tickets_view: None,
             sidebar_tab: SidebarTab::Files,
-            claude_sessions: HashMap::new(),
+            sessions: HashMap::new(),
             routine_tabs: HashMap::new(),
             teams: HashMap::new(),
             also_in: Vec::new(),
@@ -1295,8 +1297,8 @@ impl Workspace {
     }
 
     pub fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let command = self.settings.project(&self.project).ticket_command;
-        settings_view::open(cx.weak_entity(), command, window, cx);
+        let project = self.settings.project(&self.project);
+        settings_view::open(cx.weak_entity(), (project.ticket_command, project.codex_command), window, cx);
     }
 
     /// The folder the sidebar shows: the selected repo, or one of its worktrees.
@@ -1425,21 +1427,29 @@ impl Workspace {
 
     /// Starts an agent on `ticket` in a new pane: in its own worktree when the project asks
     /// Saturn to make one, running the project's ticket command.
-    pub fn start_ticket(&mut self, ticket: &Ticket, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn start_ticket(&mut self, ticket: &Ticket, agent: Agent, window: &mut Window, cx: &mut Context<Self>) {
         let make_worktree = self.settings.project(&self.project).create_worktree;
-        self.start_work(ticket.key(), &ticket.title, make_worktree, window, cx);
+        self.start_work(ticket.key(), &ticket.title, agent, make_worktree, window, cx);
     }
 
     /// Starts an agent on work named by hand (`fix-login`), with no tracker: always in a worktree
     /// of its own, which is the point of naming it.
-    pub fn start_named(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
-        self.start_work(name, name, true, window, cx);
+    pub fn start_named(&mut self, name: &str, agent: Agent, window: &mut Window, cx: &mut Context<Self>) {
+        self.start_work(name, name, agent, true, window, cx);
     }
 
-    /// Starts an agent on a piece of work, `key` (a ticket's id or a name) with its `title`, in a new
+    /// Starts `agent` on a piece of work, `key` (a ticket's id or a name) with its `title`, in a new
     /// pane: in a worktree of its own when `make_worktree`, set up by the repo's recipe, running the
-    /// project's agent command.
-    fn start_work(&mut self, key: &str, title: &str, make_worktree: bool, window: &mut Window, cx: &mut Context<Self>) {
+    /// project's command for that agent.
+    fn start_work(
+        &mut self,
+        key: &str,
+        title: &str,
+        agent: Agent,
+        make_worktree: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let project = self.settings.project(&self.project);
         let mut problem = None;
         let (cwd, made) = if make_worktree {
@@ -1465,7 +1475,7 @@ impl Workspace {
         if let Some(problem) = problem {
             self.note(tab, &problem, cx);
         }
-        let mut command = project.command_for(key, title);
+        let mut command = project.command_for(agent, key, title);
         if make_worktree && cwd != self.project {
             let folders = self.also_in_worktrees(key, tab, cx);
             command = multi_repo::with_folders(&command, &folders, settings::shell_quote);
@@ -1479,8 +1489,8 @@ impl Workspace {
         self.after_layout_change(window, cx);
     }
 
-    /// Starts a routine for its time `due`: a pane in its folder, named after it, where Claude starts
-    /// with its prompt. Its session is tied to the run once a hook tells it.
+    /// Starts a routine for its time `due`: a pane in its folder, named after it, where its agent
+    /// starts with its prompt. Its session is tied to the run once a hook tells it.
     pub fn start_routine(&mut self, routine: &Routine, due: i64, window: &mut Window, cx: &mut Context<Self>) {
         let there = routine.folder.is_dir();
         let folder = if there { routine.folder.clone() } else { self.project.clone() };
@@ -1489,7 +1499,7 @@ impl Workspace {
         self.names.insert(tab, routine.name.clone());
         if there {
             self.routine_tabs.insert(tab, (routine.id.clone(), due));
-            self.type_into(tab, format!("claude {}", settings::shell_quote(&routine.prompt)), cx);
+            self.type_into(tab, routine.agent.start(Some(&routine.prompt), settings::shell_quote), cx);
             notify::post(&routine.id, &routine.name, "The routine started.", false);
         } else {
             let gone = routine.folder.display();
@@ -1500,10 +1510,16 @@ impl Workspace {
 
     /// Reads the team each pane's session leads, off the main thread.
     fn refresh_teams(&mut self, cx: &mut Context<Self>) {
-        if self.claude_sessions.is_empty() && self.teams.is_empty() {
+        if self.sessions.is_empty() && self.teams.is_empty() {
             return;
         }
-        let sessions: Vec<(TabId, String)> = self.claude_sessions.iter().map(|(tab, id)| (*tab, id.clone())).collect();
+        // Agent teams are Claude Code's.
+        let sessions: Vec<(TabId, String)> = self
+            .sessions
+            .iter()
+            .filter(|(_, (agent, _))| *agent == Agent::Claude)
+            .map(|(tab, (_, id))| (*tab, id.clone()))
+            .collect();
         cx.spawn(async move |this, cx| {
             let teams = cx
                 .background_spawn(async move {
@@ -1529,9 +1545,16 @@ impl Workspace {
         self.teams.get(&tab)
     }
 
-    /// Resumes a Claude session in a new pane in the folder it ran in.
-    pub fn resume_session(&mut self, folder: &Path, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(command) = crate::session::resume_command(id) else { return };
+    /// Resumes an agent's session in a new pane in the folder it ran in.
+    pub fn resume_session(
+        &mut self,
+        folder: &Path,
+        agent: Agent,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(command) = crate::session::resume_command(agent, id) else { return };
         let Some(tab) = self.spawn_terminal(folder, window, cx) else { return };
         self.place_new(tab);
         self.type_into(tab, command, cx);
@@ -1789,7 +1812,8 @@ impl Workspace {
             } else {
                 self.layout.split_right(tab, None);
             }
-            self.type_into(tab, format!("claude {}", settings::shell_quote(message)), cx);
+            let agent = crate::agent_choice::current(cx);
+            self.type_into(tab, agent.start(Some(message), settings::shell_quote), cx);
             self.after_layout_change(window, cx);
         }
     }
@@ -2198,7 +2222,8 @@ impl Workspace {
                     view.write(b"\r".to_vec());
                 }),
                 Reach::Shell => {
-                    let command = format!("claude {}\r", settings::shell_quote(message));
+                    let command =
+                        format!("{}\r", crate::agent_choice::current(cx).start(Some(message), settings::shell_quote));
                     view.update(cx, |view, _| view.write(command.into_bytes()));
                 }
                 Reach::Busy(_) => {}
@@ -2278,7 +2303,8 @@ impl Workspace {
             .iter()
             .filter(|(_, tokens)| tokens.counted() > 0)
             .filter_map(|(tab, tokens)| {
-                let session = self.claude_sessions.get(tab)?.clone();
+                // Only Claude Code runs Saturn's status line.
+                let session = self.sessions.get(tab).filter(|(agent, _)| *agent == Agent::Claude)?.1.clone();
                 #[expect(clippy::cast_precision_loss, reason = "a share shown as a whole percentage")]
                 let share = tokens.counted() as f64 / all.max(1) as f64;
                 let label = match percent {
@@ -2741,20 +2767,21 @@ impl Workspace {
     fn handle_hook(&mut self, call: HookCall, cx: &mut Context<Self>) {
         let Some(tab) = call.pane.parse().ok().map(TabId) else { return call.done() };
         let Some(view) = self.terminals.get(&tab).cloned() else { return call.done() };
-        let session_before = self.claude_sessions.get(&tab).cloned();
+        let session_before = self.sessions.get(&tab).cloned();
         match (call.event(), call.field("session_id")) {
             ("SessionEnd", _) => {
-                self.claude_sessions.remove(&tab);
+                self.sessions.remove(&tab);
             }
             (_, Some(session)) => {
-                self.claude_sessions.insert(tab, session.to_owned());
+                self.sessions
+                    .insert(tab, (Agent::of_program(&call.agent).unwrap_or(Agent::Claude), session.to_owned()));
                 if let Some((routine, due)) = self.routine_tabs.remove(&tab) {
                     crate::routines_view::tie_session(routine, due, session.to_owned(), cx);
                 }
             }
             _ => {}
         }
-        if self.claude_sessions.get(&tab) != session_before.as_ref() {
+        if self.sessions.get(&tab) != session_before.as_ref() {
             self.save_session(cx);
         }
         if matches!(call.event(), "SessionStart" | "TaskCreated" | "TaskCompleted" | "TeammateIdle") {
@@ -2900,7 +2927,8 @@ impl Workspace {
             if let Some(name) = &saved_tab.name {
                 self.names.insert(tab, name.clone());
             }
-            if let Some(command) = saved_tab.claude_session.as_deref().and_then(session::resume_command)
+            let agent = saved_tab.agent.unwrap_or(Agent::Claude);
+            if let Some(command) = saved_tab.session.as_deref().and_then(|id| session::resume_command(agent, id))
                 && let Some(view) = self.terminals.get(&tab).cloned()
             {
                 // Once the shell has drawn its prompt; typed text waits there for Enter.
@@ -2932,7 +2960,8 @@ impl Workspace {
                 .map(|tab| SavedTab {
                     cwd: self.terminals.get(tab).map_or_else(|| self.project.clone(), |view| view.read(cx).cwd.clone()),
                     name: self.names.get(tab).cloned(),
-                    claude_session: self.claude_sessions.get(tab).cloned(),
+                    session: self.sessions.get(tab).map(|(_, id)| id.clone()),
+                    agent: self.sessions.get(tab).map(|(agent, _)| *agent),
                 })
                 .collect(),
         });
@@ -4356,7 +4385,7 @@ impl Workspace {
                 crate::routines_view::open(cx.weak_entity(), folder, window, cx);
             }))
             .on_action(cx.listener(|this, _: &SearchSessions, window, cx| {
-                let open = this.claude_sessions.iter().map(|(tab, id)| (id.clone(), *tab)).collect();
+                let open = this.sessions.iter().map(|(tab, (_, id))| (id.clone(), *tab)).collect();
                 crate::sessions_view::open(cx.weak_entity(), open, window, cx);
             }))
             .on_action(cx.listener(|this, _: &SendToSeveral, window, cx| {

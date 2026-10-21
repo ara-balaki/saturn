@@ -1,5 +1,5 @@
 //! Send to several agents (⌘⇧P): one message, typed into every pane you pick. A pane running an
-//! agent gets it as if you'd typed it there; a pane that's only a shell starts Claude with it; a
+//! agent gets it as if you'd typed it there; a pane that's only a shell starts the agent with it; a
 //! pane busy with something else (a server, a build) can't be picked. Panes with an agent are
 //! picked to begin with.
 
@@ -33,7 +33,7 @@ pub struct Pane {
 pub enum Reach {
     /// An agent runs there and reads it as typed.
     Agent,
-    /// Only a shell: Claude starts with the message.
+    /// Only a shell: the chosen agent starts with the message.
     Shell,
     /// Another program has the pane, named here.
     Busy(String),
@@ -108,11 +108,9 @@ impl Render for BroadcastView {
             .flex()
             .flex_col()
             .gap(len(space::SPACE_3))
-            .child(
-                div().text_size(px(13.)).text_color(theme::color(color::INK_MUTED)).child(
-                    "Pick the panes, then write the message once. A pane with only a shell starts Claude with it.",
-                ),
-            )
+            .child(div().text_size(px(13.)).text_color(theme::color(color::INK_MUTED)).child(
+                "Pick the panes, then write the message once. A pane with only a shell starts your agent with it.",
+            ))
             .child(list)
             .child(Textarea::new(&self.message).h(px(140.)))
             .child(
@@ -143,7 +141,7 @@ impl BroadcastView {
         let busy = matches!(pane.reach, Reach::Busy(_));
         let (what, tone) = match &pane.reach {
             Reach::Agent => ("Agent".to_owned(), color::INK_MUTED),
-            Reach::Shell => ("Starts Claude".to_owned(), color::INK_FAINT),
+            Reach::Shell => (format!("Starts {}", crate::agent_choice::current(cx).name()), color::INK_FAINT),
             Reach::Busy(program) => (format!("Busy: {program}"), color::INK_FAINT),
         };
         let row = div()

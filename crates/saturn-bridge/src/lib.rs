@@ -1,4 +1,4 @@
-//! Where Claude Code's hooks reach Saturn. The Saturn plugin's hooks `curl` each event's JSON to a
+//! Where the agents' hooks (Claude Code's, Codex's) reach Saturn. The Saturn plugin's hooks `curl` each event's JSON to a
 //! Unix socket that only this Saturn instance listens on (`SATURN_SOCKET`, set in every pane), with
 //! the pane they run in (`SATURN_PANE_ID`). Saturn may answer, e.g. with a `sessionTitle` for
 //! `UserPromptSubmit`; hooks that get no answer in time carry on without one.
@@ -16,10 +16,13 @@ use serde_json::Value;
 const ANSWER_TIMEOUT: Duration = Duration::from_millis(1500);
 const MAX_BODY: usize = 4 * 1024 * 1024;
 
-/// One hook event from a Claude session in a Saturn pane.
+/// One hook event from an agent's session in a Saturn pane.
 pub struct HookCall {
     /// `SATURN_PANE_ID` of the pane the session runs in.
     pub pane: String,
+    /// The agent whose hook it is (`claude`, `codex`), as its hook script says; Claude Code's when
+    /// it doesn't.
+    pub agent: String,
     /// The hook's input, as Claude Code sends it.
     pub input: Value,
     answer: mpsc::Sender<String>,
@@ -78,7 +81,13 @@ impl Drop for Bridge {
     }
 }
 
-/// Reads one `POST /hook?pane=<id>` request and answers it.
+/// One `name=value` of a request target's query.
+fn query_value(target: &str, name: &str) -> Option<String> {
+    let (_, query) = target.split_once('?')?;
+    query.split('&').find_map(|pair| pair.strip_prefix(name)?.strip_prefix('=')).map(str::to_owned)
+}
+
+/// Reads one `POST /hook?pane=<id>&agent=<name>` request and answers it.
 fn serve(stream: UnixStream, calls: &async_channel::Sender<HookCall>) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let mut reader = BufReader::new(&stream);
@@ -86,12 +95,9 @@ fn serve(stream: UnixStream, calls: &async_channel::Sender<HookCall>) {
     if reader.read_line(&mut request_line).is_err() {
         return;
     }
-    let pane = request_line
-        .split_whitespace()
-        .nth(1)
-        .and_then(|target| target.split_once("pane="))
-        .map(|(_, rest)| rest.split('&').next().unwrap_or_default().to_owned())
-        .unwrap_or_default();
+    let target = request_line.split_whitespace().nth(1).unwrap_or_default();
+    let pane = query_value(target, "pane").unwrap_or_default();
+    let agent = query_value(target, "agent").unwrap_or_else(|| "claude".to_owned());
 
     let mut length = 0;
     loop {
@@ -112,7 +118,7 @@ fn serve(stream: UnixStream, calls: &async_channel::Sender<HookCall>) {
 
     let answer = serde_json::from_slice(&body).ok().map_or_else(String::new, |input| {
         let (answer, answered) = mpsc::channel();
-        if calls.send_blocking(HookCall { pane, input, answer }).is_err() {
+        if calls.send_blocking(HookCall { pane, agent, input, answer }).is_err() {
             return String::new();
         }
         answered.recv_timeout(ANSWER_TIMEOUT).unwrap_or_default()
