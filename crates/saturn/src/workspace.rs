@@ -3085,9 +3085,11 @@ impl Workspace {
             view.update(cx, |view, _| view.kill());
             return;
         };
-        let message = format!("Close {}?", self.tab_name(tab, cx));
-        let detail = format!("{program} is still running in it and will be stopped.");
-        let answer = window.prompt(PromptLevel::Warning, &message, Some(&detail), &["Close", "Cancel"], cx);
+        // The tab's name is often the title Claude gave its session, which reads oddly as the
+        // question; it goes in the sentence below instead.
+        let message = "Close this tab?";
+        let detail = format!("{program} is still running in “{}” and will be stopped.", self.tab_name(tab, cx));
+        let answer = window.prompt(PromptLevel::Warning, message, Some(&detail), &["Close", "Cancel"], cx);
         cx.spawn(async move |_, cx| {
             if answer.await == Ok(0) {
                 view.update(cx, |view, _| view.kill());
