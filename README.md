@@ -121,7 +121,8 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   much of the 5-hour limit its agent used (`≈18% of 5h`): its part of what all the panes' sessions
   used, read from their transcripts; hover for the tokens.
 - Saturn opens where you left off and offers to resume the Claude sessions that were running (the
-  command is typed for you, never run).
+  command is typed for you, never run). A pane shows its work's chips (ticket, pull request, checks)
+  only while an agent runs in it, so a reopened pane is free for something else.
 
 <img src="docs/images/best-of.png" alt="Compare attempts: three agents' takes on one task side by side, with the files each changed" />
 

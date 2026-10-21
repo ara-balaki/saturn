@@ -3583,36 +3583,15 @@ impl Workspace {
             }
         };
 
-        let chips = div()
-            .flex()
-            .flex_shrink(1.)
-            .min_w_0()
-            .overflow_hidden()
-            .items_center()
-            .gap(len(space::SPACE_1))
-            .children(self.ticket_of(cell.active, cx).map(|ticket| ticket_chip(cell_id, ticket)))
-            .children(self.teams.get(&cell.active).map(|team| team_chip(cell_id, cell.active, team, cx)))
-            .children(
-                self.checkouts
-                    .get(&cell.active)
-                    .and_then(|checkout| best_of::attempt_of(&checkout.branch))
-                    .map(|(_, number)| attempt_chip(cell_id, number)),
-            )
-            .children(self.render_links(cell, cx))
-            .children(self.render_spent(cell, cx))
-            .children(self.render_turn(cell, cx))
-            .children(
-                self.checkouts
-                    .get(&cell.active)
-                    .and_then(|checkout| self.overlaps.get(&checkout.root))
-                    .map(|others| overlap_chip(cell_id, others)),
-            )
-            .children(self.servers.get(&cell.active).into_iter().flatten().map(|server| server_chip(cell_id, server)))
-            .children(self.pull_request_of(cell.active).map(|pr| pull_request_chip(cell_id, pr)))
-            .children(self.pull_request_of(cell.active).and_then(|pr| preview_chip(cell_id, pr)))
-            .children(self.render_check_runs(cell, cx))
-            .children(self.render_fix_ci(cell, cx))
-            .children(self.render_review_notes(cell, cx));
+        // The work's chips (its ticket, pull request, checks) show while an agent runs in the pane.
+        // A pane reopened after a restart holds only a shell with `claude --resume` typed in it, and
+        // you may start something else there instead.
+        let working = self.tab_state(cell.active, cx) != AgentState::Shell;
+        let chips = div().flex().flex_shrink(1.).min_w_0().overflow_hidden().items_center().gap(len(space::SPACE_1));
+        let chips = if working { self.work_chips_before(chips, cell, cx) } else { chips };
+        let chips = chips
+            .children(self.servers.get(&cell.active).into_iter().flatten().map(|server| server_chip(cell_id, server)));
+        let chips = if working { self.work_chips_after(chips, cell, cx) } else { chips };
         let buttons = div()
             .flex()
             .flex_none()
@@ -3640,6 +3619,41 @@ impl Workspace {
                     .then(|| self.render_maximize_button(cell_id, cx)),
             );
         div().flex().flex_shrink(1.).min_w_0().items_center().gap(len(space::SPACE_1)).child(chips).child(buttons)
+    }
+
+    /// The work's chips before the servers: its ticket, team, attempt, other repos, what it used,
+    /// its last turn and the worktrees it overlaps.
+    fn work_chips_before(&self, chips: gpui_kit::Div, cell: &Cell, cx: &mut Context<Self>) -> gpui_kit::Div {
+        let cell_id = cell.id;
+        chips
+            .children(self.ticket_of(cell.active, cx).map(|ticket| ticket_chip(cell_id, ticket)))
+            .children(self.teams.get(&cell.active).map(|team| team_chip(cell_id, cell.active, team, cx)))
+            .children(
+                self.checkouts
+                    .get(&cell.active)
+                    .and_then(|checkout| best_of::attempt_of(&checkout.branch))
+                    .map(|(_, number)| attempt_chip(cell_id, number)),
+            )
+            .children(self.render_links(cell, cx))
+            .children(self.render_spent(cell, cx))
+            .children(self.render_turn(cell, cx))
+            .children(
+                self.checkouts
+                    .get(&cell.active)
+                    .and_then(|checkout| self.overlaps.get(&checkout.root))
+                    .map(|others| overlap_chip(cell_id, others)),
+            )
+    }
+
+    /// The work's chips after the servers: its pull request, preview, checks and review threads.
+    fn work_chips_after(&self, chips: gpui_kit::Div, cell: &Cell, cx: &mut Context<Self>) -> gpui_kit::Div {
+        let cell_id = cell.id;
+        chips
+            .children(self.pull_request_of(cell.active).map(|pr| pull_request_chip(cell_id, pr)))
+            .children(self.pull_request_of(cell.active).and_then(|pr| preview_chip(cell_id, pr)))
+            .children(self.render_check_runs(cell, cx))
+            .children(self.render_fix_ci(cell, cx))
+            .children(self.render_review_notes(cell, cx))
     }
 
     /// Opens a button's menu, or closes it when it's the one open.
