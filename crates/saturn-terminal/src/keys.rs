@@ -19,6 +19,9 @@ pub struct KeyPress<'a> {
     pub command: bool,
     /// Option is Meta: Option+key sends Escape and the key, not the character the layout puts on it.
     pub meta: bool,
+    /// Caps Lock is on. The text the framework gives with a key follows Shift and Option only, so
+    /// letters are made capitals here, as everywhere else on a Mac.
+    pub caps_lock: bool,
 }
 
 /// xterm's modifier parameter: 1 + shift + 2·alt + 4·control.
@@ -109,7 +112,11 @@ pub fn encode(key: &KeyPress, app_cursor: bool) -> Option<Vec<u8>> {
             let name = if key.shift { name.to_uppercase() } else { name.to_owned() };
             format!("\x1b{name}").into_bytes()
         }
-        _ => return key.text.filter(|text| !text.is_empty()).map(|text| text.as_bytes().to_vec()),
+        _ => {
+            let text = key.text.filter(|text| !text.is_empty())?;
+            let text = if key.caps_lock { text.to_uppercase() } else { text.to_owned() };
+            return Some(text.into_bytes());
+        }
     };
     Some(bytes)
 }
@@ -201,6 +208,21 @@ mod tests {
             dropped_paths(&paths),
             "/Users/mia/Desktop/CleanShot\\ 2026-10-19\\ at\\ 13.27.05@2x.png /tmp/it\\'s\\ \\(final\\).txt "
         );
+    }
+
+    #[test]
+    fn caps_lock_types_capitals() {
+        let press = |key: &'static str, text: &'static str| KeyPress {
+            key,
+            text: Some(text),
+            caps_lock: true,
+            ..KeyPress::default()
+        };
+        assert_eq!(encode(&press("a", "a"), false), Some(b"A".to_vec()));
+        assert_eq!(encode(&press("2", "č"), false), Some("Č".as_bytes().to_vec()), "a Czech č becomes Č");
+        assert_eq!(encode(&press("1", "1"), false), Some(b"1".to_vec()), "digits stay");
+        let control = KeyPress { key: "c", text: Some("c"), control: true, caps_lock: true, ..KeyPress::default() };
+        assert_eq!(encode(&control, false), Some(vec![3]), "Ctrl+C is still Ctrl+C");
     }
 
     #[test]

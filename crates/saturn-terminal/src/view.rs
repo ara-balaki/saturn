@@ -418,7 +418,7 @@ impl TerminalView {
         self.terminal.kill();
     }
 
-    fn key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+    fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let keystroke = &event.keystroke;
         let press = KeyPress {
             key: &keystroke.key,
@@ -428,6 +428,7 @@ impl TerminalView {
             shift: keystroke.modifiers.shift,
             command: keystroke.modifiers.platform,
             meta: OPTION_AS_META.load(Ordering::Relaxed),
+            caps_lock: window.capslock().on,
         };
         if let Some(bytes) = keys::encode(&press, self.terminal.mode().contains(TermMode::APP_CURSOR)) {
             self.terminal.clear_selection();
