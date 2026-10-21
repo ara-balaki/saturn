@@ -95,17 +95,17 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   each waits for: a permission with the command or file it's for, a question, a finished turn with
   the start of its last words, a failure. Allow or deny a permission right there (Saturn presses the
   key in the pane), or go to the pane.
-- **Send to several agents** (⌘⇧P): one message, typed into every pane you pick. Panes with an agent
+- **Send to several agents** (the arrow beside New agent): one message, typed into every pane you pick. Panes with an agent
   are picked to begin with; a pane with only a shell starts Claude with it, and a busy one (a server,
   a build) is left alone.
-- **Best of N** (⌘⇧P): one task given to two to four agents at once, each in a worktree of its own
-  (branches `<task>-try-1`, `-try-2`…). **Compare attempts** lays them side by side: the files each
+- **Best of N** (the arrow beside New agent): one task given to two to four agents at once, each in a worktree of its own
+  (branches `<task>-try-1`, `-try-2`…). **Compare attempts** (an attempt's pane shows Attempt 2, say: click it) lays them side by side: the files each
   changed with their lines, its commits, and whether its agent is still at it. Keep one, and the
   others' panes close and their worktrees are archived (Worktrees can restore them).
-- **Search sessions** (⌘⇧P): every Claude Code session on this Mac, newest first, found by what you
+- **Search sessions** (the arrow beside New agent): every Claude Code session on this Mac, newest first, found by what you
   asked in it, its title, its folder or its branch. Pick one to resume it in a new pane in its
   folder, or to go to the pane it's open in.
-- **Routines** (⌘⇧P): agents on a schedule, every day, on weekdays or every few hours. While Saturn
+- **Routines** (the arrow beside New agent): agents on a schedule, every day, on weekdays or every few hours. While Saturn
   is open it starts each one on time in a pane named after it, with its prompt, in its folder. Every
   run is listed; one whose time passed while Saturn was closed shows as missed, with Run now, and one
   that ran can be resumed. Kept in `routines.json` beside the settings.
@@ -147,7 +147,7 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   to open it. The repo's Docker Compose services (`postgres :5432`) sit in the bar at the bottom.
 - Several repos in one window, as tabs in the title bar (the + after them, or ⌘O, adds one). Their agents share one grid.
 - Focus a pane that works in another git worktree, and the sidebar follows it there.
-- Worktrees (⌘⇧P): every worktree of the repo with its branch, last commit, pull request and whether
+- Worktrees (the repo's ⋯ in the sidebar): every worktree of the repo with its branch, last commit, pull request and whether
   its work is merged (squash merges too). The finished ones, with nothing uncommitted, no open pull
   request and nothing running in them, go with one click. One you're not working on now can be
   archived: its branch and uncommitted work are kept, the folder goes, and Restore brings it back
@@ -158,11 +158,14 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   worktree's own, different file is left alone.
 - New agent (⌘⇧N): name the work (`fix-login`) and Saturn makes a worktree for it on a branch of that
   name, sets it up with the [worktree recipe](#worktree-recipe), and starts your agent there. The
-  palette's "Start the app" opens a tab per server.
+  pane's ⋯ "Start the app" opens a tab per server.
 
 ### Files and editor
 
 - ⌘P finds any file by a few letters of its name or path; ⌘⇧P finds any command.
+- Every feature also has a button: the arrow beside New agent holds the other ways to start
+  agents, each pane's ⋯ what applies to it (its app, checks, pull request, what its agent is told),
+  and the repo's ⋯ in the sidebar its worktrees and history. The menu bar lists them all too.
 - A file tree with an icon for each kind of file and git badges; what git ignores is shown faint.
 - Syntax highlighting for about 60 languages, saved with your project's own formatter (Prettier,
   Biome, oxfmt or rustfmt).
@@ -183,26 +186,26 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   Claude on them. They only ever go to a pane running an agent, never to a bare shell.
 - **One change at a time**: click a line in the review to pick its change, then stage just that one,
   or revert it, leaving the file's other changes as they are. A revert can be undone.
-- **Compare with anything**: "Compare with a branch or commit" (⌘⇧P, or the button under Changes)
+- **Compare with anything**: "Compare with a branch or commit" (the repo's ⋯, or the button under Changes)
   lists the branches, tags and recent commits; pick one to review everything that differs from it,
   uncommitted work too. Comments and single changes work there as well.
 - **Undo a turn**: Saturn saves a worktree's files when its agent starts a turn and when it ends it
   (in git, under its own `refs/saturn/`, touching no branch and running no hook). The pane's ↶ then
   puts back exactly the files that turn changed, however it changed them (shell commands too), and
   leaves the rest alone; ↷ redoes it. If one of them changed since, nothing is put back.
-- **Pictures of the app** (⌘⇧P): the pages of a pane's running server, drawn at a desktop's size
+- **Pictures of the app** (the pane's ⋯): the pages of a pane's running server, drawn at a desktop's size
   and a phone's by a Chromium browser already on your Mac (Chrome, Brave, Edge, Chromium or Arc;
   invisibly, with a profile of its own). Each set is kept with its branch and time, for the whole
   repo, so two lie side by side: the default branch against an agent's, or before a turn against
   after. "Open folder" for a pull request or a ticket. "Preview the app" shows a pane's running page in the editor panel, drawn
   again every few seconds while it's open, at desktop or phone size: a picture to watch, since a
   browser engine doesn't live in Saturn; "Open in your browser" is a click away.
-- **What the agent is told** (⌘⇧P): for the focused pane's folder, everything Claude Code gives
+- **What the agent is told** (the pane's ⋯): for the focused pane's folder, everything Claude Code gives
   its agent, found as it finds it: instruction files (`CLAUDE.md`, `AGENTS.md`, `CLAUDE.local.md`,
   yours), rules and the files they're for, skills, commands, subagents, hooks and MCP servers. Long
   instruction files get a word, and anything said in more than one file comes first, so the copies
   can't drift apart. Each opens in the editor.
-- **Teach the repo** (⌘⇧P): the pane's recent prompts, corrections ("no, don't…", "always…") first;
+- **Teach the repo** (the pane's ⋯): the pane's recent prompts, corrections ("no, don't…", "always…") first;
   pick one, say it as a lesson, and add it under `## Lessons` in `AGENTS.md`, `CLAUDE.md` or your
   own `CLAUDE.local.md`, where it shows in Changes to review, or ask the agent to word it. A mistake
   corrected once stays corrected for every session after.
@@ -223,7 +226,7 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   wrench hands them to the pane's agent with where to read why. Open review threads count beside it
   (💬 2): click to hand them to the agent too, each with its file, line and conversation, and any
   request for changes. When the repo deploys pull requests (GitHub deployments: Vercel, Netlify, a
-  workflow), ↗ Preview opens this one's. "Edit the pull request's description" (⌘⇧P) opens it as it is on GitHub, or the
+  workflow), ↗ Preview opens this one's. "Edit the pull request's description" (the pane's ⋯) opens it as it is on GitHub, or the
   repo's template when it's empty, names the template's sections it leaves empty or out, and saves
   it back; or hands the writing to the agent, with the template to follow.
 - **Status bar**: errors and warnings, the cursor, the language, and the branch with how many
@@ -301,7 +304,7 @@ at all, Saturn guesses the steps from the repo's own files: the lockfile says ho
 `Gemfile.lock`, `composer.lock`, `mix.lock`, `go.sum`), and `dev` scripts (at the top, or one per app
 in `apps/`, `services/`, `packages/`) or `bin/dev` say how to start it.
 
-To change the steps, "Create worktree recipe" in the palette saves the guess to
+To change the steps, "Create worktree recipe" (the repo's ⋯) saves the guess to
 `.saturn/worktree.json`, to adjust and commit with the repo:
 
 ```json
@@ -314,12 +317,12 @@ To change the steps, "Create worktree recipe" in the palette saves the guess to
 ```
 
 - `setup` runs in a worktree Saturn makes for a ticket, before the agent starts (and the agent starts
-  only if it worked). "Set up this worktree" in the palette (⌘⇧P) runs it again, or in a worktree made
+  only if it worked). "Set up this worktree" (the pane's ⋯) runs it again, or in a worktree made
   some other way.
 - `run` names the commands that start the app. "Start the app" opens a tab for each, named after it.
 - `cleanup` runs in a worktree before Worktrees removes it (stopping its containers, say).
 - `checks` names commands that check the work (`"lint": "pnpm lint"`, `"test": "pnpm test"`; guessed
-  from `package.json` scripts or Cargo without a recipe). "Run a check" (⌘⇧P) runs one, or all, in
+  from `package.json` scripts or Cargo without a recipe). "Run a check" (the pane's ⋯) runs one, or all, in
   the background: the pane shows each as it runs and how it went, a click opens its whole log, and a
   failed one goes to the agent as a short summary with the log's path. Output that says no tests
   ran counts as a failure, whatever the exit code.

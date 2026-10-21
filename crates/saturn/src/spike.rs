@@ -37,6 +37,8 @@
 //!   the tab count after each; `SATURN_REBIND=new-tab=cmd-t` moves a shortcut first, as Settings
 //!   would. `SATURN_SETTINGS_SECTION=keyboard` opens Settings on that section.
 //! - `SATURN_MAXIMIZE_PANE=1` maximises the focused pane, over the grid and the panels.
+//! - `SATURN_MENU=new-agent|pane|repo` opens that button's menu after 2 seconds (`SATURN_MENU_PICK=2`
+//!   picks its third line instead).
 //! - `SATURN_SCREENSHOT=path.png` saves what the window draws after `SATURN_SCREENSHOT_AFTER`
 //!   seconds (needs the `capture` feature); `SATURN_QUIT_AFTER` quits after that many seconds.
 
@@ -204,6 +206,14 @@ fn maximize_from_env(window: &mut Window, cx: &mut Context<Workspace>) {
     }
     if std::env::var_os("SATURN_MAXIMIZE_EDITOR").is_some() {
         cx.defer_in(window, |workspace, _, cx| workspace.maximize_editor(cx));
+    }
+    if let Ok(name) = std::env::var("SATURN_MENU") {
+        let pick = var("SATURN_MENU_PICK");
+        cx.spawn_in(window, async move |workspace, cx| {
+            cx.background_executor().timer(Duration::from_secs(2)).await;
+            let _ = workspace.update_in(cx, |workspace, window, cx| workspace.spike_menu(&name, pick, window, cx));
+        })
+        .detach();
     }
 }
 

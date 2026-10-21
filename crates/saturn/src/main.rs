@@ -19,6 +19,7 @@ mod keymap;
 mod languages;
 mod lineage_view;
 mod lsp;
+mod menu;
 mod menu_bar;
 mod notify;
 mod palette;
@@ -57,9 +58,11 @@ use gpui_kit::{
 
 use crate::app_view::AppView;
 use crate::workspace::{
-    CloseTab, CommandPalette, Copy, GoToFile, NewTab, NextAttention, NextTab, OpenProject, OpenSettings,
-    OpenTicketPicker, Paste, PreviousTab, SaveFile, SplitDown, SplitRight, TextBigger, TextReset, TextSmaller,
-    ToggleEditor, ToggleMaximize, ToggleSidebar, ToggleTickets,
+    BestOfN, CloseTab, CommandPalette, CompareAttempts, CompareWith, Copy, CreateRecipe, EditPrBody, GoToFile, NewTab,
+    NextAttention, NextTab, OpenProject, OpenSettings, OpenTicketPicker, Paste, PreviousTab, RunCheck, SaveFile,
+    SearchSessions, SendToSeveral, SetUpWorktree, ShowContext, ShowHistory, ShowImpact, ShowLineage, ShowPictures,
+    ShowPreview, ShowProblems, ShowRoutines, ShowSchema, ShowWaiting, ShowWorktrees, SplitDown, SplitRight, StartApp,
+    TeachRepo, TextBigger, TextReset, TextSmaller, ToggleEditor, ToggleMaximize, ToggleSidebar, ToggleTickets,
 };
 
 actions!(saturn, [Quit, CheckForUpdates]);
@@ -115,6 +118,42 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::action("Previous Tab", PreviousTab),
             MenuItem::action("Maximise Pane", ToggleMaximize),
             MenuItem::action("Next Agent Needing You", NextAttention),
+        ]),
+        // Every feature has a place here, so none is found only by typing in the command palette.
+        Menu::new("Agents").items([
+            MenuItem::action("New Agent…", OpenTicketPicker),
+            MenuItem::action("Best of N…", BestOfN),
+            MenuItem::action("Send to Several Agents…", SendToSeveral),
+            MenuItem::separator(),
+            MenuItem::action("Search Sessions…", SearchSessions),
+            MenuItem::action("Routines…", ShowRoutines),
+            MenuItem::separator(),
+            MenuItem::action("Agents Waiting for You…", ShowWaiting),
+        ]),
+        Menu::new("Pane").items([
+            MenuItem::action("Start the App", StartApp),
+            MenuItem::action("Preview the App", ShowPreview),
+            MenuItem::action("Pictures of the App…", ShowPictures),
+            MenuItem::action("Run a Check…", RunCheck),
+            MenuItem::separator(),
+            MenuItem::action("Edit the Pull Request's Description…", EditPrBody),
+            MenuItem::action("Set Up This Worktree", SetUpWorktree),
+            MenuItem::separator(),
+            MenuItem::action("What the Agent Is Told…", ShowContext),
+            MenuItem::action("Teach the Repo…", TeachRepo),
+        ]),
+        Menu::new("Repo").items([
+            MenuItem::action("Worktrees…", ShowWorktrees),
+            MenuItem::action("Compare Attempts…", CompareAttempts),
+            MenuItem::action("Create Worktree Recipe", CreateRecipe),
+            MenuItem::separator(),
+            MenuItem::action("History", ShowHistory),
+            MenuItem::action("Impact of the Changes", ShowImpact),
+            MenuItem::action("Compare with a Branch or Commit…", CompareWith),
+            MenuItem::separator(),
+            MenuItem::action("Database Diagram", ShowSchema),
+            MenuItem::action("dbt Lineage", ShowLineage),
+            MenuItem::action("Problems", ShowProblems),
         ]),
         Menu::new("View").items([
             MenuItem::action("Command Palette…", CommandPalette),

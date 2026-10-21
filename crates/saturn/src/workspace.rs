@@ -3,16 +3,17 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::resizable::{h_resizable, resizable_panel, v_resizable};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::{
-    Animation, AnimationExt as _, AnyElement, AppContext as _, Bounds, ClickEvent, Context, CursorStyle, DragMoveEvent,
-    Entity, FocusHandle, Focusable as _, FontWeight, Hsla, InteractiveElement as _, IntoElement, MouseButton,
-    ParentElement as _, PathPromptOptions, Pixels, Point, PromptLevel, Render, StatefulInteractiveElement as _,
-    Styled as _, Subscription, Window, actions, bounce, div, ease_in_out, prelude::FluentBuilder as _, px, relative,
+    Action, Animation, AnimationExt as _, AnyElement, AppContext as _, Bounds, ClickEvent, Context, CursorStyle,
+    DragMoveEvent, Entity, FocusHandle, Focusable as _, FontWeight, Hsla, InteractiveElement as _, IntoElement,
+    MouseButton, ParentElement as _, PathPromptOptions, Pixels, Point, PromptLevel, Render,
+    StatefulInteractiveElement as _, Styled as _, Subscription, Window, actions, bounce, div, ease_in_out,
+    prelude::FluentBuilder as _, px, relative,
 };
 use saturn_bridge::{Bridge, HookCall};
 use saturn_core::agent_state::{AgentState, tab_title};
@@ -44,6 +45,7 @@ use crate::chrome;
 use crate::clickup;
 use crate::editor_view::EditorView;
 use crate::files_view::{FilesEvent, FilesView};
+use crate::menu;
 use crate::review_comments::{SendToAgent, Touched};
 use crate::session::{self, SavedGrid, SavedTab};
 use crate::settings::{self, AppearanceSetting, Panels, Settings};
@@ -357,6 +359,11 @@ pub struct Workspace {
     waits: HashMap<TabId, Waiting>,
     /// Focus mode: notifications held, and what they'd have said (by state) for one at the end.
     focusing: Option<Vec<AgentState>>,
+    /// The button menu that's open, if one is.
+    open_menu: Option<OpenMenu>,
+    /// The menu a click outside just closed, and when: the click that closes a menu by landing on
+    /// its own button must not open it again.
+    menu_dismissed: Option<(OpenMenu, Instant)>,
     /// The checks run in each checkout, newest last: running ones have no outcome yet.
     check_runs: HashMap<PathBuf, Vec<CheckRun>>,
     /// What reviewers left open on each tab's pull request.
@@ -396,6 +403,55 @@ enum Refresh {
     Idle,
     Running,
     RunningStale,
+}
+
+/// A menu opened from a button (see `menu`): New agent's arrow, a pane's ⋯, or the repo's ⋯.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OpenMenu {
+    NewAgent,
+    Pane(CellId),
+    Repo,
+}
+
+/// More ways to start agents, under New agent's arrow.
+fn new_agent_menu() -> Vec<menu::Item> {
+    vec![
+        Some(("square-plus", "New agent", Box::new(OpenTicketPicker))),
+        Some(("git-fork", "Best of N: one task, several agents", Box::new(BestOfN))),
+        Some(("send", "Send to several agents", Box::new(SendToSeveral))),
+        None,
+        Some(("text-search", "Search sessions and resume one", Box::new(SearchSessions))),
+        Some(("calendar-clock", "Routines: agents on a schedule", Box::new(ShowRoutines))),
+    ]
+}
+
+/// What applies to one pane: its app, its checks, its pull request, what its agent is told.
+fn pane_menu() -> Vec<menu::Item> {
+    vec![
+        Some(("play", "Start the app", Box::new(StartApp))),
+        Some(("globe", "Preview the app", Box::new(ShowPreview))),
+        Some(("camera", "Pictures of the app", Box::new(ShowPictures))),
+        Some(("list-checks", "Run a check", Box::new(RunCheck))),
+        None,
+        Some(("git-pull-request", "Edit the pull request's description", Box::new(EditPrBody))),
+        Some(("wrench", "Set up this worktree", Box::new(SetUpWorktree))),
+        None,
+        Some(("book-open", "What the agent is told", Box::new(ShowContext))),
+        Some(("sprout", "Teach the repo: keep a correction", Box::new(TeachRepo))),
+    ]
+}
+
+/// What applies to the repo the sidebar shows: its worktrees and its history.
+fn repo_menu() -> Vec<menu::Item> {
+    vec![
+        Some(("folder-git", "Worktrees", Box::new(ShowWorktrees))),
+        Some(("git-compare", "Compare attempts", Box::new(CompareAttempts))),
+        Some(("file-code", "Create worktree recipe", Box::new(CreateRecipe))),
+        None,
+        Some(("git-branch", "History", Box::new(ShowHistory))),
+        Some(("waypoints", "Impact of the changes", Box::new(ShowImpact))),
+        Some(("git-compare", "Compare with a branch or commit", Box::new(CompareWith))),
+    ]
 }
 
 /// A branch checked out in a repository (or worktree), named by its top folder.
@@ -734,6 +790,28 @@ fn link_chip(
         .child(repo.to_owned())
         .tooltip(chrome::tip("The same work in another repo: go to it"))
         .on_click(cx.listener(move |this: &mut Workspace, _, window, cx| this.go_to_folder(&folder, window, cx)))
+}
+
+/// A pane working on one of Best of N's attempts: which one. It compares them all.
+fn attempt_chip(cell: CellId, number: usize) -> impl IntoElement {
+    div()
+        .id(("attempt-chip", cell.key()))
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(len(space::SPACE_1))
+        .h(len(chrome::CONTROL_HEIGHT))
+        .px(len(space::SPACE_2))
+        .rounded(len(radius::RADIUS_SM))
+        .text_size(px(12.))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(theme::color(color::INK_MUTED))
+        .cursor_pointer()
+        .hover(|s| s.bg(theme::fill_hover()))
+        .child(chrome::icon("git-fork", 13., theme::color(color::INK_MUTED)))
+        .child(format!("Attempt {number}"))
+        .tooltip(chrome::tip_for("Compare the attempts side by side", CompareAttempts))
+        .on_click(|_, window, cx| window.dispatch_action(Box::new(CompareAttempts), cx))
 }
 
 /// A pane whose session leads an agent team: how many are in it, how far its tasks are, and
@@ -1087,6 +1165,8 @@ impl Workspace {
             spent: HashMap::new(),
             waits: HashMap::new(),
             focusing: None,
+            open_menu: None,
+            menu_dismissed: None,
             modes: HashMap::new(),
             review_notes: HashMap::new(),
             check_runs: HashMap::new(),
@@ -3565,8 +3645,9 @@ impl Workspace {
         )
     }
 
-    /// The right of a pane's tab strip: its ticket and pull request, then split and new tab. In a
-    /// narrow pane these are cut off before the tabs are; the shortcuts still work.
+    /// The right of a pane's tab strip: its ticket and pull request, then split, new tab and the
+    /// pane's menu. In a narrow pane the chips are cut off, never the buttons: the menu is where the
+    /// pane's other features are found.
     fn render_pane_actions(&self, cell: &Cell, cx: &mut Context<Self>) -> impl IntoElement {
         let cell_id: CellId = cell.id;
         let header_button = |id: &'static str, icon: &str, placement: Placement, cx: &mut Context<Self>| {
@@ -3583,7 +3664,7 @@ impl Workspace {
             }
         };
 
-        div()
+        let chips = div()
             .flex()
             .flex_shrink(1.)
             .min_w_0()
@@ -3593,6 +3674,12 @@ impl Workspace {
             .children(self.ticket_of(cell.active, cx).map(|ticket| ticket_chip(cell_id, ticket)))
             .children(self.modes.get(&cell.active).and_then(|mode| mode_chip(cell_id, mode)))
             .children(self.teams.get(&cell.active).map(|team| team_chip(cell_id, cell.active, team, cx)))
+            .children(
+                self.checkouts
+                    .get(&cell.active)
+                    .and_then(|checkout| best_of::attempt_of(&checkout.branch))
+                    .map(|(_, number)| attempt_chip(cell_id, number)),
+            )
             .children(self.render_links(cell, cx))
             .children(self.render_spent(cell, cx))
             .children(self.render_turn(cell, cx))
@@ -3607,16 +3694,109 @@ impl Workspace {
             .children(self.pull_request_of(cell.active).and_then(|pr| preview_chip(cell_id, pr)))
             .children(self.render_check_runs(cell, cx))
             .children(self.render_fix_ci(cell, cx))
-            .children(self.render_review_notes(cell, cx))
+            .children(self.render_review_notes(cell, cx));
+        let buttons = div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(len(space::SPACE_1))
             .child(header_button("split-right", "columns-2", Placement::Right, cx))
             .child(header_button("split-down", "rows-2", Placement::Down, cx))
             .child(header_button("new-tab", "plus", Placement::Tab, cx))
+            .child(
+                self.with_menu(
+                    OpenMenu::Pane(cell_id),
+                    chrome::icon_button(("pane-menu", cell_id.key()), "ellipsis", true)
+                        .when(self.open_menu == Some(OpenMenu::Pane(cell_id)), |button| {
+                            button.bg(theme::fill_pressed())
+                        })
+                        .tooltip(chrome::tip("This pane: its app, checks, pull request and what its agent is told"))
+                        .on_click(cx.listener(move |this, _, _, cx| this.toggle_menu(OpenMenu::Pane(cell_id), cx))),
+                    cx,
+                ),
+            )
             // On the focused pane only, and the maximised one to restore it: one more button on
             // every pane would crowd out their chips. ⌘⇧↩ works from any pane.
             .children(
                 (self.layout.focused == Some(cell_id) || self.layout.maximized == Some(cell_id))
                     .then(|| self.render_maximize_button(cell_id, cx)),
-            )
+            );
+        div().flex().flex_shrink(1.).min_w_0().items_center().gap(len(space::SPACE_1)).child(chips).child(buttons)
+    }
+
+    /// Opens a button's menu, or closes it when it's the one open.
+    fn toggle_menu(&mut self, which: OpenMenu, cx: &mut Context<Self>) {
+        let just_closed = self
+            .menu_dismissed
+            .take()
+            .is_some_and(|(closed, at)| closed == which && at.elapsed() < Duration::from_millis(400));
+        self.open_menu = (self.open_menu != Some(which) && !just_closed).then_some(which);
+        cx.notify();
+    }
+
+    /// Does what was picked from a menu: a pane's menu acts on that pane, as its actions do on the
+    /// focused one.
+    fn pick_from_menu(
+        &mut self,
+        which: OpenMenu,
+        action: Box<dyn Action>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_menu = None;
+        if let OpenMenu::Pane(cell) = which {
+            self.update_layout(window, cx, |layout| layout.focus_cell(cell));
+        }
+        cx.notify();
+        window.dispatch_action(action, cx);
+    }
+
+    /// For a spike: opens a menu by name (`new-agent`, `pane`, `repo`) and picks its `pick`th line.
+    pub fn spike_menu(&mut self, name: &str, pick: Option<usize>, window: &mut Window, cx: &mut Context<Self>) {
+        let which = match name {
+            "new-agent" => OpenMenu::NewAgent,
+            "repo" => OpenMenu::Repo,
+            _ => match self.layout.focused {
+                Some(cell) => OpenMenu::Pane(cell),
+                None => return,
+            },
+        };
+        self.open_menu = Some(which);
+        cx.notify();
+        let items = match which {
+            OpenMenu::NewAgent => new_agent_menu(),
+            OpenMenu::Pane(_) => pane_menu(),
+            OpenMenu::Repo => repo_menu(),
+        };
+        if let Some(action) = pick.and_then(|index| items.into_iter().flatten().nth(index)).map(|(_, _, action)| action)
+        {
+            self.pick_from_menu(which, action, window, cx);
+        }
+    }
+
+    /// A button with its menu hanging under it while it's open.
+    fn with_menu(&self, which: OpenMenu, button: impl IntoElement, cx: &mut Context<Self>) -> impl IntoElement {
+        let menu = (self.open_menu == Some(which)).then(|| {
+            let items = match which {
+                OpenMenu::NewAgent => new_agent_menu(),
+                OpenMenu::Pane(_) => pane_menu(),
+                OpenMenu::Repo => repo_menu(),
+            };
+            let workspace = cx.weak_entity();
+            let pick = move |action: Box<dyn Action>, window: &mut Window, cx: &mut gpui_kit::App| {
+                let _ = workspace.update(cx, |this, cx| this.pick_from_menu(which, action, window, cx));
+            };
+            let workspace = cx.weak_entity();
+            let dismiss = move |_: &mut Window, cx: &mut gpui_kit::App| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.open_menu = None;
+                    this.menu_dismissed = Some((which, Instant::now()));
+                    cx.notify();
+                });
+            };
+            menu::render("menu", items, pick, dismiss)
+        });
+        div().relative().flex_none().child(button).children(menu)
     }
 
     /// Maximises this pane over the grid and the panels, or restores it. The pane takes focus
@@ -3932,17 +4112,41 @@ impl Workspace {
                 ),
             ))
             .children(activity)
-            // New terminals come from each pane's ＋ (and ⌘N), repos from the ＋ after them. Starting
-            // an agent on new work, named or from a ticket, is the one primary action; its shortcut
-            // is in its tooltip, to keep the bar short.
+            .child(self.render_new_agent(cx))
+    }
+
+    /// New terminals come from each pane's ＋ (and ⌘N), repos from the ＋ after them. Starting an
+    /// agent on new work, named or from a ticket, is the one primary action; its shortcut is in its
+    /// tooltip, to keep the bar short. Its arrow holds the other ways to start agents: several at
+    /// once, again, on a schedule.
+    fn render_new_agent(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .items_center()
+            .gap(px(1.))
             .child(
                 chrome::button("new-agent", "New agent", None, true)
                     .h(len(TITLEBAR_CONTROL + 2. * space::SPACE_1))
                     .rounded(len(radius::RADIUS_MD))
+                    .rounded_r(px(0.))
                     .tooltip(chrome::tip_for("New agent, in a worktree of its own", OpenTicketPicker))
                     .on_click(cx.listener(|this, _, window, cx| {
                         ticket_picker::open(cx.weak_entity(), this.clickup.connected(), window, cx);
                     })),
+            )
+            .child(
+                self.with_menu(
+                    OpenMenu::NewAgent,
+                    chrome::button("new-agent-more", "", None, true)
+                        .h(len(TITLEBAR_CONTROL + 2. * space::SPACE_1))
+                        .px(len(space::SPACE_2))
+                        .rounded(len(radius::RADIUS_MD))
+                        .rounded_l(px(0.))
+                        .child(chrome::icon("chevron-down", 14., theme::color(color::INK_ON_ACCENT)))
+                        .tooltip(chrome::tip("More ways to start agents: Best of N, routines, past sessions"))
+                        .on_click(cx.listener(|this, _, _, cx| this.toggle_menu(OpenMenu::NewAgent, cx))),
+                    cx,
+                ),
             )
     }
 
@@ -3981,7 +4185,16 @@ impl Workspace {
         chrome::sidebar_header(
             &name,
             &detail,
-            div().flex().items_center().children(lineage).children(schema).child(follow),
+            div().flex().items_center().children(lineage).children(schema).child(follow).child(
+                self.with_menu(
+                    OpenMenu::Repo,
+                    chrome::icon_button("repo-menu", "ellipsis", true)
+                        .when(self.open_menu == Some(OpenMenu::Repo), |button| button.bg(theme::fill_pressed()))
+                        .tooltip(chrome::tip("This repo: worktrees, attempts, history"))
+                        .on_click(cx.listener(|this, _, _, cx| this.toggle_menu(OpenMenu::Repo, cx))),
+                    cx,
+                ),
+            ),
         )
         .into_any_element()
     }

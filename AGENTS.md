@@ -69,6 +69,9 @@ Saturn has a design system, and the code follows it. Full rules in
 Action)` when a shortcut does the same, so the shortcut shows. A button that says what it does
   in words (and shows its shortcut) needs none. One tooltip per element (GPUI panics on two).
 - **Only what can be clicked reacts to the pointer.** A mark or a label gets no hover.
+- **Every feature has a way in you can see**, not only the command palette: a button where it
+  applies (the arrow beside New agent, a pane's ⋯, the repo's ⋯, a chip) and its line in the menu
+  bar (`set_menus` in `main.rs`). A feature found only by typing its name is a feature nobody finds.
 - **Words:** sentence case, no emoji, buttons say what happens ("Add repo", not "OK").
 - Both themes, always: check light and dark.
 
