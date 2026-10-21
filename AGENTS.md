@@ -101,8 +101,9 @@ SATURN_SCREENSHOT=/tmp/shot.png SATURN_SCREENSHOT_AFTER=5 SATURN_QUIT_AFTER=7
 
 ## Docs
 
-A change people can see updates the [README](README.md) in the same commit: its feature list,
-shortcuts and settings. Screenshots in `docs/images` come from spikes over a made-up project, never
+A change people can see updates the docs in the same commit: [docs/features.md](docs/features.md),
+[shortcuts](docs/shortcuts.md) and [settings](docs/settings.md), and the [README](README.md) when it
+changes what Saturn is about. The README stays short: what Saturn is, a few lines per area, install. Screenshots in `docs/images` come from spikes over a made-up project, never
 a real one. The README's animation, `docs/images/agents.gif`, is four
 such screenshots with `SATURN_FAKE_AGENTS=1` and `SATURN_FAKE_STATES` set to the panes' states, joined
 with ffmpeg after the window buttons are drawn on (an offscreen render has none); `docs/images/social-preview.png` is the card GitHub shows when the repo is linked (set in
