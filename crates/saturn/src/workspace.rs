@@ -4390,6 +4390,36 @@ impl Workspace {
             SidebarTab::Files => chrome::sidebar(header, switch, files, footer),
             SidebarTab::Changes => chrome::sidebar(header, switch, changes, footer),
         };
+        let work = div().size_full().when(panels.sidebar, |main| main.pl(half_gap)).child(
+            v_resizable("main")
+                .with_handle_appearance(chrome::quiet_resize_handle())
+                .child(
+                    resizable_panel()
+                        .size(px(260.))
+                        .size_range(px(120.)..px(4000.))
+                        .visible(panels.editor)
+                        .child(div().size_full().pb(half_gap).child(self.editor.clone())),
+                )
+                .child(resizable_panel().visible(!(panels.editor && editor_maximized)).child(
+                    div().size_full().flex().flex_col().when(panels.editor, |grid| grid.pt(half_gap)).child(grid),
+                )),
+        );
+        // The tickets panel joins the row only while it's shown: a hidden panel still counts in the
+        // row's sizes, and the sidebar's handle then jumped as it was grabbed.
+        let tickets = self.tickets_view.clone().filter(|_| panels.tickets);
+        let work = match tickets {
+            Some(tickets) => h_resizable("work-and-tickets")
+                .with_handle_appearance(chrome::quiet_resize_handle())
+                .child(resizable_panel().child(div().size_full().pr(half_gap).child(work)))
+                .child(
+                    resizable_panel()
+                        .size(px(300.))
+                        .size_range(px(240.)..px(520.))
+                        .child(div().size_full().pl(half_gap).child(tickets)),
+                )
+                .into_any_element(),
+            None => work.into_any_element(),
+        };
         div().flex_1().min_h_0().child(
             h_resizable("workbench")
                 .with_handle_appearance(chrome::quiet_resize_handle())
@@ -4400,42 +4430,7 @@ impl Workspace {
                         .visible(panels.sidebar)
                         .child(div().size_full().pr(half_gap).child(sidebar)),
                 )
-                .child(
-                    resizable_panel().child(
-                        div()
-                            .size_full()
-                            .when(panels.sidebar, |main| main.pl(half_gap))
-                            .when(panels.tickets, |main| main.pr(half_gap))
-                            .child(
-                                v_resizable("main")
-                                    .with_handle_appearance(chrome::quiet_resize_handle())
-                                    .child(
-                                        resizable_panel()
-                                            .size(px(260.))
-                                            .size_range(px(120.)..px(4000.))
-                                            .visible(panels.editor)
-                                            .child(div().size_full().pb(half_gap).child(self.editor.clone())),
-                                    )
-                                    .child(
-                                        resizable_panel().visible(!(panels.editor && editor_maximized)).child(
-                                            div()
-                                                .size_full()
-                                                .flex()
-                                                .flex_col()
-                                                .when(panels.editor, |grid| grid.pt(half_gap))
-                                                .child(grid),
-                                        ),
-                                    ),
-                            ),
-                    ),
-                )
-                .child(
-                    resizable_panel()
-                        .size(px(300.))
-                        .size_range(px(240.)..px(520.))
-                        .visible(panels.tickets && self.tickets_view.is_some())
-                        .child(div().size_full().pl(half_gap).children(self.tickets_view.clone())),
-                ),
+                .child(resizable_panel().child(work)),
         )
     }
 
