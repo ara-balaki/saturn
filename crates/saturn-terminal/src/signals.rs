@@ -1,5 +1,6 @@
 //! Reads the signals programs send to their terminal that alacritty doesn't keep: Claude Code's
-//! OSC 7501 status, the working folder (OSC 7) and shell prompt marks (OSC 133). It sees the same
+//! OSC 7501 status, the working folder (OSC 7), shell prompt marks (OSC 133) and notifications
+//! (OSC 9, which Codex sends: an approval it waits for, the end of a turn). It sees the same
 //! bytes just before alacritty does.
 
 use std::path::PathBuf;
@@ -16,6 +17,8 @@ pub enum Signal {
     Cwd(PathBuf),
     /// A new shell prompt starts (OSC 133;A): whatever ran before has finished.
     PromptStart,
+    /// A notification for the person at the terminal (OSC 9), its text.
+    Notification(String),
 }
 
 #[derive(Default)]
@@ -60,6 +63,8 @@ impl Perform for Collector {
                 }
             }
             Some(133) if data.starts_with('A') => self.signals.push(Signal::PromptStart),
+            // `9;4;…` is a progress report (ConEmu's), not a notification.
+            Some(9) if !data.is_empty() && !data.starts_with("4;") => self.signals.push(Signal::Notification(data)),
             _ => {}
         }
     }
@@ -82,6 +87,13 @@ impl SignalTap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_notifications_but_not_progress() {
+        let mut tap = SignalTap::default();
+        let signals = tap.advance(b"\x1b]9;Approval requested: npm test\x07\x1b]9;4;1;50\x07");
+        assert_eq!(signals, [Signal::Notification("Approval requested: npm test".to_owned())]);
+    }
 
     #[test]
     fn reads_the_probe_and_a_status_report() {

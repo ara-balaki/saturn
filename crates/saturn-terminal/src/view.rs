@@ -55,6 +55,8 @@ pub enum TerminalViewEvent {
     PullRequestLinked,
     /// The shell drew its prompt (OSC 133): whatever ran in the foreground has ended.
     PromptShown,
+    /// The program sent a notification (OSC 9), with its text.
+    Notified(String),
 }
 
 /// Where the grid was last drawn: enough to turn a mouse position into a cell.
@@ -202,6 +204,7 @@ impl TerminalView {
                     }
                     cx.emit(TerminalViewEvent::PromptShown);
                 }
+                TerminalEvent::Notification(text) => cx.emit(TerminalViewEvent::Notified(text)),
             }
         }
         self.schedule_sync_flush(cx);

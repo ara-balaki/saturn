@@ -32,6 +32,8 @@ pub enum TerminalEvent {
     Status(ProgramStatus),
     Cwd(PathBuf),
     PromptStart,
+    /// A notification the program sent (OSC 9).
+    Notification(String),
     /// The program put text on the clipboard (OSC 52), as Claude Code does when you select in it.
     /// Reading the clipboard stays refused.
     Copy(String),
@@ -165,6 +167,7 @@ impl Terminal {
                 Signal::Status(status) => out.push(TerminalEvent::Status(status)),
                 Signal::Cwd(path) => out.push(TerminalEvent::Cwd(path)),
                 Signal::PromptStart => out.push(TerminalEvent::PromptStart),
+                Signal::Notification(text) => out.push(TerminalEvent::Notification(text)),
             }
         }
         out.extend(self.links.feed(bytes).map(TerminalEvent::PullRequestLink));

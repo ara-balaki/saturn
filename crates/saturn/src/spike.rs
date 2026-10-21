@@ -33,7 +33,8 @@
 //! - `SATURN_TEAM=1` opens the first pane's agent team after 6 seconds.
 //! - `SATURN_START_NAMED=fix-login` starts work by name, also in the other repos `SATURN_ALSO_IN` names.
 //! - `SATURN_UNDO_TURN=6` presses the first pane's "Undo the agent's last turn" after 6 seconds.
-//! - `SATURN_ANSWER=allow|deny` answers the first pane's permission after 5 seconds.
+//! - `SATURN_ANSWER=allow|deny` answers the first pane's permission after 5 seconds
+//!   (`SATURN_ANSWER_AFTER` seconds when given).
 //! - `SATURN_RUN_CHECKS=1` runs every check of the focused pane's checkout.
 //! - `SATURN_PICTURES=1` opens "Pictures of the app" after 6 seconds (`SATURN_TAKE_PICTURES=1` takes a set).
 //! - `SATURN_KEYS="e c h tab"` presses those keys in the focused pane, through the window, and prints
@@ -349,11 +350,13 @@ fn team_from_env(window: &mut Window, cx: &mut Context<Workspace>) {
     .detach();
 }
 
-/// Answers the first pane's permission after 5 seconds (`SATURN_ANSWER=allow|deny`).
+/// Answers the first pane's permission after 5 seconds (`SATURN_ANSWER=allow|deny`, after
+/// `SATURN_ANSWER_AFTER` seconds instead when given).
 fn answer_from_env(cx: &mut Context<Workspace>) {
     let Ok(answer) = std::env::var("SATURN_ANSWER") else { return };
+    let after = var("SATURN_ANSWER_AFTER").map_or(Duration::from_secs(5), Duration::from_secs);
     cx.spawn(async move |workspace, cx| {
-        cx.background_executor().timer(Duration::from_secs(5)).await;
+        cx.background_executor().timer(after).await;
         let _ = workspace.update(cx, |workspace, cx| workspace.answer_permission(TabId(1), answer == "allow", cx));
     })
     .detach();

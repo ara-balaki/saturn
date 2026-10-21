@@ -39,6 +39,27 @@ pub fn from_hook(event: &str, input: &Value) -> Option<Option<Waiting>> {
     }
 }
 
+/// What a Codex notification (OSC 9) says it waits for: an approval for a command or an edit, a plan
+/// to approve, else the end of its turn with the start of its answer ("Agent turn complete" when
+/// it has none to show).
+#[must_use]
+pub fn from_codex_notification(text: &str) -> Waiting {
+    let text = text.trim();
+    if let Some(command) = text.strip_prefix("Approval requested: ") {
+        Waiting::Permission { tool: "Bash".to_owned(), detail: command.to_owned() }
+    } else if let Some(files) = text.strip_prefix("Codex wants to edit ") {
+        Waiting::Permission { tool: "Edit".to_owned(), detail: files.to_owned() }
+    } else if let Some(server) = text.strip_prefix("Approval requested by ") {
+        Waiting::Permission { tool: server.to_owned(), detail: String::new() }
+    } else if let Some(plan) = text.strip_prefix("Plan mode prompt: ") {
+        Waiting::Question(plan.to_owned())
+    } else if text.is_empty() || text == "Agent turn complete" {
+        Waiting::Done(None)
+    } else {
+        Waiting::Done(first_line(text))
+    }
+}
+
 /// What a tool would do, in a line: the command a shell runs, the file an edit writes, the address a
 /// fetch reads; for anything else its first piece of text.
 pub fn describe(tool: &str, input: &Value) -> String {
@@ -116,5 +137,20 @@ mod tests {
         );
         assert_eq!(from_hook("Notification", &json!({"notification_type": "idle_prompt"})), None);
         assert_eq!(from_hook("PreToolUse", &json!({})), None);
+    }
+
+    #[test]
+    fn reads_what_codex_notifies() {
+        assert_eq!(
+            from_codex_notification("Approval requested: npm test"),
+            Waiting::Permission { tool: "Bash".to_owned(), detail: "npm test".to_owned() }
+        );
+        assert_eq!(
+            from_codex_notification("Codex wants to edit src/app.ts"),
+            Waiting::Permission { tool: "Edit".to_owned(), detail: "src/app.ts".to_owned() }
+        );
+        assert_eq!(from_codex_notification("Plan mode prompt: Ship it"), Waiting::Question("Ship it".to_owned()));
+        assert_eq!(from_codex_notification("Agent turn complete"), Waiting::Done(None));
+        assert!(matches!(from_codex_notification("All 40 tests pass"), Waiting::Done(Some(_))));
     }
 }

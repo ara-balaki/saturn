@@ -606,7 +606,7 @@ pub fn apply_app_settings(settings: &Settings, cx: &mut gpui_kit::App) {
 
 /// The Saturn plugin that Claude sessions in Saturn's panes load: inside Saturn.app
 /// (`Contents/Resources/plugin`), else `plugin/` in this repository when run from source.
-fn plugin_dir() -> Option<PathBuf> {
+pub fn plugin_dir() -> Option<PathBuf> {
     let bundled = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(|macos| macos.join("../Resources/plugin")))
@@ -1493,7 +1493,7 @@ impl Workspace {
         if made && let Some(setup) = self.setup_for(tab, &cwd, cx) {
             command = format!("{setup} && {command}");
         }
-        self.type_into(tab, command, cx);
+        self.type_into(tab, &command, cx);
         self.after_layout_change(window, cx);
     }
 
@@ -1507,7 +1507,7 @@ impl Workspace {
         self.names.insert(tab, routine.name.clone());
         if there {
             self.routine_tabs.insert(tab, (routine.id.clone(), due));
-            self.type_into(tab, routine.agent.start(Some(&routine.prompt), settings::shell_quote), cx);
+            self.type_into(tab, &routine.agent.start(Some(&routine.prompt), settings::shell_quote), cx);
             notify::post(&routine.id, &routine.name, "The routine started.", false);
         } else {
             let gone = routine.folder.display();
@@ -1565,7 +1565,7 @@ impl Workspace {
         let Some(command) = crate::session::resume_command(agent, id) else { return };
         let Some(tab) = self.spawn_terminal(folder, window, cx) else { return };
         self.place_new(tab);
-        self.type_into(tab, command, cx);
+        self.type_into(tab, &command, cx);
         self.after_layout_change(window, cx);
     }
 
@@ -1741,7 +1741,7 @@ impl Workspace {
             if fresh && let Some(setup) = self.setup_for(tab, &dir, cx) {
                 command = format!("{setup} && {command}");
             }
-            self.type_into(tab, command, cx);
+            self.type_into(tab, &command, cx);
         }
         self.after_layout_change(window, cx);
     }
@@ -1828,7 +1828,7 @@ impl Workspace {
                 self.layout.split_right(tab, None);
             }
             let agent = crate::agent_choice::current(cx);
-            self.type_into(tab, agent.start(Some(message), settings::shell_quote), cx);
+            self.type_into(tab, &agent.start(Some(message), settings::shell_quote), cx);
             self.after_layout_change(window, cx);
         }
     }
@@ -1865,15 +1865,20 @@ impl Workspace {
             self.layout.split_right(tab, None);
         }
         if let Some(setup) = self.setup_for(tab, checkout, cx) {
-            self.type_into(tab, setup, cx);
+            self.type_into(tab, &setup, cx);
         }
         self.after_layout_change(window, cx);
     }
 
     /// Types `command` into a new tab's shell and runs it, once the shell has drawn its prompt.
-    fn type_into(&mut self, tab: TabId, command: String, cx: &mut Context<Self>) {
+    fn type_into(&mut self, tab: TabId, command: &str, cx: &mut Context<Self>) {
         let Some(view) = self.terminals.get(&tab).cloned() else { return };
-        // The agent it starts, after any setup that runs first (`setup && codex '…'`).
+        // The agent it starts, after any setup that runs first (`setup && codex '…'`); Codex with
+        // Saturn's profile, so it tells Saturn about its turns.
+        let command = match command.rsplit_once("&& ") {
+            Some((setup, last)) => format!("{setup}&& {}", crate::agent_choice::with_profile(last, cx)),
+            None => crate::agent_choice::with_profile(command, cx),
+        };
         if let Some(agent) = command.rsplit("&& ").next().and_then(Agent::of_command) {
             self.started.insert(tab, agent);
         }
@@ -1928,7 +1933,7 @@ impl Workspace {
                     if source == Source::Guessed {
                         self.note(tab, &guessed(), cx);
                     }
-                    self.type_into(tab, setup, cx);
+                    self.type_into(tab, &setup, cx);
                 }
                 (None, Source::File) => self.note(tab, &format!("{} has no \"setup\" steps.", recipe::FILE), cx),
                 (None, Source::Guessed) => self.note(tab, &no_recipe(), cx),
@@ -1947,7 +1952,7 @@ impl Workspace {
                     if index == 0 && source == Source::Guessed {
                         self.note(tab, &guessed(), cx);
                     }
-                    self.type_into(tab, command, cx);
+                    self.type_into(tab, &command, cx);
                 }
                 return;
             }
@@ -2783,8 +2788,15 @@ impl Workspace {
         cx.notify();
     }
 
-    /// A Claude Code hook from a session in one of the panes.
-    fn handle_hook(&mut self, call: HookCall, cx: &mut Context<Self>) {
+    /// A hook from an agent's session in one of the panes: Claude Code's, or the end of a Codex turn
+    /// (its `notify`), read as Claude Code's `Stop`.
+    fn handle_hook(&mut self, mut call: HookCall, cx: &mut Context<Self>) {
+        if Agent::of_program(&call.agent) == Some(Agent::Codex) {
+            match saturn_core::agents::codex_turn_as_hook(&call.input) {
+                Some(input) => call.input = input,
+                None => return call.done(),
+            }
+        }
         let Some(tab) = call.pane.parse().ok().map(TabId) else { return call.done() };
         let Some(view) = self.terminals.get(&tab).cloned() else { return call.done() };
         let session_before = self.sessions.get(&tab).cloned();
@@ -2948,7 +2960,11 @@ impl Workspace {
                 self.names.insert(tab, name.clone());
             }
             let agent = saved_tab.agent.unwrap_or(Agent::Claude);
-            if let Some(command) = saved_tab.session.as_deref().and_then(|id| session::resume_command(agent, id))
+            if let Some(command) = saved_tab
+                .session
+                .as_deref()
+                .and_then(|id| session::resume_command(agent, id))
+                .map(|command| crate::agent_choice::with_profile(&command, cx))
                 && let Some(view) = self.terminals.get(&tab).cloned()
             {
                 // Once the shell has drawn its prompt; typed text waits there for Enter.
@@ -3034,6 +3050,13 @@ impl Workspace {
                 self.read_codex_title(tab, cx);
                 cx.notify();
             }
+            TerminalViewEvent::Notified(text) => {
+                // Codex says what it waits for this way (with Saturn's profile).
+                if self.agent_in(tab) == Some(Agent::Codex) {
+                    self.waits.insert(tab, saturn_core::waiting::from_codex_notification(text));
+                    cx.notify();
+                }
+            }
             TerminalViewEvent::PromptShown => {
                 self.started.remove(&tab);
                 self.program_checked.remove(&tab);
@@ -3066,6 +3089,10 @@ impl Workspace {
                 if view.update(cx, TerminalView::codex_title_state) {
                     self.started.remove(&tab);
                     self.program_checked.remove(&tab);
+                }
+                // Working again (an approval answered, a new turn): it waits for nothing.
+                if view.read(cx).state == AgentState::Working && self.waits.remove(&tab).is_some() {
+                    cx.notify();
                 }
             }
             Some(Agent::Claude) => {}

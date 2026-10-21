@@ -2,6 +2,7 @@
 //! the program, how it starts with a first message, how a session resumes, where it keeps its
 //! sessions. Which of them a Mac has is found, not set: on the login `PATH`, and logged in.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -126,6 +127,59 @@ impl Agent {
     }
 }
 
+/// The Codex profile Saturn starts its Codex sessions with (`codex -p saturn`), layered on the
+/// person's own `config.toml`: Codex sends its notifications to the terminal (OSC 9) whatever the
+/// terminal, and, when `notify` is the program given (the person has none of their own), runs it as
+/// each turn ends with the session's id and last answer.
+pub const CODEX_PROFILE: &str = "saturn";
+
+/// The profile file's text.
+#[must_use]
+pub fn codex_profile(notify: Option<&str>) -> String {
+    let mut text = String::from(
+        "# Written by Saturn for the Codex sessions it starts (codex -p saturn); your config.toml still\n\
+         # applies beneath it. Saturn writes it again as it starts, so changes here don't last.\n",
+    );
+    if let Some(program) = notify {
+        let _ = writeln!(text, "notify = [{}]", toml_string(program));
+    }
+    text.push_str("\n[tui]\nnotification_method = \"osc9\"\nnotification_condition = \"always\"\n");
+    text
+}
+
+/// A TOML basic string.
+fn toml_string(text: &str) -> String {
+    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// `command` with Saturn's Codex profile when it starts Codex without a profile of its own: after
+/// `codex` (`codex -p saturn 'Fix the login'`, `codex -p saturn resume …`).
+#[must_use]
+pub fn with_codex_profile(command: &str) -> String {
+    let Some(rest) = command.strip_prefix("codex") else { return command.to_owned() };
+    let words: Vec<&str> = rest.split_whitespace().collect();
+    let has_profile = words.iter().any(|word| *word == "-p" || word.starts_with("--profile"));
+    if !(rest.is_empty() || rest.starts_with(' ')) || has_profile {
+        return command.to_owned();
+    }
+    format!("codex -p {CODEX_PROFILE}{rest}")
+}
+
+/// What Codex's `notify` program gets as a turn ends (`agent-turn-complete`), as the hook input
+/// Saturn reads from Claude Code: a `Stop` with the session's id, its folder and its last answer.
+#[must_use]
+pub fn codex_turn_as_hook(notification: &serde_json::Value) -> Option<serde_json::Value> {
+    if notification.get("type").and_then(serde_json::Value::as_str) != Some("agent-turn-complete") {
+        return None;
+    }
+    Some(serde_json::json!({
+        "hook_event_name": "Stop",
+        "session_id": notification.get("thread-id")?,
+        "cwd": notification.get("cwd"),
+        "last_assistant_message": notification.get("last-assistant-message"),
+    }))
+}
+
 /// What Saturn found of an agent on this Mac.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Found {
@@ -198,6 +252,32 @@ mod tests {
         assert_eq!(Agent::of_command("aider"), None);
         assert_eq!(Agent::Codex.answer_keys(true), b"y");
         assert_eq!(Agent::Claude.answer_keys(false), b"\x1b");
+    }
+
+    #[test]
+    fn starts_codex_with_saturns_profile() {
+        assert_eq!(with_codex_profile("codex 'Fix it'"), "codex -p saturn 'Fix it'");
+        assert_eq!(with_codex_profile("codex"), "codex -p saturn");
+        assert_eq!(with_codex_profile("codex resume 019d"), "codex -p saturn resume 019d");
+        assert_eq!(with_codex_profile("codex -p work"), "codex -p work", "a profile of its own stays");
+        assert_eq!(with_codex_profile("claude 'Fix it'"), "claude 'Fix it'");
+        let profile = codex_profile(Some("/Applications/Saturn.app/Contents/Resources/plugin/bin/codex-notify"));
+        assert!(profile.contains("notify = [\"/Applications/Saturn.app/Contents/Resources/plugin/bin/codex-notify\"]"));
+        assert!(profile.contains("notification_method = \"osc9\""));
+        assert!(!codex_profile(None).contains("notify ="));
+    }
+
+    #[test]
+    fn reads_the_end_of_a_codex_turn_as_a_stop() {
+        let notification = serde_json::json!({
+            "type": "agent-turn-complete", "thread-id": "019d7c54", "turn-id": "1",
+            "cwd": "/code/acme-web", "last-assistant-message": "Done: the tests pass.",
+        });
+        let hook = codex_turn_as_hook(&notification).expect("a stop");
+        assert_eq!(hook["hook_event_name"], "Stop");
+        assert_eq!(hook["session_id"], "019d7c54");
+        assert_eq!(hook["last_assistant_message"], "Done: the tests pass.");
+        assert_eq!(codex_turn_as_hook(&serde_json::json!({"type": "other"})), None);
     }
 
     #[test]

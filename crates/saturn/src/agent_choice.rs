@@ -18,6 +18,8 @@ use crate::theme::{self, len};
 #[derive(Default)]
 pub struct Agents {
     pub found: Option<Vec<Found>>,
+    /// Saturn's Codex profile is in place, so Codex sessions Saturn starts use it.
+    pub codex_profile: bool,
 }
 
 impl Global for Agents {}
@@ -33,6 +35,10 @@ pub fn start(cx: &mut App) {
             .map(|agent| Found { agent, installed: named.contains(&agent), logged_in: named.contains(&agent) })
             .collect();
         cx.global_mut::<Agents>().found = Some(found);
+        // A spike's Codex home is its own (`CODEX_HOME`); the person's is never written by one.
+        if std::env::var_os("CODEX_HOME").is_some() && named.contains(&Agent::Codex) {
+            cx.global_mut::<Agents>().codex_profile = install_codex_profile();
+        }
         return;
     }
     cx.spawn(async move |cx| {
@@ -47,13 +53,41 @@ pub fn start(cx: &mut App) {
             .get()
             .cloned()
             .unwrap_or_else(|| "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin".to_owned());
-        let found = cx.background_spawn(async move { agents::detect(&path) }).await;
+        let (found, codex_profile) = cx
+            .background_spawn(async move {
+                let found = agents::detect(&path);
+                let codex = found.iter().any(|found| found.agent == Agent::Codex && found.installed);
+                (found, codex && install_codex_profile())
+            })
+            .await;
         cx.update(|cx| {
-            cx.global_mut::<Agents>().found = Some(found);
+            let agents = cx.global_mut::<Agents>();
+            agents.found = Some(found);
+            agents.codex_profile = codex_profile;
             cx.refresh_windows();
         });
     })
     .detach();
+}
+
+/// Writes Saturn's Codex profile (`$CODEX_HOME/saturn.config.toml`) when it isn't as it should be:
+/// Codex's notifications to the terminal, and Saturn's `codex-notify` as each turn ends, unless the
+/// person runs a `notify` of their own, which stays theirs. Says whether the profile is there.
+fn install_codex_profile() -> bool {
+    let Some(home) = Agent::Codex.home().filter(|home| home.is_dir()) else { return false };
+    let own_notify = std::fs::read_to_string(home.join("config.toml"))
+        .is_ok_and(|config| config.lines().any(|line| line.trim_start().starts_with("notify")));
+    let script = crate::workspace::plugin_dir().map(|dir| dir.join("bin/codex-notify"));
+    let notify = script.filter(|_| !own_notify).map(|script| script.to_string_lossy().into_owned());
+    let text = agents::codex_profile(notify.as_deref());
+    let file = home.join(format!("{}.config.toml", agents::CODEX_PROFILE));
+    std::fs::read_to_string(&file).is_ok_and(|now| now == text) || std::fs::write(&file, text).is_ok()
+}
+
+/// A command as Saturn types it: Codex with Saturn's profile, once it's in place.
+pub fn with_profile(command: &str, cx: &App) -> String {
+    let ready = cx.try_global::<Agents>().is_some_and(|agents| agents.codex_profile);
+    if ready { agents::with_codex_profile(command) } else { command.to_owned() }
 }
 
 /// The agents that can start: installed and logged in. Before they're found, Claude Code, as
