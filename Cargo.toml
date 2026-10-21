@@ -16,7 +16,7 @@ saturn-core = { path = "crates/saturn-core" }
 saturn-design = { path = "crates/saturn-design" }
 saturn-terminal = { path = "crates/saturn-terminal" }
 
-# GPUI moves weekly; versions are pinned exactly and upgraded on purpose (docs/05-rust-stack.md).
+# GPUI moves weekly; versions are pinned exactly and upgraded on purpose (docs/rust-stack.md).
 gpui-kit = "=0.7.3"
 alacritty_terminal = "=0.26.0"
 portable-pty = "=0.9.0"

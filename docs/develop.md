@@ -34,7 +34,7 @@ Node is only used for commit hooks and for formatting Markdown and JSON. Commits
 | `crates/saturn-design`   | Design tokens compiled from [`design/tokens.json`](../design/tokens.json)    |
 | `crates/saturn-bridge`   | Where the plugin's hooks reach Saturn: a small HTTP server on a Unix socket  |
 
-More reading: [the design system](04-design-system.md) and [the Rust stack](05-rust-stack.md).
+More reading: [the design system](design-system.md) and [the Rust stack](rust-stack.md).
 Want to change something? [AGENTS.md](../AGENTS.md) has the rules, for people and coding agents alike.
 
 ## Spikes and screenshots

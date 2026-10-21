@@ -3,7 +3,7 @@
 Saturn is a native macOS workbench for running many Claude Code agents side by side: a grid of
 terminals, a light editor, a diff review, and a clear signal when an agent needs you. It's Rust on
 GPUI, macOS only. Read the [README](README.md) for what it does, and
-[the design system](docs/04-design-system.md) and [the Rust stack](docs/05-rust-stack.md) before
+[the design system](docs/design-system.md) and [the Rust stack](docs/rust-stack.md) before
 changing how it looks or what it's built on.
 
 These rules are for anyone changing Saturn, people and coding agents alike.
@@ -51,7 +51,7 @@ pnpm health           # format check, clippy, tests, unused dependencies, licenc
 ## The design
 
 Saturn has a design system, and the code follows it. Full rules in
-[docs/04-design-system.md](docs/04-design-system.md); the ones that matter most:
+[docs/design-system.md](docs/design-system.md); the ones that matter most:
 
 - **Colours come from tokens** (`saturn_design::color`, through `theme::color`), never hex in code.
   Strokes and control fills are relative (`theme::overlay`, `separator`, `fill_*`): black in light
