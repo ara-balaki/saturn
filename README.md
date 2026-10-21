@@ -126,6 +126,12 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
 - Saturn opens where you left off and offers to resume the Claude sessions that were running (the
   command is typed for you, never run).
 
+<img src="docs/images/best-of.png" alt="Compare attempts: three agents' takes on one task side by side, with the files each changed" />
+
+| ![Search sessions: every Claude Code session, found by what was asked in it](docs/images/sessions.png) | ![Routines: agents on a schedule, with the runs and a missed one](docs/images/routines.png) |
+| :----------------------------------------------------------------------------------------------------: | :-----------------------------------------------------------------------------------------: |
+|                                          **Search sessions**                                           |                                        **Routines**                                         |
+
 ### Terminals
 
 - Split right (⌘D) or down (⌘⇧D), or drag a tab onto a pane's edge to split it there. Tabs in every
@@ -237,6 +243,8 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   model at a time with what's 1, 2 or 3 steps around it. dbt itself isn't needed.
 
 <img src="docs/images/database.png" alt="The database diagram, grouped by schema file" width="640" />
+
+![Impact in a dbt project: a changed staging model, the models built from it and the exposures that read them](docs/images/dbt-impact.png)
 
 ### Tickets (optional)
 
