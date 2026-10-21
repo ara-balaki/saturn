@@ -364,9 +364,6 @@ pub struct Workspace {
     check_runs: HashMap<PathBuf, Vec<CheckRun>>,
     /// What reviewers left open on each tab's pull request.
     review_notes: HashMap<TabId, ReviewNotes>,
-    /// Each tab's session's permission mode (`default`, `plan`, `bypassPermissions`…), as its hooks
-    /// report it.
-    modes: HashMap<TabId, String>,
 }
 
 /// A check run in a checkout, and how it went (`None` while it runs).
@@ -725,37 +722,6 @@ fn preview_chip(cell: CellId, pr: &PullRequest) -> Option<impl IntoElement> {
                     let _ = std::process::Command::new("open").arg(url).spawn();
                 }
             }),
-    )
-}
-
-/// The pane's permission mode, when it isn't the usual one; a warning when it skips permissions.
-fn mode_chip(cell: CellId, mode: &str) -> Option<impl IntoElement> {
-    let (label, tip, warn) = match mode {
-        "plan" => ("Plan mode", "Plans without changing anything until you approve the plan.", false),
-        "acceptEdits" => ("Accepts edits", "Edits files without asking; still asks before running commands.", false),
-        "auto" => ("Auto mode", "Decides itself what needs your permission.", false),
-        "dontAsk" => ("Doesn't ask", "Runs what its settings allow and refuses the rest, without asking.", false),
-        "bypassPermissions" => (
-            "Skips permissions",
-            "Runs anything without asking: commands, edits, deletions. Keep it to throwaway work, or a sandbox.",
-            true,
-        ),
-        _ => return None,
-    };
-    Some(
-        div()
-            .id(("mode-chip", cell.key()))
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap(len(space::SPACE_1))
-            .px(len(space::SPACE_2))
-            .text_size(px(12.))
-            .font_weight(FontWeight::MEDIUM)
-            .text_color(theme::color(if warn { color::AMBER_TEXT } else { color::INK_MUTED }))
-            .when(warn, |chip| chip.child(chrome::icon("triangle-alert", 13., theme::color(color::AMBER_TEXT))))
-            .child(label)
-            .tooltip(chrome::tip(tip)),
     )
 }
 
@@ -1146,7 +1112,6 @@ impl Workspace {
             waits: HashMap::new(),
             open_menu: None,
             menu_dismissed: None,
-            modes: HashMap::new(),
             review_notes: HashMap::new(),
             check_runs: HashMap::new(),
             roots,
@@ -2814,15 +2779,6 @@ impl Workspace {
             }
             None => {}
         }
-        match (call.event(), call.field("permission_mode")) {
-            ("SessionEnd", _) => {
-                self.modes.remove(&tab);
-            }
-            (_, Some(mode)) => {
-                self.modes.insert(tab, mode.to_owned());
-            }
-            _ => {}
-        }
         if let Some(path) = call.field("transcript_path").filter(|path| !path.is_empty()) {
             self.transcripts.insert(tab, PathBuf::from(path));
         }
@@ -3632,7 +3588,6 @@ impl Workspace {
             .items_center()
             .gap(len(space::SPACE_1))
             .children(self.ticket_of(cell.active, cx).map(|ticket| ticket_chip(cell_id, ticket)))
-            .children(self.modes.get(&cell.active).and_then(|mode| mode_chip(cell_id, mode)))
             .children(self.teams.get(&cell.active).map(|team| team_chip(cell_id, cell.active, team, cx)))
             .children(
                 self.checkouts
