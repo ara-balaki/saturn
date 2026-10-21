@@ -55,13 +55,18 @@ impl TeachView {
             InputState::new(window, cx)
                 .placeholder("The lesson, as an instruction: \"Keep loops readable; don't use reduce.\"")
         });
-        // The repository's instruction files that exist, and the personal one; else a new AGENTS.md.
+        // The repository's instruction files that exist; else a new AGENTS.md, which Claude Code and
+        // Codex both read. The personal CLAUDE.local.md only where Claude reads CLAUDE files anyway:
+        // making one beside a lone AGENTS.md would stop Claude Code reading that.
         let mut files: Vec<PathBuf> =
             ["AGENTS.md", "CLAUDE.md"].iter().map(|name| checkout.join(name)).filter(|path| path.is_file()).collect();
         if files.is_empty() {
             files.push(checkout.join("AGENTS.md"));
         }
-        files.push(checkout.join("CLAUDE.local.md"));
+        let local = checkout.join("CLAUDE.local.md");
+        if local.is_file() || checkout.join("CLAUDE.md").is_file() {
+            files.push(local);
+        }
         Self { workspace, checkout, prompts, lesson, files, file: 0, said: None }
     }
 

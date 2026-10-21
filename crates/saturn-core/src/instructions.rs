@@ -1,7 +1,8 @@
-//! What an agent in a folder is told, found the way Claude Code finds it: instruction files from the
-//! folder up to the repository (`CLAUDE.md`, `AGENTS.md`, `CLAUDE.local.md`) and the personal one,
-//! rules (`.claude/rules/`, some only for certain files), skills, commands, subagents, hooks and MCP
-//! servers. And what's said twice: the same instruction in several files drifts apart the first time
+//! What an agent in a folder is told, found the way it finds it. Claude Code: instruction files from
+//! the folder up to the repository (`CLAUDE.md`, `CLAUDE.local.md`, and `AGENTS.md` where there's no
+//! `CLAUDE.md` at all) and the personal one, rules (`.claude/rules/`, some only for certain files),
+//! skills, commands, subagents, hooks and MCP servers. Codex: `AGENTS.override.md` or `AGENTS.md` in
+//! each folder from the repository down, the personal one, and skills in `.agents/skills`. And what's said twice: the same instruction in several files drifts apart the first time
 //! one is edited, and a model reading both can't tell which one wins.
 
 use std::collections::{BTreeMap, HashMap};
@@ -126,8 +127,13 @@ pub fn gather(checkout: &Path, folder: &Path, home: Option<&Path>) -> Vec<Source
     let mut folders: Vec<PathBuf> =
         folder.ancestors().take_while(|path| path.starts_with(checkout)).map(Path::to_path_buf).collect();
     folders.reverse();
+    // Claude Code reads AGENTS.md only where no CLAUDE.md (or CLAUDE.local.md) is in the folder or
+    // above it.
+    let claude_files = ["CLAUDE.md", "CLAUDE.local.md", ".claude/CLAUDE.md"];
+    let has_claude_md = folder.ancestors().any(|dir| claude_files.iter().any(|file| dir.join(file).is_file()));
+    let files: &[&str] = if has_claude_md { &claude_files } else { &["AGENTS.md", "CLAUDE.local.md"] };
     for dir in &folders {
-        for file in ["CLAUDE.md", "AGENTS.md", "CLAUDE.local.md", ".claude/CLAUDE.md"] {
+        for file in files {
             let path = dir.join(file);
             let name = place(&path);
             add_file(Kind::Instructions, path, name, None);
@@ -168,6 +174,60 @@ pub fn gather(checkout: &Path, folder: &Path, home: Option<&Path>) -> Vec<Source
     found.extend(hooks(&claude.join("settings.json")));
     found.extend(hooks(&claude.join("settings.local.json")));
     found.extend(mcp_servers(&checkout.join(".mcp.json")));
+    found
+}
+
+/// Everything Codex working in `folder` (inside `checkout`) is given; `home` is Codex's own folder
+/// (`~/.codex`) and `user_home` the person's, for their own instructions and skills.
+pub fn gather_codex(checkout: &Path, folder: &Path, home: Option<&Path>, user_home: Option<&Path>) -> Vec<Source> {
+    let mut found = Vec::new();
+    let place = |path: &Path| {
+        path.strip_prefix(checkout)
+            .map_or_else(|_| path.display().to_string(), |relative| relative.display().to_string())
+    };
+    // In each folder the first of these that says something.
+    let first_of = |dir: &Path| {
+        ["AGENTS.override.md", "AGENTS.md"]
+            .iter()
+            .map(|file| dir.join(file))
+            .find(|path| read(path).is_some_and(|text| !text.trim().is_empty()))
+    };
+    let mut add = |kind: Kind, path: PathBuf, name: String, detail: Option<String>| {
+        if let Some(text) = read(&path) {
+            found.push(Source { kind, name, detail, path, lines: text.lines().count() });
+        }
+    };
+    if let Some(path) = home.and_then(first_of) {
+        let name = format!("Your own {}", path.file_name().map(|name| name.to_string_lossy()).unwrap_or_default());
+        add(Kind::Instructions, path, name, Some("for every project".to_owned()));
+    }
+    let mut folders: Vec<PathBuf> =
+        folder.ancestors().take_while(|path| path.starts_with(checkout)).map(Path::to_path_buf).collect();
+    folders.reverse();
+    for dir in &folders {
+        if let Some(path) = first_of(dir) {
+            let name = place(&path);
+            add(Kind::Instructions, path, name, None);
+        }
+    }
+    let mut skills = |folder: &Path, own: bool| {
+        for path in markdown_in(folder, Some("SKILL.md")) {
+            let text = read(&path).unwrap_or_default();
+            let mut matter = front_matter(&text);
+            let fallback = path.parent().and_then(Path::file_name).map(|name| name.to_string_lossy().into_owned());
+            let mut name = matter.remove("name").or(fallback).unwrap_or_default();
+            if own {
+                name.push_str(" (yours)");
+            }
+            add(Kind::Skill, path, name, matter.remove("description"));
+        }
+    };
+    for dir in folders.iter().rev() {
+        skills(&dir.join(".agents/skills"), false);
+    }
+    if let Some(user_home) = user_home {
+        skills(&user_home.join(".agents/skills"), true);
+    }
     found
 }
 
@@ -351,7 +411,8 @@ mod tests {
         let named = |kind: Kind| {
             found.iter().filter(|source| source.kind == kind).map(|source| source.name.as_str()).collect::<Vec<_>>()
         };
-        assert_eq!(named(Kind::Instructions), ["Your own CLAUDE.md", "CLAUDE.md", "apps/web/AGENTS.md"]);
+        // With a CLAUDE.md, Claude Code leaves AGENTS.md alone.
+        assert_eq!(named(Kind::Instructions), ["Your own CLAUDE.md", "CLAUDE.md"]);
         assert_eq!(
             found.iter().find(|source| source.kind == Kind::Rule).and_then(|rule| rule.detail.clone()).as_deref(),
             Some("for apps/api/**")
@@ -363,6 +424,36 @@ mod tests {
             Some("lint.sh")
         );
         assert_eq!(named(Kind::McpServer), ["db"]);
+    }
+
+    #[test]
+    fn claude_reads_agents_md_where_there_is_no_claude_md() {
+        let dir = tempfile::tempdir().expect("a temporary folder");
+        let repo = dir.path().join("acme-web");
+        write(&repo, "AGENTS.md", "Use pnpm.\n");
+        write(&repo, "apps/web/AGENTS.md", "Use the design tokens.\n");
+        let found = gather(&repo, &repo.join("apps/web"), None);
+        let names: Vec<&str> = found.iter().map(|source| source.name.as_str()).collect();
+        assert_eq!(names, ["AGENTS.md", "apps/web/AGENTS.md"]);
+    }
+
+    #[test]
+    fn gathers_what_codex_is_told() {
+        let dir = tempfile::tempdir().expect("a temporary folder");
+        let (repo, codex, user) = (dir.path().join("acme-web"), dir.path().join("codex"), dir.path().join("user"));
+        write(&repo, "AGENTS.md", "Use pnpm.\n");
+        write(&repo, "apps/web/AGENTS.md", "Use the design tokens.\n");
+        write(&repo, "apps/web/AGENTS.override.md", "Not today: use plain CSS.\n");
+        write(&repo, "CLAUDE.md", "Only for Claude.\n");
+        write(&repo, ".agents/skills/release/SKILL.md", "---\nname: release\ndescription: Ship a version\n---\n");
+        write(&codex, "AGENTS.md", "Be brief.\n");
+        write(&user, ".agents/skills/notes/SKILL.md", "---\nname: notes\n---\n");
+        let found = gather_codex(&repo, &repo.join("apps/web"), Some(&codex), Some(&user));
+        let named = |kind: Kind| {
+            found.iter().filter(|source| source.kind == kind).map(|source| source.name.as_str()).collect::<Vec<_>>()
+        };
+        assert_eq!(named(Kind::Instructions), ["Your own AGENTS.md", "AGENTS.md", "apps/web/AGENTS.override.md"]);
+        assert_eq!(named(Kind::Skill), ["release", "notes (yours)"]);
     }
 
     #[test]
@@ -394,7 +485,7 @@ mod tests {
             "# Rules\n- **Never** push to main without a review.\n- Short line here.\n```\nnever push to main without a review\n```\n",
         );
         write(repo, ".claude/rules/git.md", "Never push to main, without a review!\n");
-        write(repo, "AGENTS.md", "Same file.\nWith two lines of six words or more.\n");
+        write(repo, ".claude/CLAUDE.md", "Same file.\nWith two lines of six words or more.\n");
         write(repo, "apps/CLAUDE.md", "Same file.\nWith two lines of six words or more.\n");
         let mut sources = gather(repo, &repo.join("apps"), None);
         sources.retain(|source| source.kind != Kind::Hook);

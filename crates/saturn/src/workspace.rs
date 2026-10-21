@@ -4510,7 +4510,13 @@ impl Workspace {
                     .map(|view| view.read(cx).cwd.clone())
                     .filter(|folder| folder.starts_with(&checkout))
                     .unwrap_or_else(|| checkout.clone());
-                crate::context_view::open(cx.weak_entity(), checkout, &folder, window, cx);
+                // The pane's own agent, else the one new panes start.
+                let agent = this
+                    .layout
+                    .focused_tab()
+                    .and_then(|tab| this.agent_in(tab))
+                    .unwrap_or_else(|| crate::agent_choice::current(cx));
+                crate::context_view::open(cx.weak_entity(), checkout, &folder, agent, window, cx);
             }))
             .on_action(cx.listener(|this, _: &RunCheck, window, cx| {
                 let checkout = this.focused_checkout(cx);

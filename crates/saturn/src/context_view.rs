@@ -1,6 +1,7 @@
-//! What the agent is told (⌘⇧P): for the focused pane's folder, everything Claude Code gives its
-//! agent, found as Claude Code finds it (`saturn_core::instructions`): instruction files, rules and
-//! the files they're for, skills, commands, subagents, hooks and MCP servers. Long instruction files
+//! What the agent is told: for the focused pane's folder, everything its agent is given, found as
+//! that agent finds it (`saturn_core::instructions`): Claude Code's instruction files, rules and the
+//! files they're for, skills, commands, subagents, hooks and MCP servers; Codex's `AGENTS.md` files
+//! and skills. Long instruction files
 //! get a word, and anything said in more than one file is listed first. Each opens in the editor.
 
 use std::path::PathBuf;
@@ -10,6 +11,7 @@ use gpui_kit::{
     App, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, StatefulInteractiveElement as _,
     Styled as _, WeakEntity, Window, div, px,
 };
+use saturn_core::agents::Agent;
 use saturn_core::instructions::{self, Kind, Repeat, Source};
 use saturn_design::{color, radius, space};
 
@@ -22,11 +24,17 @@ pub fn open(
     workspace: WeakEntity<Workspace>,
     checkout: PathBuf,
     folder: &std::path::Path,
+    agent: Agent,
     window: &mut Window,
     cx: &mut App,
 ) {
-    let home = saturn_core::prompts::claude_home();
-    let sources = instructions::gather(&checkout, folder, home.as_deref());
+    let sources = match agent {
+        Agent::Claude => instructions::gather(&checkout, folder, saturn_core::prompts::claude_home().as_deref()),
+        Agent::Codex => {
+            let user_home = std::env::var_os("HOME").map(PathBuf::from);
+            instructions::gather_codex(&checkout, folder, Agent::Codex.home().as_deref(), user_home.as_deref())
+        }
+    };
     let repeats = instructions::repeats(&sources);
     window.open_dialog(cx, move |dialog, _, _| {
         let mut list =
