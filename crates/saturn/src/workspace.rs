@@ -315,6 +315,8 @@ pub struct Workspace {
     /// The agent's session running in each tab (whose, and its id), from its hooks, so a restart can
     /// offer to resume it.
     sessions: HashMap<TabId, (Agent, String)>,
+    /// The agent Saturn started in each tab (by typing its command), before any hook says more.
+    started: HashMap<TabId, Agent>,
     /// Panes a routine started, until their session is known: the routine and its time.
     routine_tabs: HashMap<TabId, (String, i64)>,
     /// The agent team each pane's session leads, if any.
@@ -1092,6 +1094,7 @@ impl Workspace {
             tickets_view: None,
             sidebar_tab: SidebarTab::Files,
             sessions: HashMap::new(),
+            started: HashMap::new(),
             routine_tabs: HashMap::new(),
             teams: HashMap::new(),
             also_in: Vec::new(),
@@ -1689,16 +1692,16 @@ impl Workspace {
 
     /// Best of N: makes a worktree for each of `count` attempts at `task` (off the main thread),
     /// then opens a pane in each that sets it up and starts Claude with the task.
-    pub fn start_attempts(&mut self, task: String, count: usize, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn start_attempts(&mut self, task: String, agents: Vec<Agent>, window: &mut Window, cx: &mut Context<Self>) {
         let repo = git::main_worktree(&self.project).unwrap_or_else(|| self.project.clone());
-        let names = best_of::work_names(&task, count);
+        let names = best_of::work_names(&task, agents.len());
         cx.spawn_in(window, async move |this, cx| {
             let made = cx
                 .background_spawn(async move {
                     names.iter().map(|name| git::work_worktree(&repo, name)).collect::<Vec<_>>()
                 })
                 .await;
-            let _ = this.update_in(cx, |this, window, cx| this.open_attempts(&task, made, window, cx));
+            let _ = this.update_in(cx, |this, window, cx| this.open_attempts(&task, &agents, made, window, cx));
         })
         .detach();
     }
@@ -1706,6 +1709,7 @@ impl Workspace {
     fn open_attempts(
         &mut self,
         task: &str,
+        agents: &[Agent],
         made: Vec<Result<(PathBuf, bool), String>>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -1727,7 +1731,8 @@ impl Workspace {
             self.furnish_worktree(&dir, fresh);
             let Some(tab) = self.spawn_terminal(&dir, window, cx) else { continue };
             self.place_new(tab);
-            let mut command = format!("claude {}", settings::shell_quote(task));
+            let agent = agents.get(number).copied().unwrap_or(Agent::Claude);
+            let mut command = agent.start(Some(task), settings::shell_quote);
             if fresh && let Some(setup) = self.setup_for(tab, &dir, cx) {
                 command = format!("{setup} && {command}");
             }
@@ -1746,6 +1751,11 @@ impl Workspace {
     }
 
     /// Where each attempt's agent is: its pane (the first working in its folder) and that pane's state.
+    /// The agent a tab runs, as its session's hooks say, else as Saturn started it.
+    pub fn agent_in(&self, tab: TabId) -> Option<Agent> {
+        self.sessions.get(&tab).map(|(agent, _)| *agent).or_else(|| self.started.get(&tab).copied())
+    }
+
     pub fn attempt_panes(&self, folders: &[PathBuf], cx: &gpui_kit::App) -> Vec<Option<(TabId, AgentState)>> {
         folders
             .iter()
@@ -1856,8 +1866,12 @@ impl Workspace {
     }
 
     /// Types `command` into a new tab's shell and runs it, once the shell has drawn its prompt.
-    fn type_into(&self, tab: TabId, command: String, cx: &mut Context<Self>) {
+    fn type_into(&mut self, tab: TabId, command: String, cx: &mut Context<Self>) {
         let Some(view) = self.terminals.get(&tab).cloned() else { return };
+        // The agent it starts, after any setup that runs first (`setup && codex '…'`).
+        if let Some(agent) = command.rsplit("&& ").next().and_then(Agent::of_command) {
+            self.started.insert(tab, agent);
+        }
         cx.spawn(async move |_, cx| {
             cx.background_executor().timer(std::time::Duration::from_millis(600)).await;
             let () = view.update(cx, |view, _| view.write(format!("{command}\r").into_bytes()));

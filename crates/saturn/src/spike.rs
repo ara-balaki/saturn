@@ -19,11 +19,14 @@
 //!   `SATURN_TICKET_FILTERS=1` opens the Tickets panel's filters.
 //! - `SATURN_DROP=path` drops that file on the middle of the window, as Finder would.
 //! - `SATURN_RUN_COMMAND="Start the app"` runs that command from the palette's list, by its name
-//!   (after `SATURN_RUN_COMMAND_AFTER` seconds, else 1.5).
+//!   (after `SATURN_RUN_COMMAND_AFTER` seconds, else 1.5); `SATURN_THEN_COMMAND` runs a second one
+//!   later (`SATURN_THEN_AFTER`, else 8).
 //! - `SATURN_BROADCAST=text` writes that in Send to several agents (`SATURN_BROADCAST_SEND=1` sends it
 //!   two seconds after it opens).
-//! - `SATURN_BEST_OF=text` writes that in Best of N (`SATURN_BEST_OF_START=1` starts it); with Compare
-//!   attempts open, `SATURN_KEEP_ATTEMPT=2` keeps attempt 2.
+//! - `SATURN_BEST_OF=text` writes that in Best of N (`SATURN_BEST_OF_START=1` starts it,
+//!   `SATURN_BEST_OF_AGENTS=claude,codex` sets each attempt's agent); with Compare attempts open,
+//!   `SATURN_KEEP_ATTEMPT=2` keeps attempt 2. `SATURN_AGENTS=claude,codex` says which agents the Mac
+//!   has, without looking.
 //! - `SATURN_SESSIONS_QUERY=text` types that into Search sessions (`CLAUDE_CONFIG_DIR` points it at
 //!   made-up transcripts).
 //! - `SATURN_ROUTINES=1` lets routines run in an automated run (they never do otherwise).
@@ -356,14 +359,20 @@ fn answer_from_env(cx: &mut Context<Workspace>) {
     .detach();
 }
 
-/// Runs a palette command by its name (`SATURN_RUN_COMMAND`), as picking it would.
+/// Runs a palette command by its name (`SATURN_RUN_COMMAND`), as picking it would, and a second one
+/// later (`SATURN_THEN_COMMAND`, after `SATURN_THEN_AFTER` seconds, else 8).
 fn run_command_from_env(window: &mut Window, cx: &mut Context<Workspace>) {
+    if let Ok(name) = std::env::var("SATURN_THEN_COMMAND") {
+        let after = var("SATURN_THEN_AFTER").map_or(Duration::from_secs(8), Duration::from_secs);
+        run_command_after(name, after, window, cx);
+    }
     let Ok(name) = std::env::var("SATURN_RUN_COMMAND") else { return };
     // Later for commands about a pane's server, which takes a few seconds to be seen.
-    let after = std::env::var("SATURN_RUN_COMMAND_AFTER")
-        .ok()
-        .and_then(|seconds| seconds.parse().ok())
-        .map_or(Duration::from_millis(1500), Duration::from_secs);
+    let after = var("SATURN_RUN_COMMAND_AFTER").map_or(Duration::from_millis(1500), Duration::from_secs);
+    run_command_after(name, after, window, cx);
+}
+
+fn run_command_after(name: String, after: Duration, window: &mut Window, cx: &mut Context<Workspace>) {
     cx.spawn_in(window, async move |_, cx| {
         cx.background_executor().timer(after).await;
         let _ = cx.update(|window, cx| {

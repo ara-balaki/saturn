@@ -12,6 +12,7 @@ use gpui_kit::{
     StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div, prelude::FluentBuilder as _, px,
 };
 use saturn_core::agent_state::AgentState;
+use saturn_core::agents::Agent;
 use saturn_core::best_of::{self, Group, Outcome};
 use saturn_core::layout::TabId;
 use saturn_core::worktrees;
@@ -26,7 +27,9 @@ pub struct StartView {
     workspace: WeakEntity<Workspace>,
     repo_name: String,
     task: Entity<TextareaState>,
-    count: usize,
+    /// Each attempt's agent; as many as attempts. All the current agent to begin with; with both
+    /// agents ready, each can be switched, to see Claude Code and Codex take on the same task.
+    agents: Vec<Agent>,
     said: Option<String>,
 }
 
@@ -46,7 +49,14 @@ impl StartView {
             .detach();
         }
         let repo_name = repo.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
-        Self { workspace, repo_name, task, count: 3, said: None }
+        let agent = crate::agent_choice::current(cx);
+        // A spike sets each attempt's agent (`SATURN_BEST_OF_AGENTS=claude,codex,claude`).
+        let agents = std::env::var("SATURN_BEST_OF_AGENTS")
+            .ok()
+            .map(|names| names.split(',').filter_map(|name| Agent::of_program(name.trim())).collect::<Vec<_>>())
+            .filter(|agents| (2..=best_of::MOST).contains(&agents.len()))
+            .unwrap_or_else(|| vec![agent; 3]);
+        Self { workspace, repo_name, task, agents, said: None }
     }
 
     fn begin(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -56,9 +66,47 @@ impl StartView {
             cx.notify();
             return;
         }
-        let count = self.count;
-        let _ = self.workspace.update(cx, |workspace, cx| workspace.start_attempts(task, count, window, cx));
+        let agents = self.agents.clone();
+        let _ = self.workspace.update(cx, |workspace, cx| workspace.start_attempts(task, agents, window, cx));
         window.close_dialog(cx);
+    }
+}
+
+impl StartView {
+    /// One switch per attempt, its agent raised: Claude Code against Codex on the same task.
+    fn attempt_agents(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let mut row = div().flex().flex_wrap().items_center().gap(len(space::SPACE_2));
+        for (index, chosen) in self.agents.iter().copied().enumerate() {
+            let mut track = chrome::track();
+            for agent in Agent::ALL {
+                track = track.child(
+                    chrome::track_item(("attempt-agent", index * 10 + agent as usize), chosen == agent)
+                        .px(len(space::SPACE_2))
+                        .text_size(px(12.))
+                        .child(agent.name())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(slot) = this.agents.get_mut(index) {
+                                *slot = agent;
+                            }
+                            cx.notify();
+                        })),
+                );
+            }
+            row = row.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(len(space::SPACE_1))
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(theme::color(color::INK_FAINT))
+                            .child(format!("{}", index + 1)),
+                    )
+                    .child(track),
+            );
+        }
+        row
     }
 }
 
@@ -67,16 +115,18 @@ impl Render for StartView {
         let mut counts = chrome::track();
         for count in 2..=best_of::MOST {
             counts = counts.child(
-                chrome::track_item(("best-of-count", count), self.count == count)
+                chrome::track_item(("best-of-count", count), self.agents.len() == count)
                     .px(len(space::SPACE_3))
                     .text_size(px(12.))
                     .child(format!("{count} agents"))
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.count = count;
+                        let last = this.agents.last().copied().unwrap_or(Agent::Claude);
+                        this.agents.resize(count, last);
                         cx.notify();
                     })),
             );
         }
+        let mixing = crate::agent_choice::ready(cx).len() > 1;
         div()
             .flex()
             .flex_col()
@@ -86,6 +136,7 @@ impl Render for StartView {
                 self.repo_name
             )))
             .child(Textarea::new(&self.task).h(px(140.)))
+            .when(mixing, |view| view.child(self.attempt_agents(cx)))
             .child(
                 div()
                     .flex()
@@ -101,7 +152,7 @@ impl Render for StartView {
                             .children(self.said.clone()),
                     )
                     .child(
-                        chrome::button("best-of-start", format!("Start {} attempts", self.count), None, true)
+                        chrome::button("best-of-start", format!("Start {} attempts", self.agents.len()), None, true)
                             .on_click(cx.listener(|this, _, window, cx| this.begin(window, cx))),
                     ),
             )
@@ -209,6 +260,7 @@ impl CompareView {
         (number, worktree): &(usize, worktrees::Worktree),
         outcome: &Outcome,
         pane: Option<(TabId, AgentState)>,
+        agent: Option<Agent>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let number = *number;
@@ -255,7 +307,10 @@ impl CompareView {
                             .text_size(px(13.))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(theme::color(color::INK))
-                            .child(format!("Attempt {number}")),
+                            .child(match agent {
+                                Some(agent) => format!("Attempt {number} · {}", agent.name()),
+                                None => format!("Attempt {number}"),
+                            }),
                     )
                     .child(
                         div()
@@ -323,10 +378,18 @@ impl Render for CompareView {
             .map_or_else(|| vec![None; folders.len()], |workspace| workspace.read(cx).attempt_panes(&folders, cx));
         let attempts: Vec<_> = read.group.attempts.clone();
         let outcomes: Vec<_> = read.outcomes.clone();
+        // Which agent made each, once there's more than one to tell apart.
+        let agents: Vec<Option<Agent>> = match self.workspace.upgrade() {
+            Some(workspace) if crate::agent_choice::ready(cx).len() > 1 => {
+                panes.iter().map(|pane| pane.and_then(|(tab, _)| workspace.read(cx).agent_in(tab))).collect()
+            }
+            _ => vec![None; panes.len()],
+        };
         let mut columns = div().flex().gap(len(space::SPACE_2));
         for (index, (attempt, outcome)) in attempts.iter().zip(&outcomes).enumerate() {
             let pane = panes.get(index).copied().flatten();
-            columns = columns.child(self.column(index, attempt, outcome, pane, cx));
+            let agent = agents.get(index).copied().flatten();
+            columns = columns.child(self.column(index, attempt, outcome, pane, agent, cx));
         }
         div()
             .flex()
