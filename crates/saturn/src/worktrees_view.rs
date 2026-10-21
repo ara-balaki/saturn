@@ -497,34 +497,62 @@ impl Render for WorktreesView {
 /// Everything about each worktree of `repo`.
 fn read_rows(repo: &Path, pane_folders: &[PathBuf]) -> Vec<Row> {
     let list = worktrees::list(repo);
-    let base = worktrees::default_branch(repo);
     let folders: Vec<PathBuf> = list
         .iter()
         .filter(|worktree| !worktree.main && !worktree.missing)
         .map(|worktree| worktree.path.clone())
         .collect();
-    let programs = worktrees::programs_in(&folders);
-    let pull_requests = crate::github::pull_requests_by_branch(repo);
+    // Everything at once: `lsof`, `gh` and each worktree's git commands, which one after another take
+    // seconds in a repo with twenty worktrees.
+    let base = worktrees::default_branch(repo);
+    let (programs, pull_requests, details) = std::thread::scope(|scope| {
+        let programs = scope.spawn(|| worktrees::programs_in(&folders));
+        let pull_requests = scope.spawn(|| crate::github::pull_requests_by_branch(repo));
+        let mut details = Vec::with_capacity(list.len());
+        for chunk in list.chunks(8) {
+            let reading: Vec<_> =
+                chunk.iter().map(|worktree| scope.spawn(|| details_of(repo, worktree, base.as_deref()))).collect();
+            details.extend(reading.into_iter().map(|reading| reading.join().unwrap_or((Merged::No, 0, None))));
+        }
+        (programs.join().unwrap_or_default(), pull_requests.join().unwrap_or_default(), details)
+    });
     list.into_iter()
-        .map(|worktree| {
-            let merged = match (&worktree.branch, &base) {
-                (Some(branch), Some(base)) if !worktree.main && !worktree.missing => {
-                    worktrees::merged(repo, branch, base)
-                }
-                _ => Merged::No,
-            };
-            let present = !worktree.missing;
-            Row {
-                merged,
-                uncommitted: if present { worktrees::uncommitted(&worktree.path) } else { 0 },
-                programs: programs.get(&worktree.path).cloned().unwrap_or_default(),
-                in_pane: pane_folders.iter().any(|folder| folder.starts_with(&worktree.path)),
-                pull_request: worktree.branch.as_ref().and_then(|branch| pull_requests.get(branch).cloned()),
-                last_commit: if present { worktrees::last_commit(&worktree.path) } else { None },
-                worktree,
-            }
+        .zip(details)
+        .map(|(worktree, (merged, uncommitted, last_commit))| Row {
+            merged,
+            uncommitted,
+            programs: programs.get(&worktree.path).cloned().unwrap_or_default(),
+            in_pane: pane_folders.iter().any(|folder| folder.starts_with(&worktree.path)),
+            pull_request: worktree.branch.as_ref().and_then(|branch| pull_requests.get(branch).cloned()),
+            last_commit,
+            worktree,
         })
         .collect()
+}
+
+/// A worktree's own state: whether it's merged into `base`, its uncommitted files, its last commit.
+fn details_of(repo: &Path, worktree: &Worktree, base: Option<&str>) -> (Merged, usize, Option<i64>) {
+    if worktree.missing {
+        return (Merged::No, 0, None);
+    }
+    let merged = match (&worktree.branch, base) {
+        (Some(branch), Some(base)) if !worktree.main => worktrees::merged(repo, branch, base),
+        _ => Merged::No,
+    };
+    (merged, worktrees::uncommitted(&worktree.path), worktrees::last_commit(&worktree.path))
+}
+
+/// "Removed 7 worktrees and their merged branches."
+fn removed_summary(removed: usize, branches: usize) -> String {
+    let worktrees = if removed == 1 { "1 worktree".to_owned() } else { format!("{removed} worktrees") };
+    match (removed, branches) {
+        (0, _) => String::new(),
+        (_, 0) => format!("Removed {worktrees}."),
+        (1, _) => format!("Removed {worktrees} and its merged branch."),
+        (_, b) if b == removed => format!("Removed {worktrees} and their merged branches."),
+        (_, 1) => format!("Removed {worktrees} and 1 merged branch."),
+        (_, b) => format!("Removed {worktrees} and {b} merged branches."),
+    }
 }
 
 /// Archives a worktree of the main checkout `repo` (its recipe's cleanup first) and lists it, so
