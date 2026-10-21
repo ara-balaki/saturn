@@ -116,8 +116,7 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   a worktree in each picked repo, on the same branch, and the agent reaches them all (Claude's
   `--add-dir`). A pane in such a worktree shows a chip for each other repo's, which goes to it.
 - macOS notifies you while Saturn is in the background, and a small Saturn in the menu bar shows how
-  many are waiting. The moon in the title bar (Focus) holds notifications while you concentrate;
-  stopping it gives one that says what happened meanwhile.
+  many are waiting.
 - Your Claude plan's limits at the foot of the sidebar: the session, the week, and a model's own
   week, with when each resets.
   At 80% and 95% of a limit, a notification says so and when it resets. Each pane shows roughly how
