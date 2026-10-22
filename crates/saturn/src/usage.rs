@@ -2,6 +2,10 @@
 //! Claude's (`/usage`: the session, the week, a model's week) and Codex's (every window its plan
 //! has), each asked of its agent. Read every few minutes and soon after an agent finishes a turn;
 //! each hidden when its agent has no plan limits to report or can't be asked.
+//!
+//! Claude's come first from what Claude Code hands Saturn's status line, which costs nothing:
+//! asking Claude Code is a request to Anthropic's usage endpoint, which refuses one asked too often
+//! (and Claude Code then doesn't ask again for some twenty minutes).
 
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -19,6 +23,8 @@ use crate::theme::len;
 const EVERY: Duration = Duration::from_mins(5);
 /// The least time between two reads, however many turns end.
 const AT_MOST_EVERY: Duration = Duration::from_secs(60);
+/// The least time between two questions to Claude Code, unless asked by hand.
+const ASK_CLAUDE_EVERY: Duration = Duration::from_mins(10);
 
 #[derive(Default)]
 pub struct Usage {
@@ -27,6 +33,8 @@ pub struct Usage {
     /// Codex's plan.
     pub codex: Option<Vec<Limit>>,
     read_at: Option<Instant>,
+    /// When Claude Code was last asked, rather than its status line read.
+    asked_claude_at: Option<Instant>,
     reading: bool,
     /// The highest warning given for each limit's current window (80 or 95), by label and reset.
     warned: std::collections::HashMap<(String, Option<i64>), u8>,
@@ -95,10 +103,11 @@ fn resets_in(seconds: i64) -> String {
 impl Global for Usage {}
 
 /// Starts reading the usage, once for the app. Automated runs show made-up numbers when asked
-/// (`SATURN_FAKE_USAGE`), and never start `claude` on their own.
+/// (`SATURN_FAKE_USAGE`), and read the real ones only when asked to (`SATURN_USAGE_LIVE`).
 pub fn start(cx: &mut App) {
     cx.set_global(Usage::default());
-    if crate::spike::is_automated() || std::env::var_os("SATURN_FAKE_USAGE").is_some() {
+    let live = std::env::var_os("SATURN_USAGE_LIVE").is_some();
+    if (crate::spike::is_automated() && !live) || std::env::var_os("SATURN_FAKE_USAGE").is_some() {
         if std::env::var_os("SATURN_FAKE_USAGE").is_some() {
             cx.global_mut::<Usage>().limits = Some(made_up());
             if std::env::var_os("SATURN_AGENTS").is_some_and(|agents| agents.to_string_lossy().contains("codex")) {
@@ -127,21 +136,33 @@ pub fn refresh(now: bool, cx: &mut App) {
     if usage.reading || (recent && !now) || std::env::var_os("SATURN_FAKE_USAGE").is_some() {
         return;
     }
+    let may_ask_claude = now || usage.asked_claude_at.is_none_or(|at| at.elapsed() >= ASK_CLAUDE_EVERY);
     cx.global_mut::<Usage>().reading = true;
     let path = crate::lsp::login_path();
     cx.spawn(async move |cx| {
-        let (limits, codex) = cx
+        let (claude, asked, codex) = cx
             .background_spawn(async move {
                 // Only what Codex says now: a figure from an old session would be out of date.
                 let codex = saturn_core::codex_usage::read(&path);
-                (usage::read(&path), codex)
+                let now = u64::try_from(unix_now()).unwrap_or(0);
+                match crate::status_line::recent_plan_limits(now) {
+                    Some(limits) => (Some(Some(limits)), false, codex),
+                    None if may_ask_claude => (Some(usage::read(&path)), true, codex),
+                    // Asked a few minutes ago: what it said stands until the next question.
+                    None => (None, false, codex),
+                }
             })
             .await;
         cx.update(|cx| {
             let usage = cx.global_mut::<Usage>();
             usage.reading = false;
             usage.read_at = Some(Instant::now());
-            usage.limits = limits;
+            if asked {
+                usage.asked_claude_at = Some(Instant::now());
+            }
+            if let Some(limits) = claude {
+                usage.limits = limits;
+            }
             usage.codex = codex;
             warn(usage);
             cx.refresh_windows();

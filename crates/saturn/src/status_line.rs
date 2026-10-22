@@ -28,6 +28,35 @@ pub fn print() {
         status_line::share_of(&file, session, i64::try_from(now).unwrap_or(i64::MAX))
     });
     print!("{}", status_line::line(&input, steps.as_ref(), here.as_deref()));
+    remember_plan_limits(&input, now);
+}
+
+/// How long the limits a status line was handed stand in for asking Claude Code: a session that
+/// is working draws its line far more often than this.
+const PLAN_LIMITS_FRESH_FOR: u64 = 10 * 60;
+
+fn plan_limits_path() -> Option<PathBuf> {
+    crate::settings::data_dir().map(|dir| dir.join("plan-limits.json"))
+}
+
+/// Keeps the plan's limits this session was handed, with when, for the usage card: they cost
+/// Anthropic no request, where asking Claude Code for them does, and is refused when done too
+/// often.
+fn remember_plan_limits(input: &Value, now: u64) {
+    let Some(rate_limits) = input.get("rate_limits").filter(|_| !status_line::plan_limits(input).is_empty()) else {
+        return;
+    };
+    if let Some(path) = plan_limits_path() {
+        let _ = std::fs::write(path, serde_json::json!({ "at": now, "rate_limits": rate_limits }).to_string());
+    }
+}
+
+/// The plan's limits a status line was handed in the last few minutes, if any was.
+pub fn recent_plan_limits(now: u64) -> Option<Vec<saturn_core::usage::Limit>> {
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(plan_limits_path()?).ok()?).ok()?;
+    let at = saved.get("at")?.as_u64()?;
+    let limits = status_line::plan_limits(&saved);
+    (now.saturating_sub(at) < PLAN_LIMITS_FRESH_FOR && !limits.is_empty()).then_some(limits)
 }
 
 /// Where Saturn keeps each session's share of the plan's session, for the status line.

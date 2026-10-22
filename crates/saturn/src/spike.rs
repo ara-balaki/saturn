@@ -42,6 +42,7 @@
 //! - `SATURN_KEYS="e c h tab"` presses those keys in the focused pane, through the window, and prints
 //!   the tab count after each; `SATURN_REBIND=new-tab=cmd-t` moves a shortcut first, as Settings
 //!   would. `SATURN_SETTINGS_SECTION=keyboard` opens Settings on that section.
+//! - `SATURN_USAGE_LIVE=1` reads the plans' real usage, as Saturn does when no spike runs it.
 //! - `SATURN_MAXIMIZE_PANE=1` maximises the focused pane, over the grid and the panels.
 //! - `SATURN_MENU=new-agent|pane|repo` opens that button's menu after 2 seconds (`SATURN_MENU_PICK=2`
 //!   picks its third line instead).

@@ -9,6 +9,7 @@
 use serde_json::{Value, json};
 
 use crate::agent_activity::Steps;
+use crate::usage::Limit;
 
 /// The status line for Claude Code's input, with the agent's steps if it has a task list, and
 /// `here`, this session's part of the plan's session as Saturn worked it out (`≈2%`), after it.
@@ -38,6 +39,24 @@ pub fn line(input: &Value, steps: Option<&Steps>, here: Option<&str>) -> String 
         parts.push(format!("{DIM}session{RESET} {tint}{used:.0}%{RESET}{here}"));
     }
     parts.join(&format!("  {DIM}·{RESET}  "))
+}
+
+/// The plan's limits Claude Code hands the status line (`rate_limits`), named as `/usage` names
+/// them: the session and the week. They come from the replies the session already had, so reading
+/// them asks Anthropic nothing.
+pub fn plan_limits(input: &Value) -> Vec<Limit> {
+    [("five_hour", "Session"), ("seven_day", "Week")]
+        .into_iter()
+        .filter_map(|(key, label)| {
+            let window = input.get("rate_limits")?.get(key)?;
+            Some(Limit {
+                label: label.to_owned(),
+                percent: window.get("used_percentage")?.as_f64()?,
+                #[expect(clippy::cast_possible_truncation, reason = "Unix seconds")]
+                resets_at: window.get("resets_at").and_then(Value::as_f64).map(|at| at as i64),
+            })
+        })
+        .collect()
 }
 
 /// A meter of `width` cells, filled to `percent`: blue on a dim track.
@@ -179,6 +198,19 @@ mod tests {
             }
         }
         out
+    }
+
+    #[test]
+    fn reads_the_plans_limits_it_is_handed() {
+        let input = json!({ "rate_limits": {
+            "five_hour": { "used_percentage": 11.0, "resets_at": 1_792_670_400 },
+            "seven_day": { "used_percentage": 53.0, "resets_at": 1_792_929_600 },
+        } });
+        let limits = plan_limits(&input);
+        let read: Vec<(&str, f64, Option<i64>)> =
+            limits.iter().map(|limit| (limit.label.as_str(), limit.percent, limit.resets_at)).collect();
+        assert_eq!(read, [("Session", 11.0, Some(1_792_670_400)), ("Week", 53.0, Some(1_792_929_600))]);
+        assert_eq!(plan_limits(&json!({ "model": { "display_name": "Fable 5.1" } })), Vec::<Limit>::new());
     }
 
     #[test]
