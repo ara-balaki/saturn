@@ -183,7 +183,15 @@ fn main() {
             let _ = LOGIN_PATH.set(path);
         }
     });
-    let project = settings::startup_project();
+    // A folder Saturn is started in or for; else the windows open when it last quit (an update's
+    // relaunch, the Dock); else, with none, the welcome screen.
+    let projects: Vec<Option<std::path::PathBuf>> = settings::startup_project().map_or_else(
+        || {
+            let open = session::take_open_windows();
+            if open.is_empty() { vec![None] } else { open.into_iter().map(Some).collect() }
+        },
+        |project| vec![Some(project)],
+    );
 
     let app = gpui_kit::application().with_assets(assets::Assets);
     // Clicking the Dock icon with no window open (the last one was closed) opens one, as a fresh
@@ -223,7 +231,9 @@ fn main() {
         });
         set_menus(cx);
 
-        open_main_window(project, cx);
+        for project in projects {
+            open_main_window(project, cx);
+        }
         // Automated runs (screenshots, spikes) must not take the keyboard from whatever the user is doing.
         if !spike::is_automated() {
             cx.activate(true);

@@ -66,6 +66,38 @@ pub fn save(project: &Path, grid: Option<SavedGrid>) {
     }
 }
 
+/// The windows open when Saturn last quit, by the repo each was opened on, kept in `windows.json`
+/// beside the grids so the next start opens them again, however Saturn is started (the Dock, an
+/// update's relaunch). Automated runs leave the person's own list alone unless they have a data
+/// folder of their own.
+fn windows_file() -> Option<PathBuf> {
+    let own = !crate::spike::is_automated() || std::env::var_os("SATURN_USER_DATA").is_some();
+    own.then(crate::settings::data_dir).flatten().map(|dir| dir.join("windows.json"))
+}
+
+/// Adds a window's repo to those open at quit.
+pub fn remember_open_window(project: &Path) {
+    let Some(path) = windows_file() else { return };
+    let mut open: Vec<PathBuf> =
+        std::fs::read_to_string(&path).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default();
+    if !open.iter().any(|known| known == project) {
+        open.push(project.to_owned());
+    }
+    if let Ok(text) = serde_json::to_string_pretty(&open) {
+        let _ = std::fs::write(path, text);
+    }
+}
+
+/// The repos whose windows were open at the last quit, still there, and forgets them: this start
+/// opens them, and the next quit writes down what's open then.
+pub fn take_open_windows() -> Vec<PathBuf> {
+    let Some(path) = windows_file() else { return Vec::new() };
+    let open: Vec<PathBuf> =
+        std::fs::read_to_string(&path).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default();
+    let _ = std::fs::remove_file(path);
+    open.into_iter().filter(|project| project.is_dir()).collect()
+}
+
 /// What to type into a restored tab to resume its agent's session: typed, not run, so resuming is
 /// one Enter and never a surprise.
 pub fn resume_command(agent: Agent, session: &str) -> Option<String> {

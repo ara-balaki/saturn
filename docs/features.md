@@ -52,7 +52,8 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   At 80% and 95% of a limit, a notification says so. With Saturn's status line on (Settings, off to
   begin with), each Claude Code agent shows under its prompt roughly how much of the 5-hour limit it
   used (`session 40% (≈2% here)`).
-- Saturn opens where you left off and offers to resume the sessions that were running, each with its
+- Saturn opens where you left off, the windows you had open when it quit, however it's started (the
+  Dock, an update's relaunch), and offers to resume the sessions that were running, each with its
   own agent (`claude --resume …`, `codex -p saturn resume …`): the command is typed for you, never
   run. Each agent can start with your own alias instead (`cdsk`, in Settings → Agents). A pane
   shows its work's chips (ticket, pull request, checks) only while an agent runs in it,

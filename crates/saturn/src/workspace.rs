@@ -1042,10 +1042,12 @@ impl Workspace {
 
     pub fn new(project: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self::keep_fresh(window, cx);
-        // Pane sizes change by dragging, which saves nothing on its own; quitting saves them.
+        // Pane sizes change by dragging, which saves nothing on its own; quitting saves them, and
+        // that this window was open, so the next start opens it again.
         cx.on_app_quit(|this, cx| {
             this.save_session(cx);
             this.remember_panels(cx);
+            session::remember_open_window(&this.projects[0]);
             async {}
         })
         .detach();
