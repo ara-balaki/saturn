@@ -12,11 +12,13 @@ panels (sidebar, editor, tickets) were showing, so Saturn opens with the same on
 - **Terminal**: Option as Meta (Option+B jumps a word back in the shell) instead of typing the
   characters your keyboard layout puts on it; copy on select. Inside Claude Code, dragging selects
   in Claude itself and copies what you select; hold Shift or Option to select with Saturn instead.
-  Dropping files (a screenshot, say) on a terminal types their paths, so the agent attaches them.
+  Dropping files (a screenshot, say) on a terminal types their paths, so the agent attaches them;
+  the terminal they'll land in lights up while you drag.
 - **Agents**: which agents Saturn found (Claude Code, Codex: installed and logged in) and which one
   new agents start. Saturn's status line under Claude Code's prompt (model, context, the task list's
   step, the session's limit), in Saturn and in any other terminal; turning it on keeps the one you
-  had, to put back. Codex's status line (its own items: model, folder, branch, context, limits), in
+  had, to put back. What resumes a Claude Code session (`claude --resume`, or an alias of your own
+  such as `cdsk --resume`), typed with the session's id after it. Codex's status line (its own items: model, folder, branch, context, limits), in
   the Codex sessions Saturn starts. Tabs named after Claude's session (a name you type yourself always wins); sessions
   named after tickets, so `/start abc-224` renames the session to `ABC-224`, as `/rename ABC-224`
   would. Tickets mentioned in normal prompts never rename anything.

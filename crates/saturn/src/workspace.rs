@@ -1305,7 +1305,14 @@ impl Workspace {
 
     pub fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let project = self.settings.project(&self.project);
-        settings_view::open(cx.weak_entity(), (project.ticket_command, project.codex_command), window, cx);
+        let claude_resume = self.settings.claude_resume.clone();
+        settings_view::open(
+            cx.weak_entity(),
+            (project.ticket_command, project.codex_command),
+            claude_resume,
+            window,
+            cx,
+        );
     }
 
     /// The folder the sidebar shows: the selected repo, or one of its worktrees.
@@ -1561,10 +1568,12 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(command) = crate::session::resume_command(agent, id) else { return };
+        let Some(command) = crate::session::resume_command(agent, id, &self.settings.claude_resume) else { return };
         let Some(tab) = self.spawn_terminal(folder, window, cx) else { return };
         self.place_new(tab);
         self.type_into(tab, &command, cx);
+        // The command may be an alias Saturn can't read the agent from (`cdsk --resume`).
+        self.started.insert(tab, agent);
         self.after_layout_change(window, cx);
     }
 
@@ -2998,7 +3007,7 @@ impl Workspace {
             if let Some(command) = saved_tab
                 .session
                 .as_deref()
-                .and_then(|id| session::resume_command(agent, id))
+                .and_then(|id| session::resume_command(agent, id, &self.settings.claude_resume))
                 .map(|command| crate::agent_choice::with_profile(&command, cx))
                 && let Some(view) = self.terminals.get(&tab).cloned()
             {

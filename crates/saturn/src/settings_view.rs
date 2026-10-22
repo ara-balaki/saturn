@@ -13,7 +13,7 @@ use saturn_design::{color, radius, space};
 
 use crate::chrome;
 use crate::keymap::{self, SHORTCUTS, Shortcut};
-use crate::settings::{AppearanceSetting, Settings, TEXT_SIZES};
+use crate::settings::{AppearanceSetting, CLAUDE_RESUME, Settings, TEXT_SIZES};
 use crate::theme::{self, len};
 use saturn_core::agents::Agent;
 
@@ -113,6 +113,7 @@ pub struct SettingsView {
     token: Entity<InputState>,
     command: Entity<InputState>,
     codex_command: Entity<InputState>,
+    claude_resume: Entity<InputState>,
     /// The shortcut waiting for its new keys, and what takes them before any shortcut fires.
     recording: Option<(&'static str, Subscription)>,
     /// What the last shortcut change did besides itself ("Taken from Close tab").
@@ -126,10 +127,11 @@ pub struct SettingsView {
 
 impl SettingsView {
     /// The workspace is in the middle of an update when Settings opens, so nothing here reads it:
-    /// the project's commands come from the caller.
+    /// the project's commands and Claude Code's resume come from the caller.
     fn new(
         workspace: WeakEntity<Workspace>,
         commands: (String, String),
+        claude_resume: String,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -138,6 +140,8 @@ impl SettingsView {
         let token = cx.new(|cx| InputState::new(window, cx).masked(true).placeholder("pk_…"));
         let command = cx.new(|cx| InputState::new(window, cx).default_value(ticket_command));
         let codex_command = cx.new(|cx| InputState::new(window, cx).default_value(codex_command));
+        let claude_resume =
+            cx.new(|cx| InputState::new(window, cx).placeholder(CLAUDE_RESUME).default_value(claude_resume));
         search.update(cx, |search, cx| search.focus(window, cx));
         let subscriptions = vec![
             cx.subscribe(&search, |_, _, event: &InputEvent, cx| {
@@ -172,6 +176,13 @@ impl SettingsView {
                     );
                 });
             }),
+            cx.subscribe(&claude_resume, |this, input, event: &InputEvent, cx| {
+                if !matches!(event, InputEvent::Change) {
+                    return;
+                }
+                let value = input.read(cx).value().to_string();
+                this.change(cx, |settings| settings.claude_resume = value);
+            }),
         ];
         let observed = workspace.upgrade().map(|workspace| cx.observe(&workspace, |_, _, cx| cx.notify()));
         // Spikes open a section by name (`SATURN_SETTINGS_SECTION=keyboard`).
@@ -186,6 +197,7 @@ impl SettingsView {
             token,
             command,
             codex_command,
+            claude_resume,
             recording: None,
             note: None,
             status_line: crate::status_line::is_installed(),
@@ -451,6 +463,13 @@ impl SettingsView {
                     cx.notify();
                 })),
             ),
+            Row::new(
+                Section::Agents,
+                "Resume Claude Code with",
+                "Typed into a pane with the session's id after it, when Saturn offers to resume a session or you pick one in Search sessions. Your own alias works too (cdsk --resume, say). Empty: claude --resume.",
+                Input::new(&self.claude_resume),
+            )
+            .wide(),
             Row::new(
                 Section::Agents,
                 "Name tabs after Claude's session",
@@ -861,8 +880,14 @@ impl Render for SettingsView {
 /// Opens Settings. `commands` are the project's current ones (Claude Code's, Codex's): the caller
 /// passes them, since the workspace that opens the dialog is in the middle of an update and can't be
 /// read.
-pub fn open(workspace: WeakEntity<Workspace>, commands: (String, String), window: &mut Window, cx: &mut App) {
-    let view = cx.new(|cx| SettingsView::new(workspace, commands, window, cx));
+pub fn open(
+    workspace: WeakEntity<Workspace>,
+    commands: (String, String),
+    claude_resume: String,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let view = cx.new(|cx| SettingsView::new(workspace, commands, claude_resume, window, cx));
     window.open_dialog(cx, move |dialog, _, _| {
         dialog
             .title("Settings")

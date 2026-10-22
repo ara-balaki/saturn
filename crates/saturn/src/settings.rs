@@ -49,7 +49,13 @@ pub struct Settings {
     /// Codex shows its status line (model, folder, branch, context, limits) in the sessions Saturn
     /// starts.
     pub codex_status_line: bool,
+    /// What resumes a Claude Code session, typed with the session's id after it: `claude --resume`,
+    /// or the person's own alias for it.
+    pub claude_resume: String,
 }
+
+/// How Claude Code resumes a session unless the settings say otherwise.
+pub const CLAUDE_RESUME: &str = "claude --resume";
 
 /// The window's panels around the grid, and whether each is showing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -202,6 +208,7 @@ impl Default for Settings {
             panels: Panels::default(),
             agent: None,
             codex_status_line: false,
+            claude_resume: CLAUDE_RESUME.to_owned(),
         }
     }
 }
