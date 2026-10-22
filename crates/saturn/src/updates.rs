@@ -1,8 +1,9 @@
 //! Updates, through Sparkle: Saturn.app carries `Sparkle.framework` (see `scripts/bundle.sh`),
 //! loaded here at launch rather than linked, so a build without it (`cargo run`) simply has no
-//! updates. Sparkle checks the newest GitHub release's feed every hour, shows its own window when
-//! a version is waiting, and installs it; the feed, the check interval and the public key that
-//! updates must be signed with are in the app's Info.plist.
+//! updates. Sparkle checks the newest GitHub release's feed once a day, shows its own window when
+//! a version is waiting (Remind me later puts it off until the next check), and installs it; the
+//! feed, the check interval and the public key that updates must be signed with are in the app's
+//! Info.plist.
 
 use std::cell::RefCell;
 
@@ -12,7 +13,7 @@ use objc2::{class, msg_send};
 use objc2_foundation::NSString;
 
 thread_local! {
-    /// Sparkle's controller, alive as long as Saturn: it runs the hourly checks.
+    /// Sparkle's controller, alive as long as Saturn: it runs the daily checks.
     static CONTROLLER: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
 }
 

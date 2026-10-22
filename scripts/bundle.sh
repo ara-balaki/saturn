@@ -50,11 +50,11 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>NSHighResolutionCapable</key><true/>
   <!-- Updates: the newest GitHub release's feed, signed with the key in the publisher's keychain;
-       checked every hour, the shortest Sparkle allows. -->
+       checked once a day, so an update put off with Remind me later comes back the next day. -->
   <key>SUFeedURL</key><string>https://github.com/itsjonasarden/saturn/releases/latest/download/appcast.xml</string>
   <key>SUPublicEDKey</key><string>L6qK9LpfH0C48mSjQNc4JAnNxO7rokEYbdIR5gemae0=</string>
   <key>SUEnableAutomaticChecks</key><true/>
-  <key>SUScheduledCheckInterval</key><integer>3600</integer>
+  <key>SUScheduledCheckInterval</key><integer>86400</integer>
 </dict>
 </plist>
 PLIST

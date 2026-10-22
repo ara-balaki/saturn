@@ -70,7 +70,7 @@ and Intel, with [Claude Code](https://claude.com/claude-code),
 > Saturn isn't notarised by Apple (it has no Apple Developer ID), so the first time you open it,
 > click **Done**, then **Open Anyway** in System Settings → Privacy & Security. Only once.
 
-Saturn updates itself: every hour it checks for a new release and offers it. To build it from the
+Saturn updates itself: once a day it checks for a new release and offers it. To build it from the
 code, see [Develop](docs/develop.md).
 
 ## The shortcuts that matter

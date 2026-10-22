@@ -3,7 +3,7 @@
 #
 # Sets the version, commits and tags it, builds the disk image for Apple Silicon and Intel, signs
 # it with the Sparkle key in this Mac's keychain, and publishes a GitHub release carrying the disk
-# image and `appcast.xml`, the feed every installed Saturn checks each hour. The newest release's
+# image and `appcast.xml`, the feed every installed Saturn checks once a day. The newest release's
 # feed is the one they read (releases/latest/download/appcast.xml).
 #
 # The signing key was made with Sparkle's `generate_keys`; back it up with
@@ -73,4 +73,4 @@ cp "$dmg" target/Saturn.dmg
 
 git push -q origin main "$tag"
 gh release create "$tag" "$dmg" target/Saturn.dmg target/appcast.xml --title "Saturn $version" --notes "$markdown"
-echo "Released Saturn $version: every installed Saturn offers it within the hour."
+echo "Released Saturn $version: every installed Saturn offers it within a day."
