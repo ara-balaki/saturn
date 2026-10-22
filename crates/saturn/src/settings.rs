@@ -49,13 +49,37 @@ pub struct Settings {
     /// Codex shows its status line (model, folder, branch, context, limits) in the sessions Saturn
     /// starts.
     pub codex_status_line: bool,
-    /// What resumes a Claude Code session, typed with the session's id after it: `claude --resume`,
-    /// or the person's own alias for it.
-    pub claude_resume: String,
+    /// What starts each agent: its own name, or the person's alias for it (`cdsk`).
+    pub agent_commands: AgentCommands,
+    /// Claude Code's resume command, as 0.1.29 kept it (`cdsk --resume`): read once into
+    /// `agent_commands`.
+    #[serde(skip_serializing)]
+    claude_resume: Option<String>,
 }
 
-/// How Claude Code resumes a session unless the settings say otherwise.
-pub const CLAUDE_RESUME: &str = "claude --resume";
+/// What Saturn types to start each agent, before what it adds itself (a first message,
+/// `--resume …`, Codex's `-p saturn`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AgentCommands {
+    pub claude: String,
+    pub codex: String,
+}
+
+impl Default for AgentCommands {
+    fn default() -> Self {
+        Self { claude: Agent::Claude.program().to_owned(), codex: Agent::Codex.program().to_owned() }
+    }
+}
+
+impl AgentCommands {
+    pub fn get(&self, agent: Agent) -> &str {
+        match agent {
+            Agent::Claude => &self.claude,
+            Agent::Codex => &self.codex,
+        }
+    }
+}
 
 /// The window's panels around the grid, and whether each is showing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -208,7 +232,8 @@ impl Default for Settings {
             panels: Panels::default(),
             agent: None,
             codex_status_line: false,
-            claude_resume: CLAUDE_RESUME.to_owned(),
+            agent_commands: AgentCommands::default(),
+            claude_resume: None,
         }
     }
 }
@@ -230,7 +255,21 @@ pub fn load() -> Settings {
     file()
         .and_then(|path| std::fs::read_to_string(path).ok())
         .and_then(|text| serde_json::from_str(&text).ok())
+        .map(upgrade)
         .unwrap_or_default()
+}
+
+/// Settings written by an older Saturn, in today's terms.
+fn upgrade(mut settings: Settings) -> Settings {
+    // 0.1.29 kept only Claude Code's resume command; what comes before `--resume` starts it.
+    if let Some(resume) = settings.claude_resume.take()
+        && let Some(command) = resume.trim().strip_suffix("--resume").map(str::trim)
+        && !command.is_empty()
+        && settings.agent_commands == AgentCommands::default()
+    {
+        command.clone_into(&mut settings.agent_commands.claude);
+    }
+    settings
 }
 
 impl Settings {
@@ -308,6 +347,19 @@ mod tests {
         let settings: Settings = serde_json::from_str(r#"{"name_tabs_after_sessions": false}"#).expect("loads");
         assert_eq!(settings.appearance, AppearanceSetting::System);
         assert!(!settings.name_tabs_after_sessions);
+    }
+
+    #[test]
+    fn a_resume_command_of_your_own_becomes_what_starts_claude() {
+        let settings: Settings = serde_json::from_str(r#"{"claude_resume": "cdsk --resume"}"#).expect("loads");
+        let settings = upgrade(settings);
+        assert_eq!(
+            (settings.agent_commands.claude.as_str(), settings.agent_commands.codex.as_str()),
+            ("cdsk", "codex")
+        );
+        let plain: Settings = serde_json::from_str(r#"{"claude_resume": "claude --resume"}"#).expect("loads");
+        assert_eq!(upgrade(plain).agent_commands, AgentCommands::default());
+        assert!(!serde_json::to_string(&settings).expect("saves").contains("claude_resume"));
     }
 
     #[test]

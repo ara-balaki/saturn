@@ -54,7 +54,7 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   used (`session 40% (≈2% here)`).
 - Saturn opens where you left off and offers to resume the sessions that were running, each with its
   own agent (`claude --resume …`, `codex -p saturn resume …`): the command is typed for you, never
-  run. Claude Code's can be your own alias instead (`cdsk --resume`, in Settings → Agents). A pane
+  run. Each agent can start with your own alias instead (`cdsk`, in Settings → Agents). A pane
   shows its work's chips (ticket, pull request, checks) only while an agent runs in it,
   so a reopened pane is free for something else.
 

@@ -91,6 +91,24 @@ pub fn with_profile(command: &str, cx: &App) -> String {
     if ready { agents::with_codex_profile(command) } else { command.to_owned() }
 }
 
+/// What's typed to run `command`, written as Saturn writes agents' commands (`claude …`): the
+/// agent it starts, after any setup that runs first (`setup && codex '…'`), with Saturn's Codex
+/// profile and started with the person's own command for it (Settings → Agents).
+pub fn as_typed(command: &str, cx: &App) -> String {
+    let own = settings::load().agent_commands;
+    let typed = |command: &str| {
+        let command = with_profile(command, cx);
+        match Agent::of_command(&command) {
+            Some(agent) => agents::with_own_command(&command, own.get(agent)),
+            None => command,
+        }
+    };
+    match command.rsplit_once("&& ") {
+        Some((setup, last)) => format!("{setup}&& {}", typed(last)),
+        None => typed(command),
+    }
+}
+
 /// The agents that can start: installed and logged in. Before they're found, Claude Code, as
 /// Saturn has always started.
 pub fn ready(cx: &App) -> Vec<Agent> {

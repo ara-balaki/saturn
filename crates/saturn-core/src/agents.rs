@@ -187,6 +187,20 @@ pub fn with_codex_profile(command: &str) -> String {
     format!("codex -p {CODEX_PROFILE}{rest}")
 }
 
+/// `command`, which starts an agent as Saturn writes it (`claude …`, `codex -p saturn resume …`),
+/// started with `own` instead: the person's own command for that agent, an alias such as `cdsk`.
+/// Saturn keeps writing the agent's own name until the last moment, so it can still tell which
+/// agent a command starts. Anything else, or an empty `own`, is left as it is.
+#[must_use]
+pub fn with_own_command(command: &str, own: &str) -> String {
+    let own = own.trim();
+    let Some(agent) = Agent::of_command(command) else { return command.to_owned() };
+    match command.strip_prefix(agent.program()) {
+        Some(rest) if !own.is_empty() && (rest.is_empty() || rest.starts_with(' ')) => format!("{own}{rest}"),
+        _ => command.to_owned(),
+    }
+}
+
 /// What Codex's `notify` program gets as a turn ends (`agent-turn-complete`), as the hook input
 /// Saturn reads from Claude Code: a `Stop` with the session's id, its folder and its last answer.
 #[must_use]
@@ -274,6 +288,15 @@ mod tests {
         assert_eq!(Agent::of_command("aider"), None);
         assert_eq!(Agent::Codex.answer_keys(true), b"y");
         assert_eq!(Agent::Claude.answer_keys(false), b"\x1b");
+    }
+
+    #[test]
+    fn starts_an_agent_with_the_persons_own_command() {
+        assert_eq!(with_own_command("claude --resume 0b6f7c2e", "cdsk"), "cdsk --resume 0b6f7c2e");
+        assert_eq!(with_own_command("claude", " cdsk "), "cdsk");
+        assert_eq!(with_own_command("codex -p saturn 'Fix it'", "cx --yolo"), "cx --yolo -p saturn 'Fix it'");
+        assert_eq!(with_own_command("claude 'Fix it'", ""), "claude 'Fix it'");
+        assert_eq!(with_own_command("aider 'Fix it'", "cdsk"), "aider 'Fix it'");
     }
 
     #[test]

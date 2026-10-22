@@ -1305,11 +1305,10 @@ impl Workspace {
 
     pub fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let project = self.settings.project(&self.project);
-        let claude_resume = self.settings.claude_resume.clone();
         settings_view::open(
             cx.weak_entity(),
             (project.ticket_command, project.codex_command),
-            claude_resume,
+            self.settings.agent_commands.clone(),
             window,
             cx,
         );
@@ -1568,12 +1567,10 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(command) = crate::session::resume_command(agent, id, &self.settings.claude_resume) else { return };
+        let Some(command) = crate::session::resume_command(agent, id) else { return };
         let Some(tab) = self.spawn_terminal(folder, window, cx) else { return };
         self.place_new(tab);
         self.type_into(tab, &command, cx);
-        // The command may be an alias Saturn can't read the agent from (`cdsk --resume`).
-        self.started.insert(tab, agent);
         self.after_layout_change(window, cx);
     }
 
@@ -1905,16 +1902,13 @@ impl Workspace {
     /// Types `command` into a new tab's shell and runs it, once the shell has drawn its prompt.
     fn type_into(&mut self, tab: TabId, command: &str, cx: &mut Context<Self>) {
         let Some(view) = self.terminals.get(&tab).cloned() else { return };
-        // The agent it starts, after any setup that runs first (`setup && codex '…'`); Codex with
-        // Saturn's profile, so it tells Saturn about its turns.
-        let command = match command.rsplit_once("&& ") {
-            Some((setup, last)) => format!("{setup}&& {}", crate::agent_choice::with_profile(last, cx)),
-            None => crate::agent_choice::with_profile(command, cx),
-        };
+        // The agent it starts, after any setup that runs first (`setup && codex '…'`), read before
+        // it's started with the person's own command, which Saturn may not recognise.
         if let Some(agent) = command.rsplit("&& ").next().and_then(Agent::of_command) {
             self.started.insert(tab, agent);
             self.started_at.insert(tab, crate::worktrees_view::now());
         }
+        let command = crate::agent_choice::as_typed(command, cx);
         cx.spawn(async move |_, cx| {
             cx.background_executor().timer(std::time::Duration::from_millis(600)).await;
             let () = view.update(cx, |view, _| view.write(format!("{command}\r").into_bytes()));
@@ -2279,8 +2273,8 @@ impl Workspace {
                     view.write(b"\r".to_vec());
                 }),
                 Reach::Shell => {
-                    let command =
-                        format!("{}\r", crate::agent_choice::current(cx).start(Some(message), settings::shell_quote));
+                    let command = crate::agent_choice::current(cx).start(Some(message), settings::shell_quote);
+                    let command = format!("{}\r", crate::agent_choice::as_typed(&command, cx));
                     view.update(cx, |view, _| view.write(command.into_bytes()));
                 }
                 Reach::Busy(_) => {}
@@ -3007,8 +3001,8 @@ impl Workspace {
             if let Some(command) = saved_tab
                 .session
                 .as_deref()
-                .and_then(|id| session::resume_command(agent, id, &self.settings.claude_resume))
-                .map(|command| crate::agent_choice::with_profile(&command, cx))
+                .and_then(|id| session::resume_command(agent, id))
+                .map(|command| crate::agent_choice::as_typed(&command, cx))
                 && let Some(view) = self.terminals.get(&tab).cloned()
             {
                 // Once the shell has drawn its prompt; typed text waits there for Enter.

@@ -6,13 +6,17 @@ logged in (`claude auth status`, `codex login status`); Settings → Agents show
 only one, Saturn uses it and asks nothing. With both, New agent, Best of N and the routine form have
 a **Claude Code | Codex** switch that remembers your last pick.
 
+Settings → Agents also says what starts each one: `claude` and `codex`, or an alias of your own
+(`cdsk`, say). Saturn types what it needs after it (a first message, `--resume …`, Codex's
+`-p saturn`), so everything it starts or resumes runs your way.
+
 ## What each gives Saturn
 
 |                                               | Claude Code                    | Codex                                         |
 | --------------------------------------------- | ------------------------------ | --------------------------------------------- |
 | Working, needs you, your turn                 | ✓                              | ✓                                             |
 | What it waits for, answered from the queue    | ✓                              | ✓ (in sessions Saturn starts)                 |
-| Resume after a restart                        | `claude --resume …`, or yours  | `codex -p saturn resume …`                    |
+| Resume after a restart                        | `claude --resume …`            | `codex -p saturn resume …`                    |
 | Search sessions, Best of N, routines, Also in | ✓                              | ✓                                             |
 | Limits at the foot of the sidebar             | the session, the week, a model | every window the plan has (for Pro, the week) |
 | Status line                                   | Saturn's own, with its share   | Codex's own items                             |

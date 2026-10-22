@@ -67,18 +67,10 @@ pub fn save(project: &Path, grid: Option<SavedGrid>) {
 }
 
 /// What to type into a restored tab to resume its agent's session: typed, not run, so resuming is
-/// one Enter and never a surprise. Claude Code's is `claude_resume` from the settings when it's
-/// set (an alias such as `cdsk --resume`), with the id after it.
-pub fn resume_command(agent: Agent, session: &str, claude_resume: &str) -> Option<String> {
+/// one Enter and never a surprise.
+pub fn resume_command(agent: Agent, session: &str) -> Option<String> {
     // Session ids are UUIDs; anything else is not typed into a shell.
-    if !session.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
-        return None;
-    }
-    let claude_resume = claude_resume.trim();
-    Some(match agent {
-        Agent::Claude if !claude_resume.is_empty() => format!("{claude_resume} {session}"),
-        _ => agent.resume(session),
-    })
+    session.chars().all(|c| c.is_ascii_hexdigit() || c == '-').then(|| agent.resume(session))
 }
 
 #[cfg(test)]
@@ -88,19 +80,14 @@ mod tests {
     #[test]
     fn only_uuid_like_sessions_are_offered() {
         assert_eq!(
-            resume_command(Agent::Claude, "0b6f7c2e-1a2b-4c3d-9e8f-001122334455", "claude --resume").as_deref(),
+            resume_command(Agent::Claude, "0b6f7c2e-1a2b-4c3d-9e8f-001122334455").as_deref(),
             Some("claude --resume 0b6f7c2e-1a2b-4c3d-9e8f-001122334455")
         );
         assert_eq!(
-            resume_command(Agent::Claude, "0b6f7c2e", " cdsk --resume ").as_deref(),
-            Some("cdsk --resume 0b6f7c2e")
-        );
-        assert_eq!(resume_command(Agent::Claude, "0b6f7c2e", "").as_deref(), Some("claude --resume 0b6f7c2e"));
-        assert_eq!(
-            resume_command(Agent::Codex, "019d7c54-01b0-7992-acd4-66566288cc3e", "cdsk --resume").as_deref(),
+            resume_command(Agent::Codex, "019d7c54-01b0-7992-acd4-66566288cc3e").as_deref(),
             Some("codex resume 019d7c54-01b0-7992-acd4-66566288cc3e")
         );
-        assert_eq!(resume_command(Agent::Claude, "x; rm -rf ~", "claude --resume"), None);
+        assert_eq!(resume_command(Agent::Claude, "x; rm -rf ~"), None);
     }
 
     #[test]
