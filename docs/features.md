@@ -68,8 +68,9 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
   evenly whenever one opens or closes; drag a divider to change that, or double-click it to even
   out its two panes.
 - A real terminal underneath (alacritty's engine), so TUIs, colours and the mouse work as they should.
-- Drop a file, a screenshot say, on a terminal to type its path, so the agent attaches it. Pasting
-  works the same: copied files (from Finder) and copied images paste as paths.
+- Drop a file, a screenshot say, on a terminal to type its path, so the agent attaches it; the
+  terminal it will land in lights up while you drag. Pasting works the same: copied files (from
+  Finder) and copied images paste as paths.
 - ⌘-click a link to open it, a pull request linked as `#123` too.
 - Each pane shows the servers its agent runs, named after their app and port (`web :5173`); click one
   to open it. The repo's Docker Compose services (`postgres :5432`) sit in the bar at the bottom.

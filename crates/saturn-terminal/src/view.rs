@@ -537,5 +537,10 @@ impl Render for TerminalView {
             .on_mouse_move(cx.listener(Self::mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
             .child(TerminalElement::new(cx.entity(), focused, self.geometry.clone()))
+            // While files are dragged over this terminal it lights up, so it's clear which one
+            // they'll be typed into. Over the text, which paints its own background.
+            .child(div().absolute().inset_0().drag_over::<gpui_kit::ExternalPaths>(|style, _, _, _| {
+                style.bg(crate::element::hsla(crate::palette::selection(), crate::palette::selection_opacity() / 2.))
+            }))
     }
 }

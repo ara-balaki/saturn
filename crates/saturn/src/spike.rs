@@ -17,7 +17,8 @@
 //!   `SATURN_PALETTE_QUERY` typed in it; `SATURN_TICKET_PICKER=1` opens New agent (with
 //!   `SATURN_NEW_AGENT_QUERY` typed in it);
 //!   `SATURN_TICKET_FILTERS=1` opens the Tickets panel's filters.
-//! - `SATURN_DROP=path` drops that file on the middle of the window, as Finder would;
+//! - `SATURN_DROP=path` drops that file on the middle of the window, as Finder would (with
+//!   `SATURN_DROP_HOLD=1`, holds it there without letting go, to see what lights up);
 //!   `SATURN_DRAG=270,600:390,600` drags the mouse from one point to the other, a few pixels a frame.
 //! - `SATURN_RUN_COMMAND="Start the app"` runs that command from the palette's list, by its name
 //!   (after `SATURN_RUN_COMMAND_AFTER` seconds, else 1.5); `SATURN_THEN_COMMAND` runs a second one
@@ -471,11 +472,13 @@ fn drop_file(path: String, window: &mut Window, cx: &mut Context<Workspace>) {
         let _ = cx.update(|window, cx| {
             let middle = window.bounds().size.center();
             let paths = gpui_kit::ExternalPaths(vec![std::path::PathBuf::from(path)].into());
-            for event in [
+            let hold = std::env::var_os("SATURN_DROP_HOLD").is_some();
+            let events = [
                 gpui_kit::FileDropEvent::Entered { position: middle, paths },
                 gpui_kit::FileDropEvent::Pending { position: middle },
                 gpui_kit::FileDropEvent::Submit { position: middle },
-            ] {
+            ];
+            for event in events.into_iter().take(if hold { 2 } else { 3 }) {
                 window.dispatch_event(gpui_kit::PlatformInput::FileDrop(event), cx);
             }
         });
