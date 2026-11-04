@@ -20,6 +20,7 @@ pub mod git;
 pub mod git_graph;
 pub mod grid_scroll;
 pub mod hunks;
+pub mod image_zoom;
 pub mod imports;
 pub mod instructions;
 pub mod layout;

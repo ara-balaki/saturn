@@ -4,7 +4,7 @@
 //!   types a command into each.
 //! - `AKYBA_PERF=1` prints how long terminal frames take, every second.
 //! - `AKYBA_OPEN_SETTINGS=1` opens the Settings dialog on start; `AKYBA_OPEN_FILE=path` opens a file
-//!   in the editor (`AKYBA_SAVE=1` saves it after a moment); `AKYBA_REVIEW=1` shows the Changes tab and reviews the first change
+//!   in the editor (`AKYBA_SAVE=1` saves it after a moment; `AKYBA_ZOOM_PICTURE=8` zooms a picture 8 times); `AKYBA_REVIEW=1` shows the Changes tab and reviews the first change
 //!   (`AKYBA_REVIEW_COMMENT="12:text"` comments on its line 12; `AKYBA_REVIEW_SEND=1` sends it;
 //!   `AKYBA_REVIEW_PICK=12` clicks line 12, `AKYBA_REVIEW_ACT=stage|revert|undo` presses that);
 //!   `AKYBA_COMPARE=main` reviews everything that differs from `main`.
@@ -218,7 +218,26 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
         .detach();
     }
     if let Some(path) = std::env::var_os("AKYBA_OPEN_FILE") {
-        cx.defer_in(window, move |workspace, window, cx| workspace.open_file(std::path::Path::new(&path), window, cx));
+        open_file_from_env(path, window, cx);
+    }
+}
+
+/// `AKYBA_OPEN_FILE`: that file in the editor; a picture is then zoomed by `AKYBA_ZOOM_PICTURE`
+/// about its middle, once it's been drawn.
+fn open_file_from_env(path: std::ffi::OsString, window: &mut Window, cx: &mut Context<Workspace>) {
+    let opened = path.clone();
+    cx.defer_in(window, move |workspace, window, cx| {
+        workspace.open_file(std::path::Path::new(&opened), window, cx);
+    });
+    if let Some(by) = std::env::var("AKYBA_ZOOM_PICTURE").ok().and_then(|by| by.parse::<f32>().ok()) {
+        cx.spawn(async move |workspace, cx| {
+            cx.background_executor().timer(Duration::from_secs(3)).await;
+            let _ = workspace.update(cx, |workspace, cx| {
+                let path = std::path::PathBuf::from(&path);
+                workspace.editor().update(cx, |editor, cx| editor.zoom_picture(&path, by, None, cx));
+            });
+        })
+        .detach();
     }
 }
 

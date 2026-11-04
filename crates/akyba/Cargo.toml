@@ -87,6 +87,7 @@ gpui-component = { version = "=0.7.3", features = [
   "tree-sitter-yaml",
   "tree-sitter-zig",
 ] }
+imagesize = "0.14"
 gpui-pre = { version = "=0.3.9", features = ["test-support"], optional = true }
 gpui-pre-platform = { version = "=0.3.9", features = ["test-support"], optional = true }
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }

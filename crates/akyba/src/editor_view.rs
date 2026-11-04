@@ -32,6 +32,7 @@ use crate::review_comments::{ReviewComments, SendToAgent, Touched};
 use crate::schema_view::SchemaView;
 use crate::theme::TypeScale as _;
 use crate::theme::{self, len};
+use akyba_core::image_zoom::Zoom;
 use akyba_design::icon;
 use akyba_design::text;
 
@@ -51,7 +52,37 @@ struct OpenFile {
     pull: Option<Task<()>>,
     /// A picture (a screenshot an agent took, say), shown rather than edited; its text stays empty.
     image: bool,
+    /// How the picture is zoomed and where it's moved to, when it's one.
+    picture: Picture,
     _changes: Subscription,
+}
+
+/// A picture's view: its own size, the panel it's shown in (as last drawn), the zoom, and a drag
+/// in progress.
+#[derive(Default)]
+struct Picture {
+    size: (f32, f32),
+    panel: std::rc::Rc<std::cell::Cell<gpui_kit::Bounds<gpui_kit::Pixels>>>,
+    zoom: Zoom,
+    dragged_from: Option<gpui_kit::Point<gpui_kit::Pixels>>,
+}
+
+impl Picture {
+    fn panel_size(&self) -> (f32, f32) {
+        let bounds = self.panel.get();
+        (f32::from(bounds.size.width), f32::from(bounds.size.height))
+    }
+
+    /// Where `position` (in the window) is in the panel.
+    fn in_panel(&self, position: gpui_kit::Point<gpui_kit::Pixels>) -> (f32, f32) {
+        let origin = self.panel.get().origin;
+        (f32::from(position.x - origin.x), f32::from(position.y - origin.y))
+    }
+
+    fn middle(&self) -> (f32, f32) {
+        let (width, height) = self.panel_size();
+        (width / 2., height / 2.)
+    }
 }
 
 impl OpenFile {
@@ -219,6 +250,7 @@ impl EditorView {
             language,
             pull: None,
             image,
+            picture: Picture { size: picture_size(path), ..Picture::default() },
             _changes: changes,
         });
         self.active = self.files.len() - 1;
@@ -1544,13 +1576,175 @@ impl EditorView {
             Front::Problems => shown(self.problems_view.as_ref()),
             Front::File => self.files.get(self.active).map(|file| {
                 if file.image {
-                    return render_image(&file.path);
+                    return Self::render_picture(file, cx);
                 }
                 Editor::new(&file.state).appearance(false).bordered(false).size_full().into_any_element()
             }),
         }
     }
 }
+
+impl EditorView {
+    /// The open picture at `path`, to change how it's shown.
+    fn picture_at(&mut self, path: &Path) -> Option<&mut Picture> {
+        self.files.iter_mut().find(|file| file.image && file.path == path).map(|file| &mut file.picture)
+    }
+
+    fn change_picture(&mut self, path: &Path, cx: &mut Context<Self>, change: impl FnOnce(&mut Picture)) {
+        if let Some(picture) = self.picture_at(path) {
+            change(picture);
+            cx.notify();
+        }
+    }
+
+    /// Zooms the picture at `path` by `by`, about `at` in its panel (its middle when `None`).
+    pub fn zoom_picture(&mut self, path: &Path, by: f32, at: Option<(f32, f32)>, cx: &mut Context<Self>) {
+        self.change_picture(path, cx, |picture| {
+            let at = at.unwrap_or_else(|| picture.middle());
+            picture.zoom = picture.zoom.by(by, at, picture.size, picture.panel_size());
+        });
+    }
+
+    /// A picture fitted to the panel at first: pinch, Command and scroll, or double-click to zoom
+    /// in where the pointer is; drag or scroll to move around; the buttons in the corner too.
+    fn render_picture(file: &OpenFile, cx: &mut Context<Self>) -> AnyElement {
+        let picture = &file.picture;
+        let panel = picture.panel.clone();
+        let placed = picture.zoom.place(picture.size, picture.panel_size());
+        let zoomed = picture.zoom.scale.is_some();
+        let percent = (picture.zoom.current(picture.size, picture.panel_size()) * 100.).round();
+        let path = file.path.clone();
+        let listen = |path: PathBuf| path;
+        let (pinch, scroll, down, moved, up) = (
+            listen(path.clone()),
+            listen(path.clone()),
+            listen(path.clone()),
+            listen(path.clone()),
+            listen(path.clone()),
+        );
+        let controls = Self::render_picture_controls(&path, zoomed, percent, cx);
+        div()
+            .id("picture")
+            .relative()
+            .size_full()
+            .overflow_hidden()
+            .when(zoomed, |view| {
+                view.cursor(if picture.dragged_from.is_some() {
+                    gpui_kit::CursorStyle::ClosedHand
+                } else {
+                    gpui_kit::CursorStyle::OpenHand
+                })
+            })
+            .child(
+                // The panel's size, for the next frame; a new size draws that frame now.
+                gpui_kit::canvas(
+                    move |bounds, window, _| {
+                        if panel.get() != bounds {
+                            panel.set(bounds);
+                            window.refresh();
+                        }
+                    },
+                    |_, (), _, _| {},
+                )
+                .absolute()
+                .size_full(),
+            )
+            .child(
+                img(path)
+                    .absolute()
+                    .left(px(placed.left))
+                    .top(px(placed.top))
+                    .w(px(placed.width))
+                    .h(px(placed.height))
+                    .object_fit(ObjectFit::Fill),
+            )
+            .child(div().absolute().bottom(len(space::SPACE_3)).right(len(space::SPACE_3)).child(controls))
+            .on_pinch(cx.listener(move |this, event: &gpui_kit::PinchEvent, _, cx| {
+                let at = this.picture_at(&pinch).map(|picture| picture.in_panel(event.position));
+                this.zoom_picture(&pinch, 1. + event.delta, at, cx);
+            }))
+            .on_scroll_wheel(cx.listener(move |this, event: &gpui_kit::ScrollWheelEvent, window, cx| {
+                let delta = event.delta.pixel_delta(window.line_height());
+                if event.modifiers.platform {
+                    // Command and scroll zooms, as in a browser: up enlarges.
+                    let at = this.picture_at(&scroll).map(|picture| picture.in_panel(event.position));
+                    let by = (1. + f32::from(delta.y) / 200.).clamp(0.5, 2.);
+                    this.zoom_picture(&scroll, by, at, cx);
+                } else {
+                    this.change_picture(&scroll, cx, |picture| {
+                        let by = (f32::from(delta.x), f32::from(delta.y));
+                        picture.zoom = picture.zoom.moved(by, picture.size, picture.panel_size());
+                    });
+                }
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &gpui_kit::MouseDownEvent, _, cx| {
+                    this.change_picture(&down, cx, |picture| {
+                        if event.click_count == 2 {
+                            let at = picture.in_panel(event.position);
+                            picture.zoom = picture.zoom.toggled(at, picture.size, picture.panel_size());
+                        } else {
+                            picture.dragged_from = Some(event.position);
+                        }
+                    });
+                }),
+            )
+            .on_mouse_move(cx.listener(move |this, event: &gpui_kit::MouseMoveEvent, _, cx| {
+                let Some(picture) = this.picture_at(&moved) else { return };
+                let Some(from) = picture.dragged_from else { return };
+                if event.pressed_button != Some(MouseButton::Left) {
+                    picture.dragged_from = None;
+                    cx.notify();
+                    return;
+                }
+                let by = (f32::from(event.position.x - from.x), f32::from(event.position.y - from.y));
+                picture.zoom = picture.zoom.moved(by, picture.size, picture.panel_size());
+                picture.dragged_from = Some(event.position);
+                cx.notify();
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(move |this, _, _, cx| this.change_picture(&up, cx, |picture| picture.dragged_from = None)),
+            )
+            .into_any_element()
+    }
+
+    /// The zoom's controls in a picture's corner: out, how large it is now, in, and Fit while zoomed.
+    fn render_picture_controls(path: &Path, zoomed: bool, percent: f32, cx: &mut Context<Self>) -> gpui_kit::Div {
+        let (smaller, bigger, fit) = (path.to_owned(), path.to_owned(), path.to_owned());
+        let step = |id: &'static str, label: &'static str, tip: &'static str| {
+            chrome::button(id, label, None, false)
+                .w(len(chrome::CONTROL_HEIGHT))
+                .px_0()
+                .justify_center()
+                .tooltip(chrome::tip(tip))
+        };
+        chrome::track()
+            .child(step("picture-smaller", "−", "Zoom out").on_click(cx.listener(move |this, _, _, cx| {
+                this.zoom_picture(&smaller, 1. / ZOOM_STEP, None, cx);
+            })))
+            .child(
+                div()
+                    .w(px(44.))
+                    .text_center()
+                    .text_scale(text::LABEL)
+                    .text_color(theme::color(color::INK_MUTED))
+                    .child(format!("{percent}%")),
+            )
+            .child(step("picture-bigger", "+", "Zoom in").on_click(cx.listener(move |this, _, _, cx| {
+                this.zoom_picture(&bigger, ZOOM_STEP, None, cx);
+            })))
+            .when(zoomed, |track| {
+                track.child(chrome::button("picture-fit", "Fit", None, false).on_click(cx.listener(
+                    move |this, _, _, cx| this.change_picture(&fit, cx, |picture| picture.zoom = Zoom::default()),
+                )))
+            })
+    }
+}
+
+/// How much each press of Zoom in or Zoom out changes a picture's size.
+const ZOOM_STEP: f32 = 1.5;
 
 impl Render for EditorView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1688,16 +1882,11 @@ fn is_image(path: &Path) -> bool {
     )
 }
 
-/// A picture, whole and as large as the panel lets it be without growing past its own size.
-fn render_image(path: &Path) -> AnyElement {
-    div()
-        .size_full()
-        .flex()
-        .items_center()
-        .justify_center()
-        .p(len(space::SPACE_4))
-        .child(img(path.to_owned()).max_w_full().max_h_full().object_fit(ObjectFit::ScaleDown))
-        .into_any_element()
+/// A picture's own size in pixels, read from its header; an SVG (which has none to read) counts as
+/// a square that fits most panels.
+#[expect(clippy::cast_precision_loss, reason = "a picture's pixel size")]
+fn picture_size(path: &Path) -> (f32, f32) {
+    imagesize::size(path).map_or((1000., 1000.), |size| (size.width as f32, size.height as f32))
 }
 
 fn display_name(path: &Path) -> String {

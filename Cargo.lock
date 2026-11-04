@@ -148,6 +148,7 @@ dependencies = [
  "gpui-pre-platform",
  "ignore",
  "image",
+ "imagesize 0.14.0",
  "lsp-types",
  "notify",
  "objc2 0.6.5",
