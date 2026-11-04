@@ -133,7 +133,7 @@ dependencies = [
 
 [[package]]
 name = "akyba"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "akyba-bridge",
  "akyba-core",
@@ -184,7 +184,7 @@ dependencies = [
 
 [[package]]
 name = "akyba-bridge"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "async-channel",
  "serde_json",
@@ -192,7 +192,7 @@ dependencies = [
 
 [[package]]
 name = "akyba-core"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "async-channel",
  "base64 0.22.1",
@@ -206,14 +206,14 @@ dependencies = [
 
 [[package]]
 name = "akyba-design"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "akyba-terminal"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "akyba-core",
  "akyba-design",
