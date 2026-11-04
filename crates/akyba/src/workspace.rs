@@ -3442,6 +3442,23 @@ impl Workspace {
         self.unseen.remove(&tab);
         self.names.remove(&tab);
         self.checkouts.remove(&tab);
+        // What the tab's agent was goes with it: a closed pane's session is no longer open in a
+        // pane (Search sessions offers to resume it), and its waits, servers and links are over.
+        self.sessions.remove(&tab);
+        self.session_names.remove(&tab);
+        self.started.remove(&tab);
+        self.started_at.remove(&tab);
+        self.program_checked.remove(&tab);
+        self.routine_tabs.remove(&tab);
+        self.teams.remove(&tab);
+        self.links.remove(&tab);
+        self.pull_requests.remove(&tab);
+        self.servers.remove(&tab);
+        self.turns.remove(&tab);
+        self.transcripts.remove(&tab);
+        self.spent.remove(&tab);
+        self.waits.remove(&tab);
+        self.review_notes.remove(&tab);
         self.layout.remove_tab(tab);
         for grid in self.pages.values_mut() {
             grid.remove_tab(tab);
